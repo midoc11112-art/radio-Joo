@@ -24,6 +24,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -138,13 +139,7 @@ class RadioService : Service() {
             .setConnectTimeoutMs(15000)
             .setReadTimeoutMs(15000)
             .setAllowCrossProtocolRedirects(true)
-            .setDefaultRequestProperties(
-                mapOf(
-                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-                    "Accept" to "*/*",
-                    "Icy-MetaData" to "0"
-                )
-            )
+            .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
 
         val mediaSourceFactory = DefaultMediaSourceFactory(this).setDataSourceFactory(dataSourceFactory)
 
@@ -299,17 +294,37 @@ class RadioService : Service() {
     }
 
     private fun startStream(streamUrl: String, useProxy: Boolean = false) {
-        player.stop()
-        player.clearMediaItems()
-        isUsingProxy = useProxy
-        val finalUrl = if (useProxy) getProxiedUrl(streamUrl) else streamUrl
-        val uri = Uri.parse(finalUrl)
-        val metadata = MediaMetadata.Builder().setTitle(currentTitle).setArtist(currentLiveProgram).build()
-        val mediaItem = MediaItem.Builder().setUri(uri).setMediaMetadata(metadata).build()
+        try {
+            player.stop()
+            player.clearMediaItems()
+            isUsingProxy = useProxy
+            val finalUrl = if (useProxy) getProxiedUrl(streamUrl) else streamUrl
+            val uri = Uri.parse(finalUrl)
 
-        player.setMediaItem(mediaItem)
-        player.prepare()
-        player.playWhenReady = true
+            // تحديد MimeType صراحة لتجاوز خطأ عدم الامتداد في روابط radiojar وغيرها
+            val mimeType = when {
+                streamUrl.contains(".m3u8", ignoreCase = true) -> MimeTypes.APPLICATION_M3U8
+                streamUrl.contains(".aac", ignoreCase = true) -> MimeTypes.AUDIO_AAC
+                else -> MimeTypes.AUDIO_MPEG
+            }
+
+            val metadata = MediaMetadata.Builder()
+                .setTitle(currentTitle)
+                .setArtist(currentLiveProgram)
+                .build()
+
+            val mediaItem = MediaItem.Builder()
+                .setUri(uri)
+                .setMimeType(mimeType)
+                .setMediaMetadata(metadata)
+                .build()
+
+            player.setMediaItem(mediaItem)
+            player.prepare()
+            player.playWhenReady = true
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     fun isPlaying(): Boolean = ::player.isInitialized && player.isPlaying
@@ -338,7 +353,6 @@ class RadioService : Service() {
                 val connection = URL(finalUrl).openConnection().apply {
                     connectTimeout = 10000; readTimeout = 10000
                     setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                    setRequestProperty("Icy-MetaData", "0")
                 }
                 connection.getInputStream().use { input ->
                     FileOutputStream(file).use { output ->
