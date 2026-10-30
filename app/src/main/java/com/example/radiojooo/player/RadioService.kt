@@ -131,7 +131,6 @@ class RadioService : Service() {
                 .build()
         }
 
-        // ✅ 1. تقليل المخزن المؤقت (10-20 ثانية) لتوفير البيانات عند التبديل
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
                 10000, // minBufferMs: 10 ثوانٍ
@@ -149,12 +148,10 @@ class RadioService : Service() {
             .setAllowCrossProtocolRedirects(true)
             .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
 
-        // ✅ 2. إضافة سياسة معالجة الأخطاء هنا (على mediaSourceFactory وليس player)
         val mediaSourceFactory = DefaultMediaSourceFactory(this)
             .setDataSourceFactory(dataSourceFactory)
             .setLoadErrorHandlingPolicy(LiveStreamLoadErrorHandlingPolicy())
 
-        // ✅ 3. إنشاء المشغل
         player = ExoPlayer.Builder(this, renderersFactory)
             .setTrackSelector(trackSelector)
             .setLoadControl(loadControl)
@@ -174,7 +171,6 @@ class RadioService : Service() {
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 val currentUrl = availableUrls.getOrNull(currentUrlIndex) ?: ""
-                // إذا فشل الرابط المباشر، جرب الـ Proxy. إذا فشل الـ Proxy، انتقل للسيرفر التالي.
                 if (!isUsingProxy && currentUrl.isNotBlank()) {
                     startStream(currentUrl, useProxy = true)
                 } else {
