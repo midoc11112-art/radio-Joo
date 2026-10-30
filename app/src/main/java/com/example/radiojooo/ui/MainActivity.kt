@@ -78,7 +78,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestAllPermissions()
-        scheduleStationSync() // ✅ جدولة التحديث التلقائي
+        scheduleStationSync() 
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -92,7 +92,6 @@ class MainActivity : AppCompatActivity() {
         observeViewModel()
     }
 
-    // ✅ دالة جدولة التحديث التلقائي كل 6 ساعات
     private fun scheduleStationSync() {
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -253,6 +252,19 @@ class MainActivity : AppCompatActivity() {
             binding.miniPlayerContainer.visibility = View.VISIBLE
             binding.tvMiniStationName.text = currentStation?.name ?: service?.currentTitle
 
+            // ✅ تحديث الشارات الجديدة
+            if (currentStation != null) {
+                binding.tvMiniCategoryBadge.text = getCategoryArabicTitle(currentStation.category)
+                binding.tvMiniBitrateBadge.text = if (currentStation.bitrate > 0) "${currentStation.bitrate} Kbps" else "32 Kbps"
+                binding.tvMiniCountryBadge.text = currentStation.countryCode
+                binding.tvMiniServersBadge.text = "${currentStation.mirrorsCount} خوادم"
+            } else {
+                binding.tvMiniCategoryBadge.text = "عام"
+                binding.tvMiniBitrateBadge.text = "32 Kbps"
+                binding.tvMiniCountryBadge.text = "EG"
+                binding.tvMiniServersBadge.text = "1 خادم"
+            }
+
             if (service != null) {
                 binding.btnMiniPlayPause.text = if (service.isPlaying()) "إيقاف" else "تشغيل"
                 binding.tvMiniDataMb.text = String.format(Locale.US, "%.2f MB", service.totalDataMb)
@@ -262,6 +274,16 @@ class MainActivity : AppCompatActivity() {
         } else {
             binding.miniPlayerContainer.visibility = View.GONE
         }
+    }
+
+    // دالة مساعدة لترجمة الفئة (تمت إضافتها هنا لدعم الشارات الجديدة)
+    private fun getCategoryArabicTitle(cat: String): String = when (cat) {
+        "QURAN" -> "القرآن"
+        "NEWS" -> "الأخبار"
+        "MUSIC" -> "الموسيقى"
+        "SPORTS" -> "الرياضة"
+        "EGYPT" -> "مصر"
+        else -> "عام"
     }
 
     private fun observeViewModel() {
