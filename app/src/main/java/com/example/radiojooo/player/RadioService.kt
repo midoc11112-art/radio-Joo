@@ -117,10 +117,10 @@ class RadioService : Service() {
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
         }
 
+        // تم إلغاء قيد setMaxAudioBitrate الذي كان يحظر تشغيل المحطات
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters()
                 .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
-                .setMaxAudioBitrate(48000)
                 .build()
         }
 
