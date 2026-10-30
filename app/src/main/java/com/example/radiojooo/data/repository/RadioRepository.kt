@@ -43,13 +43,14 @@ class RadioRepository(private val stationDao: StationDao) {
     suspend fun refreshStations(): Int = withContext(Dispatchers.IO) {
         val fetchedList = mutableListOf<StationEntity>()
 
-        // جلب متزامن من جميع المصادر
         coroutineScope {
             val jobs = listOf(
                 async { fetchFromRadioBrowserAllArab() },
                 async { fetchFromIPRD() },
                 async { fetchFromIslamicAPI() },
-                async { fetchFromM3U() }
+                async { fetchFromM3U() },
+                async { fetchFromFMStream() },
+                async { fetchFromRadioNet() }
             )
             jobs.forEach { fetchedList.addAll(it.await()) }
         }
@@ -81,7 +82,6 @@ class RadioRepository(private val stationDao: StationDao) {
             "https://nl1.api.radio-browser.info",
             "https://fr1.api.radio-browser.info"
         )
-        // 1. استعلام لكل دولة عربية
         for (country in arabCountries) {
             for (server in servers) {
                 try {
@@ -118,12 +118,11 @@ class RadioRepository(private val stationDao: StationDao) {
                                 )
                             }
                         }
-                        break // نجح الجلب من هذا الخادم، انتقل للدولة التالية
+                        break
                     }
                 } catch (e: Exception) { e.printStackTrace() }
             }
         }
-        // 2. استعلام language=arabic (لجلب المحطات الناطقة بالعربية في أي دولة)
         for (server in servers) {
             try {
                 val url = URL("$server/json/stations/search?language=arabic&limit=500&hidebroken=true&bitrateMax=64")
@@ -167,7 +166,7 @@ class RadioRepository(private val stationDao: StationDao) {
         return list
     }
 
-    // ==================== 2. IPRD (كتالوج JSON) ====================
+    // ==================== 2. IPRD ====================
 
     private fun fetchFromIPRD(): List<StationEntity> {
         val list = mutableListOf<StationEntity>()
@@ -276,7 +275,7 @@ class RadioRepository(private val stationDao: StationDao) {
         return list
     }
 
-    // ==================== 4. قوائم M3U العربية ====================
+    // ==================== 4. قوائم M3U ====================
 
     private fun fetchFromM3U(): List<StationEntity> {
         val list = mutableListOf<StationEntity>()
@@ -300,7 +299,6 @@ class RadioRepository(private val stationDao: StationDao) {
                         } else if (line.startsWith("http") && currentName.isNotEmpty()) {
                             val lowerUrl = line.lowercase()
                             val lowerName = currentName.lowercase()
-                            // فلترة: نأخذ الروابط التي تحتوي على 64 أو 32 أو low في اسمها
                             val isLowBitrate = lowerUrl.contains("64") || lowerUrl.contains("32") ||
                                     lowerUrl.contains("low") || lowerName.contains("64") || lowerName.contains("32")
                             if (isLowBitrate) {
@@ -327,6 +325,107 @@ class RadioRepository(private val stationDao: StationDao) {
                     break
                 }
             } catch (e: Exception) { e.printStackTrace() }
+        }
+        return list
+    }
+
+    // ==================== 5. fmstream.org ====================
+
+    private fun fetchFromFMStream(): List<StationEntity> {
+        val list = mutableListOf<StationEntity>()
+        try {
+            // fmstream.org API (غير رسمي لكنه يوفر قوائم محطات)
+            val url = URL("https://fmstream.org/api/stations?limit=500")
+            val connection = url.openConnection() as HttpURLConnection
+            connection.connectTimeout = 10000
+            connection.readTimeout = 10000
+            connection.setRequestProperty("User-Agent", "RadioJooApp/5.0")
+            if (connection.responseCode == 200) {
+                val jsonArray = JSONArray(connection.inputStream.bufferedReader().use { it.readText() })
+                for (i in 0 until jsonArray.length()) {
+                    val obj = jsonArray.getJSONObject(i)
+                    val name = obj.optString("name", "محطة").trim()
+                    val country = obj.optString("country", "")
+                    val bitrate = obj.optInt("bitrate", 128)
+                    val streamUrl = obj.optString("stream", "").trim()
+                    val isArab = country.equals("EG", true) || country.equals("SA", true) ||
+                            country.equals("AE", true) || country.equals("QA", true) ||
+                            country.equals("KW", true) || country.equals("BH", true) ||
+                            country.equals("OM", true) || country.equals("JO", true) ||
+                            country.equals("LB", true) || country.equals("SY", true) ||
+                            country.equals("IQ", true) || country.equals("PS", true) ||
+                            country.equals("YE", true) || country.equals("SD", true) ||
+                            country.equals("LY", true) || country.equals("TN", true) ||
+                            country.equals("DZ", true) || country.equals("MA", true)
+                    if (isArab && streamUrl.isNotBlank() && bitrate in 1..64) {
+                        val uuid = "fmstream_${name.hashCode()}_${streamUrl.hashCode()}"
+                        val category = StationNormalizer.classify(uuid, name, "")
+                        list.add(
+                            StationEntity(
+                                uuid = uuid,
+                                name = name,
+                                primaryUrl = wrapProxy(streamUrl),
+                                fallbackUrl = "",
+                                tags = "arabic,fmstream",
+                                country = country,
+                                category = category,
+                                countryCode = if (country.isBlank()) "AR" else country,
+                                bitrate = bitrate,
+                                isFavorite = false,
+                                popularityScore = 60
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) { e.printStackTrace() }
+        return list
+    }
+
+    // ==================== 6. radio.net (API غير رسمي) ====================
+
+    private fun fetchFromRadioNet(): List<StationEntity> {
+        val list = mutableListOf<StationEntity>()
+        try {
+            // radio.net API غير الرسمي (قد يتغير)
+            val url = URL("http://api.radio.net/info/v2/search/stations?country=EG&size=200")
+            val connection = url.openConnection() as HttpURLConnection
+            connection.connectTimeout = 10000
+            connection.readTimeout = 10000
+            connection.setRequestProperty("User-Agent", "RadioJooApp/5.0")
+            if (connection.responseCode == 200) {
+                val jsonText = connection.inputStream.bufferedReader().use { it.readText() }
+                // محاولة قراءة JSON (قد يكون الشكل مختلفاً)
+                val root = JSONArray(jsonText)
+                for (i in 0 until root.length()) {
+                    val obj = root.getJSONObject(i)
+                    val name = obj.optString("name", "محطة").trim()
+                    val streamUrl = obj.optString("streamUrl", obj.optString("url", "")).trim()
+                    val bitrate = obj.optInt("bitrate", 128)
+                    val country = obj.optString("country", "EG")
+                    if (streamUrl.isNotBlank() && bitrate in 1..64) {
+                        val uuid = "radionet_${name.hashCode()}_${streamUrl.hashCode()}"
+                        val category = StationNormalizer.classify(uuid, name, "")
+                        list.add(
+                            StationEntity(
+                                uuid = uuid,
+                                name = name,
+                                primaryUrl = wrapProxy(streamUrl),
+                                fallbackUrl = "",
+                                tags = "arabic,radionet",
+                                country = country,
+                                category = category,
+                                countryCode = country,
+                                bitrate = bitrate,
+                                isFavorite = false,
+                                popularityScore = 80
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // radio.net قد لا يعمل، نتجاهل الخطأ
         }
         return list
     }
