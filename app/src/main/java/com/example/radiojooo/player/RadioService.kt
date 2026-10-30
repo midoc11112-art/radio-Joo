@@ -131,13 +131,14 @@ class RadioService : Service() {
             .build()
 
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(10000)
-            .setReadTimeoutMs(10000)
+            .setConnectTimeoutMs(12000)
+            .setReadTimeoutMs(12000)
             .setAllowCrossProtocolRedirects(true)
             .setDefaultRequestProperties(
                 mapOf(
-                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-                    "Icy-MetaData" to "1"
+                    "User-Agent" to "Mozilla/5.0 (Android; Mobile; rv:131.0) Gecko/131.0 Firefox/131.0",
+                    "Accept" to "*/*",
+                    "Icy-MetaData" to "0"
                 )
             )
 
@@ -277,8 +278,8 @@ class RadioService : Service() {
         currentTitle = title
         currentLiveProgram = "بث مباشر"
         availableUrls.clear()
-        if (pUrl.isNotBlank()) availableUrls.add(pUrl)
-        if (fUrl.isNotBlank()) availableUrls.addAll(fUrl.split(",").filter { it.isNotBlank() })
+        if (pUrl.isNotBlank()) availableUrls.add(pUrl.trim())
+        if (fUrl.isNotBlank()) availableUrls.addAll(fUrl.split(",").map { it.trim() }.filter { it.isNotBlank() })
         currentUrlIndex = 0
         totalSessionBytes = 0L
         lastRxBytes = TrafficStats.getUidRxBytes(android.os.Process.myUid())
@@ -331,8 +332,9 @@ class RadioService : Service() {
                 val safeTitle = currentTitle.replace(Regex("[^a-zA-Z0-9_ -]"), "_")
                 val file = File(dir, "Rec_${safeTitle}_${System.currentTimeMillis()}.mp3")
                 val connection = URL(finalUrl).openConnection().apply {
-                    connectTimeout = 6000; readTimeout = 6000
-                    setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                    connectTimeout = 10000; readTimeout = 10000
+                    setRequestProperty("User-Agent", "Mozilla/5.0 (Android; Mobile; rv:131.0) Gecko/131.0 Firefox/131.0")
+                    setRequestProperty("Icy-MetaData", "0")
                 }
                 connection.getInputStream().use { input ->
                     FileOutputStream(file).use { output ->
@@ -382,7 +384,7 @@ class RadioService : Service() {
     private fun tryNextMirrorServer() {
         if (availableUrls.isEmpty()) return
         if (availableUrls.size == 1) {
-            statsHandler.postDelayed({ if (availableUrls.isNotEmpty()) startStream(availableUrls[0], useProxy = false) }, 5000)
+            statsHandler.postDelayed({ if (availableUrls.isNotEmpty()) startStream(availableUrls[0], useProxy = false) }, 4000)
             return
         }
         currentUrlIndex = (currentUrlIndex + 1) % availableUrls.size
