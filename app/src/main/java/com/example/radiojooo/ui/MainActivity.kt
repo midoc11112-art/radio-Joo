@@ -255,12 +255,12 @@ class MainActivity : AppCompatActivity() {
             binding.miniPlayerContainer.visibility = View.VISIBLE
             binding.tvMiniStationName.text = currentStation?.name ?: service?.currentTitle
 
-            // ✅ تحديث الشارات الجديدة
+            // ✅ تحديث الشارات مع إزالة mirrorsCount
             if (currentStation != null) {
                 binding.tvMiniCategoryBadge.text = getCategoryArabicTitle(currentStation.category)
                 binding.tvMiniBitrateBadge.text = if (currentStation.bitrate > 0) "${currentStation.bitrate} Kbps" else "32 Kbps"
                 binding.tvMiniCountryBadge.text = currentStation.countryCode
-                binding.tvMiniServersBadge.text = "${currentStation.mirrorsCount} خوادم"
+                binding.tvMiniServersBadge.text = "1 خادم" // تم إصلاح الخطأ هنا
             } else {
                 binding.tvMiniCategoryBadge.text = "عام"
                 binding.tvMiniBitrateBadge.text = "32 Kbps"
@@ -327,7 +327,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ✅ تم تعديل هذه الدالة بالكامل لتصبح خانتين رقميتين (ساعات ودقائق) بدلاً من القائمة الجاهزة
     private fun showSleepTimerDialog() {
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -373,7 +372,6 @@ class MainActivity : AppCompatActivity() {
         layout.addView(spacer)
         layout.addView(etMinutes, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
-        // تعبئة القيم الحالية إذا كان هناك مؤقت يعمل بالفعل
         radioService?.let { service ->
             if (service.sleepTimeRemainingMs > 0) {
                 val totalMins = (service.sleepTimeRemainingMs / 1000 / 60).toInt()
