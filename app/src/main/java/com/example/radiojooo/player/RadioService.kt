@@ -162,6 +162,7 @@ class RadioService : Service() {
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 val currentUrl = availableUrls.getOrNull(currentUrlIndex) ?: ""
+                // إذا فشل الرابط المباشر، جرب الـ Proxy. إذا فشل الـ Proxy، انتقل للسيرفر التالي.
                 if (!isUsingProxy && currentUrl.isNotBlank()) {
                     startStream(currentUrl, useProxy = true)
                 } else {
@@ -234,10 +235,13 @@ class RadioService : Service() {
             this, 2, closeIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        // ✅ إصلاح: استخدام أيقونة التطبيق الأساسية المتاحة دائماً لتجنب الانهيار
+        val iconResId = R.mipmap.ic_launcher 
+
         val builder = NotificationCompat.Builder(this, "radio_joo_service_channel")
             .setContentTitle(currentTitle)
             .setContentText(currentLiveProgram)
-            .setSmallIcon(R.drawable.ic_app_logo)
+            .setSmallIcon(iconResId)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -285,11 +289,17 @@ class RadioService : Service() {
         stationStartTimeMs = System.currentTimeMillis()
 
         if (availableUrls.isNotEmpty()) {
-            startStream(availableUrls[0], useProxy = false)
+            // ابدأ بالـ Proxy مباشرة لضمان تجاوز الحظر
+            startStream(availableUrls[0], useProxy = true)
         }
 
         try {
-            startForeground(1001, buildNotification())
+            // ملاحظة: يجب استدعاء startForeground مبكراً لتجنب الانهيار في أندرويد 14+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(1001, buildNotification(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+            } else {
+                startForeground(1001, buildNotification())
+            }
         } catch (e: Exception) { e.printStackTrace() }
     }
 
@@ -301,7 +311,6 @@ class RadioService : Service() {
             val finalUrl = if (useProxy) getProxiedUrl(streamUrl) else streamUrl
             val uri = Uri.parse(finalUrl)
 
-            // تحديد MimeType صراحة لتجاوز خطأ عدم الامتداد في روابط radiojar وغيرها
             val mimeType = when {
                 streamUrl.contains(".m3u8", ignoreCase = true) -> MimeTypes.APPLICATION_M3U8
                 streamUrl.contains(".aac", ignoreCase = true) -> MimeTypes.AUDIO_AAC
@@ -402,11 +411,11 @@ class RadioService : Service() {
     private fun tryNextMirrorServer() {
         if (availableUrls.isEmpty()) return
         if (availableUrls.size == 1) {
-            statsHandler.postDelayed({ if (availableUrls.isNotEmpty()) startStream(availableUrls[0], useProxy = false) }, 4000)
+            statsHandler.postDelayed({ if (availableUrls.isNotEmpty()) startStream(availableUrls[0], useProxy = true) }, 4000)
             return
         }
         currentUrlIndex = (currentUrlIndex + 1) % availableUrls.size
-        statsHandler.postDelayed({ if (availableUrls.isNotEmpty()) startStream(availableUrls[currentUrlIndex], useProxy = false) }, 1500)
+        statsHandler.postDelayed({ if (availableUrls.isNotEmpty()) startStream(availableUrls[currentUrlIndex], useProxy = true) }, 1500)
     }
 
     private fun calculateDataUsage() {
