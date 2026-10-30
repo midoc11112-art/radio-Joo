@@ -1,0 +1,14 @@
+name: Repository Cleanup
+
+on:
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Remove Temporary and Duplicate Files
+      run: |
+        find . -name "* XML" -type f -delete
+        find . -name "*  XML" -type f -delete
