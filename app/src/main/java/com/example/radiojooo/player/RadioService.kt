@@ -41,6 +41,7 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
 import java.net.URL
+import java.net.URLEncoder
 import java.util.Locale
 
 class RadioService : Service() {
@@ -51,7 +52,11 @@ class RadioService : Service() {
     private fun getProxiedUrl(rawUrl: String): String {
         if (rawUrl.isBlank()) return rawUrl
         if (rawUrl.contains("radio-joo-proxy.midoc11112.workers.dev")) return rawUrl
-        return cloudflareProxyBase + Uri.encode(rawUrl)
+        return try {
+            cloudflareProxyBase + URLEncoder.encode(rawUrl, "UTF-8")
+        } catch (e: Exception) {
+            cloudflareProxyBase + Uri.encode(rawUrl)
+        }
     }
 
     private lateinit var player: ExoPlayer
@@ -117,7 +122,6 @@ class RadioService : Service() {
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
         }
 
-        // تم إلغاء قيد setMaxAudioBitrate الذي كان يحظر تشغيل المحطات
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters()
                 .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
@@ -125,18 +129,18 @@ class RadioService : Service() {
         }
 
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(10000, 30000, 1000, 2500)
+            .setBufferDurationsMs(5000, 20000, 1500, 3000)
             .setPrioritizeTimeOverSizeThresholds(true)
             .setBackBuffer(0, false)
             .build()
 
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(12000)
-            .setReadTimeoutMs(12000)
+            .setConnectTimeoutMs(15000)
+            .setReadTimeoutMs(15000)
             .setAllowCrossProtocolRedirects(true)
             .setDefaultRequestProperties(
                 mapOf(
-                    "User-Agent" to "Mozilla/5.0 (Android; Mobile; rv:131.0) Gecko/131.0 Firefox/131.0",
+                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
                     "Accept" to "*/*",
                     "Icy-MetaData" to "0"
                 )
@@ -333,7 +337,7 @@ class RadioService : Service() {
                 val file = File(dir, "Rec_${safeTitle}_${System.currentTimeMillis()}.mp3")
                 val connection = URL(finalUrl).openConnection().apply {
                     connectTimeout = 10000; readTimeout = 10000
-                    setRequestProperty("User-Agent", "Mozilla/5.0 (Android; Mobile; rv:131.0) Gecko/131.0 Firefox/131.0")
+                    setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
                     setRequestProperty("Icy-MetaData", "0")
                 }
                 connection.getInputStream().use { input ->
