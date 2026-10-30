@@ -46,6 +46,7 @@ import java.util.Locale
 class RadioService : Service() {
 
     private val cloudflareProxyBase = "https://radio-joo-proxy.midoc11112.workers.dev/?stream_url="
+    private var isUsingProxy = false
 
     private fun getProxiedUrl(rawUrl: String): String {
         if (rawUrl.isBlank()) return rawUrl
@@ -112,7 +113,6 @@ class RadioService : Service() {
         acquireLocks()
         createNotificationChannel()
 
-        // 1. حظر معالجات الفيديو كلياً على مستوى المحرك لمنع استهلاك الباقة في محطات الفيديو
         val renderersFactory = DefaultRenderersFactory(this).apply {
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
         }
@@ -120,7 +120,7 @@ class RadioService : Service() {
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters()
                 .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
-                .setMaxAudioBitrate(48000) // أقصى جودة صوتية لتوفير الباقة
+                .setMaxAudioBitrate(48000)
                 .build()
         }
 
@@ -136,9 +136,8 @@ class RadioService : Service() {
             .setAllowCrossProtocolRedirects(true)
             .setDefaultRequestProperties(
                 mapOf(
-                    "User-Agent" to "RadioJooApp/3.0",
-                    "Icy-MetaData" to "0",
-                    "Accept-Encoding" to "gzip"
+                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+                    "Icy-MetaData" to "1"
                 )
             )
 
@@ -162,7 +161,12 @@ class RadioService : Service() {
 
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
-                tryNextMirrorServer()
+                val currentUrl = availableUrls.getOrNull(currentUrlIndex) ?: ""
+                if (!isUsingProxy && currentUrl.isNotBlank()) {
+                    startStream(currentUrl, useProxy = true)
+                } else {
+                    tryNextMirrorServer()
+                }
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -173,9 +177,7 @@ class RadioService : Service() {
         statsHandler.post(statsRunnable)
     }
 
-    override fun onTaskRemoved(rootIntent: Intent?) {
-        // حماية الخدمة من الإغلاق عند مسح التطبيق من قائمة الشاشة
-    }
+    override fun onTaskRemoved(rootIntent: Intent?) { }
 
     private fun acquireLocks() {
         try {
@@ -218,7 +220,6 @@ class RadioService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        // 1. زر التشغيل / الإيقاف المؤقت
         val playPauseIntent = Intent(this, RadioService::class.java).apply {
             action = if (isPlaying()) "ACTION_PAUSE" else "ACTION_PLAY"
         }
@@ -228,7 +229,6 @@ class RadioService : Service() {
         val playPauseIcon = if (isPlaying()) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
         val playPauseTitle = if (isPlaying()) "إيقاف مؤقت" else "تشغيل"
 
-        // 2. زر الخروج X
         val closeIntent = Intent(this, RadioService::class.java).apply { action = "ACTION_CLOSE" }
         val closePending = PendingIntent.getService(
             this, 2, closeIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
@@ -285,7 +285,7 @@ class RadioService : Service() {
         stationStartTimeMs = System.currentTimeMillis()
 
         if (availableUrls.isNotEmpty()) {
-            startStream(availableUrls[0])
+            startStream(availableUrls[0], useProxy = false)
         }
 
         try {
@@ -293,10 +293,11 @@ class RadioService : Service() {
         } catch (e: Exception) { e.printStackTrace() }
     }
 
-    private fun startStream(streamUrl: String) {
+    private fun startStream(streamUrl: String, useProxy: Boolean = false) {
         player.stop()
         player.clearMediaItems()
-        val finalUrl = getProxiedUrl(streamUrl)
+        isUsingProxy = useProxy
+        val finalUrl = if (useProxy) getProxiedUrl(streamUrl) else streamUrl
         val uri = Uri.parse(finalUrl)
         val metadata = MediaMetadata.Builder().setTitle(currentTitle).setArtist(currentLiveProgram).build()
         val mediaItem = MediaItem.Builder().setUri(uri).setMediaMetadata(metadata).build()
@@ -323,14 +324,15 @@ class RadioService : Service() {
         if (availableUrls.isEmpty()) return
         isRecording = true
         val currentUrl = availableUrls.getOrNull(currentUrlIndex) ?: return
-        val finalUrl = getProxiedUrl(currentUrl)
+        val finalUrl = if (isUsingProxy) getProxiedUrl(currentUrl) else currentUrl
         recordingJob = serviceScope.launch {
             try {
                 val dir = getRecordingsFolder()
                 val safeTitle = currentTitle.replace(Regex("[^a-zA-Z0-9_ -]"), "_")
                 val file = File(dir, "Rec_${safeTitle}_${System.currentTimeMillis()}.mp3")
                 val connection = URL(finalUrl).openConnection().apply {
-                    connectTimeout = 6000; readTimeout = 6000; setRequestProperty("User-Agent", "RadioJooApp/3.0")
+                    connectTimeout = 6000; readTimeout = 6000
+                    setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
                 }
                 connection.getInputStream().use { input ->
                     FileOutputStream(file).use { output ->
@@ -380,11 +382,11 @@ class RadioService : Service() {
     private fun tryNextMirrorServer() {
         if (availableUrls.isEmpty()) return
         if (availableUrls.size == 1) {
-            statsHandler.postDelayed({ if (availableUrls.isNotEmpty()) startStream(availableUrls[0]) }, 5000)
+            statsHandler.postDelayed({ if (availableUrls.isNotEmpty()) startStream(availableUrls[0], useProxy = false) }, 5000)
             return
         }
         currentUrlIndex = (currentUrlIndex + 1) % availableUrls.size
-        statsHandler.postDelayed({ if (availableUrls.isNotEmpty()) startStream(availableUrls[currentUrlIndex]) }, 2000)
+        statsHandler.postDelayed({ if (availableUrls.isNotEmpty()) startStream(availableUrls[currentUrlIndex], useProxy = false) }, 1500)
     }
 
     private fun calculateDataUsage() {
