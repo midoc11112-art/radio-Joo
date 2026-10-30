@@ -12,8 +12,11 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.text.Editable
+import android.text.InputType
 import android.text.TextWatcher
 import android.view.View
+import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -276,7 +279,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // دالة مساعدة لترجمة الفئة (تمت إضافتها هنا لدعم الشارات الجديدة)
     private fun getCategoryArabicTitle(cat: String): String = when (cat) {
         "QURAN" -> "القرآن"
         "NEWS" -> "الأخبار"
@@ -325,17 +327,81 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ✅ تم تعديل هذه الدالة بالكامل لتصبح خانتين رقميتين (ساعات ودقائق) بدلاً من القائمة الجاهزة
     private fun showSleepTimerDialog() {
-        val options = arrayOf("إيقاف المؤقت", "15 دقيقة", "30 دقيقة", "45 دقيقة", "60 دقيقة")
-        val minutes = intArrayOf(0, 15, 30, 45, 60)
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(60, 40, 60, 20)
+        }
+
+        val etHours = EditText(this).apply {
+            hint = "عدد الساعات (مثال: 1)"
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setTextColor(0xFFFFFFFF.toInt())
+            setHintTextColor(0xFF94A3B8.toInt())
+            textSize = 16f
+            setPadding(30, 30, 30, 30)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0xFF1E293B.toInt())
+                cornerRadius = 20f
+                setStroke(2, 0xFF8B5CF6.toInt())
+            }
+        }
+
+        val etMinutes = EditText(this).apply {
+            hint = "عدد الدقائق (مثال: 30)"
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setTextColor(0xFFFFFFFF.toInt())
+            setHintTextColor(0xFF94A3B8.toInt())
+            textSize = 16f
+            setPadding(30, 30, 30, 30)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0xFF1E293B.toInt())
+                cornerRadius = 20f
+                setStroke(2, 0xFF8B5CF6.toInt())
+            }
+        }
+
+        val spacer = android.widget.Space(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                30
+            )
+        }
+
+        layout.addView(etHours, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        layout.addView(spacer)
+        layout.addView(etMinutes, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+        // تعبئة القيم الحالية إذا كان هناك مؤقت يعمل بالفعل
+        radioService?.let { service ->
+            if (service.sleepTimeRemainingMs > 0) {
+                val totalMins = (service.sleepTimeRemainingMs / 1000 / 60).toInt()
+                etHours.setText((totalMins / 60).toString())
+                etMinutes.setText((totalMins % 60).toString())
+            }
+        }
 
         AlertDialog.Builder(this)
-            .setTitle("ضبط مؤقت النوم")
-            .setItems(options) { _, which ->
-                radioService?.startSleepTimer(minutes[which])
-                Toast.makeText(this, "تم ضبط المؤقت: ${options[which]}", Toast.LENGTH_SHORT).show()
+            .setTitle("⏱️ ضبط مؤقت النوم (يدوي)")
+            .setView(layout)
+            .setPositiveButton("تشغيل") { _, _ ->
+                val h = etHours.text.toString().toIntOrNull() ?: 0
+                val m = etMinutes.text.toString().toIntOrNull() ?: 0
+                val totalMinutes = (h * 60) + m
+
+                if (totalMinutes > 0) {
+                    radioService?.startSleepTimer(totalMinutes)
+                    Toast.makeText(this, "تم ضبط المؤقت: $h ساعة و $m دقيقة", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this, "⚠️ الرجاء إدخال وقت صحيح", Toast.LENGTH_SHORT).show()
+                }
             }
-            .setNegativeButton("إلغاء", null)
+            .setNegativeButton("إلغاء المؤقت") { _, _ ->
+                radioService?.startSleepTimer(0)
+                Toast.makeText(this, "تم إلغاء مؤقت النوم", Toast.LENGTH_SHORT).show()
+            }
+            .setNeutralButton("رجوع", null)
             .show()
     }
 }
