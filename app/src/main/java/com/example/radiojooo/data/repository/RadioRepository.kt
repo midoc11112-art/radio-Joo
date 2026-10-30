@@ -9,9 +9,14 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
+import org.json.JSONObject
+import org.w3c.dom.Element
+import org.w3c.dom.NodeList
+import java.io.ByteArrayInputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import javax.xml.parsers.DocumentBuilderFactory
 
 class RadioRepository(private val stationDao: StationDao) {
 
@@ -49,8 +54,8 @@ class RadioRepository(private val stationDao: StationDao) {
                 async { fetchFromIPRD() },
                 async { fetchFromIslamicAPI() },
                 async { fetchFromM3U() },
-                async { fetchFromFMStream() },
-                async { fetchFromRadioNet() }
+                async { fetchFromTuneIn() },      // ✅ مصدر TuneIn الجديد
+                async { fetchFromIHeart() }       // ✅ مصدر iHeartRadio الجديد
             )
             jobs.forEach { fetchedList.addAll(it.await()) }
         }
@@ -68,7 +73,7 @@ class RadioRepository(private val stationDao: StationDao) {
     }
 
     // ==================== 1. Radio Browser (جميع الدول العربية) ====================
-
+    // ... (الكود كما هو، لم يتغير)
     private fun fetchFromRadioBrowserAllArab(): List<StationEntity> {
         val list = mutableListOf<StationEntity>()
         val arabCountries = listOf(
@@ -167,7 +172,7 @@ class RadioRepository(private val stationDao: StationDao) {
     }
 
     // ==================== 2. IPRD ====================
-
+    // ... (الكود كما هو، لم يتغير)
     private fun fetchFromIPRD(): List<StationEntity> {
         val list = mutableListOf<StationEntity>()
         val arabCountries = listOf(
@@ -228,7 +233,7 @@ class RadioRepository(private val stationDao: StationDao) {
     }
 
     // ==================== 3. Islamic Radio API ====================
-
+    // ... (الكود كما هو، لم يتغير)
     private fun fetchFromIslamicAPI(): List<StationEntity> {
         val list = mutableListOf<StationEntity>()
         val islamicUrls = listOf(
@@ -276,7 +281,7 @@ class RadioRepository(private val stationDao: StationDao) {
     }
 
     // ==================== 4. قوائم M3U ====================
-
+    // ... (الكود كما هو، لم يتغير)
     private fun fetchFromM3U(): List<StationEntity> {
         val list = mutableListOf<StationEntity>()
         val m3uUrls = listOf(
@@ -329,109 +334,149 @@ class RadioRepository(private val stationDao: StationDao) {
         return list
     }
 
-    // ==================== 5. fmstream.org ====================
-
-    private fun fetchFromFMStream(): List<StationEntity> {
+    // ==================== 5. TuneIn (OPML API) ====================
+    private fun fetchFromTuneIn(): List<StationEntity> {
         val list = mutableListOf<StationEntity>()
+        val searchQueries = listOf(
+            "radio egypt", "radio masr", "nogoum fm", "quran radio",
+            "radio saudi", "radio emirates", "radio qatar", "radio kuwait",
+            "radio jordan", "radio lebanon", "radio iraq", "radio syria",
+            "radio palestine", "radio yemen", "radio sudan", "radio libya",
+            "radio tunisia", "radio algeria", "radio morocco", "arabic radio"
+        )
+        for (query in searchQueries) {
+            try {
+                val encodedQuery = URLEncoder.encode(query, "UTF-8")
+                val searchUrl = URL("http://opml.radiotime.com/Search.ashx?query=$encodedQuery")
+                val connection = searchUrl.openConnection() as HttpURLConnection
+                connection.connectTimeout = 10000
+                connection.readTimeout = 10000
+                connection.setRequestProperty("User-Agent", "RadioJooApp/5.0")
+                if (connection.responseCode == 200) {
+                    val xmlText = connection.inputStream.bufferedReader().use { it.readText() }
+                    val doc = DocumentBuilderFactory.newInstance().newDocumentBuilder()
+                        .parse(ByteArrayInputStream(xmlText.toByteArray()))
+                    val outlines = doc.getElementsByTagName("outline")
+                    for (i in 0 until outlines.length) {
+                        val outline = outlines.item(i) as Element
+                        val type = outline.getAttribute("type")
+                        val item = outline.getAttribute("item")
+                        if (type == "audio" && item == "station") {
+                            val name = outline.getAttribute("text")
+                            val tuneUrl = outline.getAttribute("URL")
+                            if (tuneUrl.isNotBlank()) {
+                                // جلب روابط البث الفعلية عبر Tune.ashx
+                                val streamUrls = resolveTuneInStream(tuneUrl)
+                                if (streamUrls.isNotEmpty()) {
+                                    val (bestUrl, bestBitrate) = streamUrls.first()
+                                    if (bestBitrate in 1..64) {
+                                        val uuid = "tunein_${name.hashCode()}_${bestUrl.hashCode()}"
+                                        val category = StationNormalizer.classify(uuid, name, "arabic")
+                                        list.add(
+                                            StationEntity(
+                                                uuid = uuid,
+                                                name = name,
+                                                primaryUrl = wrapProxy(bestUrl),
+                                                fallbackUrl = streamUrls.drop(1).joinToString(",") { it.first },
+                                                tags = "tunein,arabic",
+                                                country = "AR",
+                                                category = category,
+                                                countryCode = "AR",
+                                                bitrate = bestBitrate,
+                                                isFavorite = false,
+                                                popularityScore = 80
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) { e.printStackTrace() }
+        }
+        return list
+    }
+
+    /** جلب روابط البث من TuneIn Tune.ashx، وإرجاع قائمة (رابط، bitrate) */
+    private fun resolveTuneInStream(tuneUrl: String): List<Pair<String, Int>> {
+        val result = mutableListOf<Pair<String, Int>>()
         try {
-            // fmstream.org API (غير رسمي لكنه يوفر قوائم محطات)
-            val url = URL("https://fmstream.org/api/stations?limit=500")
-            val connection = url.openConnection() as HttpURLConnection
+            val connection = URL(tuneUrl).openConnection() as HttpURLConnection
             connection.connectTimeout = 10000
             connection.readTimeout = 10000
             connection.setRequestProperty("User-Agent", "RadioJooApp/5.0")
             if (connection.responseCode == 200) {
-                val jsonArray = JSONArray(connection.inputStream.bufferedReader().use { it.readText() })
-                for (i in 0 until jsonArray.length()) {
-                    val obj = jsonArray.getJSONObject(i)
-                    val name = obj.optString("name", "محطة").trim()
-                    val country = obj.optString("country", "")
-                    val bitrate = obj.optInt("bitrate", 128)
-                    val streamUrl = obj.optString("stream", "").trim()
-                    val isArab = country.equals("EG", true) || country.equals("SA", true) ||
-                            country.equals("AE", true) || country.equals("QA", true) ||
-                            country.equals("KW", true) || country.equals("BH", true) ||
-                            country.equals("OM", true) || country.equals("JO", true) ||
-                            country.equals("LB", true) || country.equals("SY", true) ||
-                            country.equals("IQ", true) || country.equals("PS", true) ||
-                            country.equals("YE", true) || country.equals("SD", true) ||
-                            country.equals("LY", true) || country.equals("TN", true) ||
-                            country.equals("DZ", true) || country.equals("MA", true)
-                    if (isArab && streamUrl.isNotBlank() && bitrate in 1..64) {
-                        val uuid = "fmstream_${name.hashCode()}_${streamUrl.hashCode()}"
-                        val category = StationNormalizer.classify(uuid, name, "")
-                        list.add(
-                            StationEntity(
-                                uuid = uuid,
-                                name = name,
-                                primaryUrl = wrapProxy(streamUrl),
-                                fallbackUrl = "",
-                                tags = "arabic,fmstream",
-                                country = country,
-                                category = category,
-                                countryCode = if (country.isBlank()) "AR" else country,
-                                bitrate = bitrate,
-                                isFavorite = false,
-                                popularityScore = 60
-                            )
-                        )
+                val xmlText = connection.inputStream.bufferedReader().use { it.readText() }
+                val doc = DocumentBuilderFactory.newInstance().newDocumentBuilder()
+                    .parse(ByteArrayInputStream(xmlText.toByteArray()))
+                val outlines = doc.getElementsByTagName("outline")
+                for (i in 0 until outlines.length) {
+                    val outline = outlines.item(i) as Element
+                    val type = outline.getAttribute("type")
+                    if (type == "audio") {
+                        val url = outline.getAttribute("URL")
+                        val bitrateStr = outline.getAttribute("bitrate")
+                        val bitrate = if (bitrateStr.isNotBlank()) bitrateStr.toIntOrNull() ?: 128 else 128
+                        if (url.isNotBlank()) {
+                            result.add(Pair(url, bitrate))
+                        }
                     }
                 }
             }
         } catch (e: Exception) { e.printStackTrace() }
-        return list
+        // ترتيب من الأقل bitrate إلى الأعلى
+        return result.sortedBy { it.second }
     }
 
-    // ==================== 6. radio.net (API غير رسمي) ====================
-
-    private fun fetchFromRadioNet(): List<StationEntity> {
+    // ==================== 6. iHeartRadio (API عام) ====================
+    private fun fetchFromIHeart(): List<StationEntity> {
         val list = mutableListOf<StationEntity>()
-        try {
-            // radio.net API غير الرسمي (قد يتغير)
-            val url = URL("http://api.radio.net/info/v2/search/stations?country=EG&size=200")
-            val connection = url.openConnection() as HttpURLConnection
-            connection.connectTimeout = 10000
-            connection.readTimeout = 10000
-            connection.setRequestProperty("User-Agent", "RadioJooApp/5.0")
-            if (connection.responseCode == 200) {
-                val jsonText = connection.inputStream.bufferedReader().use { it.readText() }
-                // محاولة قراءة JSON (قد يكون الشكل مختلفاً)
-                val root = JSONArray(jsonText)
-                for (i in 0 until root.length()) {
-                    val obj = root.getJSONObject(i)
-                    val name = obj.optString("name", "محطة").trim()
-                    val streamUrl = obj.optString("streamUrl", obj.optString("url", "")).trim()
-                    val bitrate = obj.optInt("bitrate", 128)
-                    val country = obj.optString("country", "EG")
-                    if (streamUrl.isNotBlank() && bitrate in 1..64) {
-                        val uuid = "radionet_${name.hashCode()}_${streamUrl.hashCode()}"
-                        val category = StationNormalizer.classify(uuid, name, "")
-                        list.add(
-                            StationEntity(
-                                uuid = uuid,
-                                name = name,
-                                primaryUrl = wrapProxy(streamUrl),
-                                fallbackUrl = "",
-                                tags = "arabic,radionet",
-                                country = country,
-                                category = category,
-                                countryCode = country,
-                                bitrate = bitrate,
-                                isFavorite = false,
-                                popularityScore = 80
+        val searchTerms = listOf("arabic", "egypt", "quran", "saudi", "emirates")
+        for (term in searchTerms) {
+            try {
+                val encodedTerm = URLEncoder.encode(term, "UTF-8")
+                val url = URL("https://api.iheart.com/api/v3/search/all?q=$encodedTerm&limit=50")
+                val connection = url.openConnection() as HttpURLConnection
+                connection.connectTimeout = 10000
+                connection.readTimeout = 10000
+                connection.setRequestProperty("User-Agent", "RadioJooApp/5.0")
+                if (connection.responseCode == 200) {
+                    val jsonText = connection.inputStream.bufferedReader().use { it.readText() }
+                    val root = JSONObject(jsonText)
+                    val stations = root.optJSONArray("stations") ?: continue
+                    for (i in 0 until stations.length()) {
+                        val station = stations.getJSONObject(i)
+                        val name = station.optString("name", "محطة").trim()
+                        val streamUrl = station.optString("streamUrl", "").trim()
+                        val bitrate = station.optInt("bitrate", 128)
+                        if (streamUrl.isNotBlank() && bitrate in 1..64) {
+                            val uuid = "iheart_${name.hashCode()}_${streamUrl.hashCode()}"
+                            val category = StationNormalizer.classify(uuid, name, "arabic")
+                            list.add(
+                                StationEntity(
+                                    uuid = uuid,
+                                    name = name,
+                                    primaryUrl = wrapProxy(streamUrl),
+                                    fallbackUrl = "",
+                                    tags = "iheart,arabic",
+                                    country = "AR",
+                                    category = category,
+                                    countryCode = "AR",
+                                    bitrate = bitrate,
+                                    isFavorite = false,
+                                    popularityScore = 90
+                                )
                             )
-                        )
+                        }
                     }
                 }
-            }
-        } catch (e: Exception) {
-            // radio.net قد لا يعمل، نتجاهل الخطأ
+            } catch (e: Exception) { e.printStackTrace() }
         }
         return list
     }
 
     // ==================== دوال مساعدة ====================
-
     private suspend fun insertEmergencyStations() {
         val emergencyList = listOf(
             StationEntity(uuid = "emergency_quran", name = "إذاعة القرآن الكريم", primaryUrl = wrapProxy("https://stream.zeno.fm/f3wvbb1ch3quv"), fallbackUrl = "", tags = "quran", country = "EG", category = "QURAN", countryCode = "EG", bitrate = 32, isFavorite = true, popularityScore = 1000),
