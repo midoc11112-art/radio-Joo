@@ -1,0 +1,294 @@
+package com.example.radiojooo.ui
+
+import android.Manifest
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.IBinder
+import android.os.Looper
+import android.text.Editable
+import android.text.TextWatcher
+import android.view.View
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import androidx.media3.common.util.UnstableApi
+import androidx.recyclerview.widget.LinearLayoutManager
+import com.example.radiojooo.R
+import com.example.radiojooo.data.model.StationEntity
+import com.example.radiojooo.databinding.ActivityMainBinding
+import com.example.radiojooo.player.RadioService
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
+import java.util.Locale
+
+@UnstableApi
+class MainActivity : AppCompatActivity() {
+
+    private lateinit var binding: ActivityMainBinding
+    private val viewModel: RadioViewModel by viewModels()
+
+    private lateinit var stationAdapter: StationAdapter
+    private var radioService: RadioService? = null
+    private var isBound = false
+
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ -> }
+
+    private val updateHandler = Handler(Looper.getMainLooper())
+    private val updateRunnable = object : Runnable {
+        override fun run() {
+            updateMiniPlayer()
+            updateHandler.postDelayed(this, 1000)
+        }
+    }
+
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            val binder = service as? RadioService.LocalBinder
+            radioService = binder?.getService()
+            isBound = true
+            radioService?.setAppForegroundState(true)
+            updateMiniPlayer()
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            radioService = null
+            isBound = false
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        requestAllPermissions()
+
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        setupRecyclerView()
+        setupSearch()
+        setupChipGroup()
+        setupSwipeRefresh()
+        setupHeaderButtons()
+        setupMiniPlayer()
+        observeViewModel()
+    }
+
+    private fun requestAllPermissions() {
+        val permissionsToRequest = mutableListOf<String>()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(Manifest.permission.READ_MEDIA_AUDIO)
+            }
+        } else {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            }
+        }
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            permissionsToRequest.add(Manifest.permission.RECORD_AUDIO)
+        }
+
+        if (permissionsToRequest.isNotEmpty()) {
+            requestPermissionLauncher.launch(permissionsToRequest.toTypedArray())
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        val intent = Intent(this, RadioService::class.java).apply {
+            action = "ACTION_LOCAL_BIND"
+        }
+        bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+        radioService?.setAppForegroundState(true)
+        updateHandler.post(updateRunnable)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        radioService?.setAppForegroundState(false)
+        updateHandler.removeCallbacks(updateRunnable)
+        if (isBound) {
+            unbindService(serviceConnection)
+            isBound = false
+        }
+    }
+
+    private fun setupRecyclerView() {
+        stationAdapter = StationAdapter(
+            onItemClick = { station ->
+                playStation(station)
+            },
+            onFavoriteClick = { station ->
+                viewModel.toggleFavorite(station)
+            }
+        )
+        binding.rvStations.apply {
+            layoutManager = LinearLayoutManager(this@MainActivity)
+            adapter = stationAdapter
+        }
+    }
+
+    private fun setupSearch() {
+        binding.etSearch.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                viewModel.searchQuery.value = s?.toString() ?: ""
+            }
+            override fun afterTextChanged(s: Editable?) {}
+        })
+    }
+
+    private fun setupChipGroup() {
+        binding.chipGroupCategories.setOnCheckedChangeListener { _, checkedId ->
+            val category = when (checkedId) {
+                R.id.chipFavorite -> "FAVORITE"
+                R.id.chipEgypt -> "EGYPT"
+                R.id.chipQuran -> "QURAN"
+                R.id.chipNews -> "NEWS"
+                R.id.chipMusic -> "MUSIC"
+                R.id.chipSports -> "SPORTS"
+                else -> "ALL"
+            }
+            viewModel.selectedCategory.value = category
+        }
+    }
+
+    private fun setupSwipeRefresh() {
+        binding.swipeRefreshLayout.setOnRefreshListener {
+            viewModel.refreshData()
+        }
+    }
+
+    private fun setupHeaderButtons() {
+        binding.btnRefreshHeader.setOnClickListener {
+            viewModel.refreshData()
+        }
+
+        binding.btnSleepTimerHeader.setOnClickListener {
+            showSleepTimerDialog()
+        }
+    }
+
+    private fun setupMiniPlayer() {
+        binding.miniPlayerHeader.setOnClickListener {
+            val intent = Intent(this, PlayerActivity::class.java)
+            startActivity(intent)
+        }
+
+        binding.btnMiniPlayPause.setOnClickListener {
+            radioService?.let { service ->
+                val intent = Intent(this, RadioService::class.java).apply {
+                    action = if (service.isPlaying()) "ACTION_PAUSE" else "ACTION_PLAY"
+                }
+                startService(intent)
+            }
+        }
+    }
+
+    private fun playStation(station: StationEntity) {
+        viewModel.setCurrentStation(station)
+
+        val serviceIntent = Intent(this, RadioService::class.java)
+        ContextCompat.startForegroundService(this, serviceIntent)
+
+        radioService?.playStation(
+            title = station.name,
+            uuid = station.uuid,
+            pUrl = station.primaryUrl,
+            fUrl = station.fallbackUrl
+        )
+
+        updateMiniPlayer()
+    }
+
+    private fun updateMiniPlayer() {
+        val currentStation = viewModel.currentPlayingStation.value
+        val service = radioService
+
+        if (currentStation != null || (service != null && service.currentTitle != "راديو جو PRO")) {
+            binding.miniPlayerContainer.visibility = View.VISIBLE
+            binding.tvMiniStationName.text = currentStation?.name ?: service?.currentTitle
+
+            if (service != null) {
+                binding.btnMiniPlayPause.text = if (service.isPlaying()) "إيقاف" else "تشغيل"
+                binding.tvMiniDataMb.text = String.format(Locale.US, "%.2f MB", service.totalDataMb)
+                binding.tvMiniDuration.text = service.getListeningDurationFormatted()
+                binding.tvMiniSpeedKbps.text = String.format(Locale.US, "%.1f KB/s", service.currentSpeedKbps)
+            }
+        } else {
+            binding.miniPlayerContainer.visibility = View.GONE
+        }
+    }
+
+    private fun observeViewModel() {
+        lifecycleScope.launch {
+            viewModel.stations.collectLatest { list ->
+                stationAdapter.submitList(list)
+                binding.tvEmptyState.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
+            }
+        }
+
+        lifecycleScope.launch {
+            viewModel.categoryCounts.collectLatest { counts ->
+                binding.chipAll.text = "🔥 الكل (${counts.allCount})"
+                binding.chipFavorite.text = "⭐ المفضلة (${counts.favCount})"
+                binding.chipEgypt.text = "🇪🇬 مصر (${counts.egyptCount})"
+                binding.chipQuran.text = "📖 القرآن الكريم (${counts.quranCount})"
+                binding.chipNews.text = "📰 الأخبار (${counts.newsCount})"
+                binding.chipMusic.text = "🎵 الموسيقى (${counts.musicCount})"
+                binding.chipSports.text = "⚽ الرياضة (${counts.sportsCount})"
+            }
+        }
+
+        lifecycleScope.launch {
+            viewModel.isLoading.collectLatest { isLoading ->
+                binding.swipeRefreshLayout.isRefreshing = isLoading
+            }
+        }
+
+        lifecycleScope.launch {
+            viewModel.refreshResult.collectLatest { count ->
+                Toast.makeText(this@MainActivity, "تم تحديث $count محطة بنجاح", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        lifecycleScope.launch {
+            viewModel.currentPlayingStation.collectLatest {
+                updateMiniPlayer()
+            }
+        }
+    }
+
+    private fun showSleepTimerDialog() {
+        val options = arrayOf("إيقاف المؤقت", "15 دقيقة", "30 دقيقة", "45 دقيقة", "60 دقيقة")
+        val minutes = intArrayOf(0, 15, 30, 45, 60)
+
+        AlertDialog.Builder(this)
+            .setTitle("ضبط مؤقت النوم")
+            .setItems(options) { _, which ->
+                radioService?.startSleepTimer(minutes[which])
+                Toast.makeText(this, "تم ضبط المؤقت: ${options[which]}", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("إلغاء", null)
+            .show()
+    }
+}
