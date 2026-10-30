@@ -125,11 +125,10 @@ class RadioService : Service() {
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
         }
 
-        // ✅ إجبار المشغل على قبول 64Kbps كحد أقصى، وإجبار الصوت على Mono
+        // ✅ إعداد المشغل: منع الفيديو، وتحديد سقف 64Kbps (بدون فرض Mono)
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters()
                 .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true) // منع الفيديو
-                .setMaxAudioChannelCount(1) // فرض Mono
                 .setMaxAudioBitrate(64000) // فرض 64Kbps كحد أقصى
                 .build()
         }
