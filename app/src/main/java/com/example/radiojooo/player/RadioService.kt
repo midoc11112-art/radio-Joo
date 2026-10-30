@@ -45,6 +45,14 @@ import java.util.Locale
 
 class RadioService : Service() {
 
+    private val cloudflareProxyBase = "https://radio-joo-proxy.midoc11112.workers.dev/?stream_url="
+
+    private fun getProxiedUrl(rawUrl: String): String {
+        if (rawUrl.isBlank()) return rawUrl
+        if (rawUrl.contains("radio-joo-proxy.midoc11112.workers.dev")) return rawUrl
+        return cloudflareProxyBase + Uri.encode(rawUrl)
+    }
+
     private lateinit var player: ExoPlayer
     private lateinit var trackSelector: DefaultTrackSelector
 
@@ -288,7 +296,8 @@ class RadioService : Service() {
     private fun startStream(streamUrl: String) {
         player.stop()
         player.clearMediaItems()
-        val uri = Uri.parse(streamUrl)
+        val finalUrl = getProxiedUrl(streamUrl)
+        val uri = Uri.parse(finalUrl)
         val metadata = MediaMetadata.Builder().setTitle(currentTitle).setArtist(currentLiveProgram).build()
         val mediaItem = MediaItem.Builder().setUri(uri).setMediaMetadata(metadata).build()
 
@@ -314,12 +323,13 @@ class RadioService : Service() {
         if (availableUrls.isEmpty()) return
         isRecording = true
         val currentUrl = availableUrls.getOrNull(currentUrlIndex) ?: return
+        val finalUrl = getProxiedUrl(currentUrl)
         recordingJob = serviceScope.launch {
             try {
                 val dir = getRecordingsFolder()
                 val safeTitle = currentTitle.replace(Regex("[^a-zA-Z0-9_ -]"), "_")
                 val file = File(dir, "Rec_${safeTitle}_${System.currentTimeMillis()}.mp3")
-                val connection = URL(currentUrl).openConnection().apply {
+                val connection = URL(finalUrl).openConnection().apply {
                     connectTimeout = 6000; readTimeout = 6000; setRequestProperty("User-Agent", "RadioJooApp/3.0")
                 }
                 connection.getInputStream().use { input ->
