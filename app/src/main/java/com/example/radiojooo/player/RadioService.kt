@@ -149,14 +149,16 @@ class RadioService : Service() {
             .setAllowCrossProtocolRedirects(true)
             .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
 
-        val mediaSourceFactory = DefaultMediaSourceFactory(this).setDataSourceFactory(dataSourceFactory)
+        // ✅ 2. إضافة سياسة معالجة الأخطاء هنا (على mediaSourceFactory وليس player)
+        val mediaSourceFactory = DefaultMediaSourceFactory(this)
+            .setDataSourceFactory(dataSourceFactory)
+            .setLoadErrorHandlingPolicy(LiveStreamLoadErrorHandlingPolicy())
 
+        // ✅ 3. إنشاء المشغل
         player = ExoPlayer.Builder(this, renderersFactory)
             .setTrackSelector(trackSelector)
             .setLoadControl(loadControl)
             .setMediaSourceFactory(mediaSourceFactory)
-            // ✅ 2. إضافة سياسة معالجة الأخطاء لزيادة الاستقرار (إعادة المحاولة 5 مرات)
-            .setLoadErrorHandlingPolicy(LiveStreamLoadErrorHandlingPolicy())
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
