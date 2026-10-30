@@ -32,6 +32,7 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.FilteringMediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import com.example.radiojooo.R
 import com.example.radiojooo.ui.MainActivity
@@ -62,6 +63,7 @@ class RadioService : Service() {
 
     private lateinit var player: ExoPlayer
     private lateinit var trackSelector: DefaultTrackSelector
+    private lateinit var mediaSourceFactory: DefaultMediaSourceFactory
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
@@ -123,23 +125,20 @@ class RadioService : Service() {
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
         }
 
+        // ✅ إجبار المشغل على قبول 64Kbps كحد أقصى، وإجبار الصوت على Mono
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters()
-                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
-                .setMaxAudioBitrate(64000) // تفضيل جودة 64kbps لتوفير البيانات
-                .setMaxAudioChannelCount(1) // Mono
+                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true) // منع الفيديو
+                .setMaxAudioChannelCount(1) // فرض Mono
+                .setMaxAudioBitrate(64000) // فرض 64Kbps كحد أقصى
                 .build()
         }
 
+        // ✅ مخزن مؤقت 10-20 ثانية لتوفير البيانات عند التبديل
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(
-                10000, // minBufferMs: 10 ثوانٍ
-                20000, // maxBufferMs: 20 ثانية
-                1500,  // bufferForPlaybackMs: 1.5 ثانية للبدء
-                3000   // bufferForPlaybackAfterRebufferMs: 3 ثوانٍ بعد الانقطاع
-            )
+            .setBufferDurationsMs(10000, 20000, 1500, 3000)
             .setPrioritizeTimeOverSizeThresholds(true)
-            .setBackBuffer(0, false) // عدم الاحتفاظ بأي بيانات قديمة
+            .setBackBuffer(0, false)
             .build()
 
         val dataSourceFactory = DefaultHttpDataSource.Factory()
@@ -148,7 +147,7 @@ class RadioService : Service() {
             .setAllowCrossProtocolRedirects(true)
             .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
 
-        val mediaSourceFactory = DefaultMediaSourceFactory(this)
+        mediaSourceFactory = DefaultMediaSourceFactory(this)
             .setDataSourceFactory(dataSourceFactory)
             .setLoadErrorHandlingPolicy(LiveStreamLoadErrorHandlingPolicy())
 
@@ -243,7 +242,7 @@ class RadioService : Service() {
             this, 2, closeIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val iconResId = R.mipmap.ic_launcher 
+        val iconResId = R.mipmap.ic_launcher
 
         val builder = NotificationCompat.Builder(this, "radio_joo_service_channel")
             .setContentTitle(currentTitle)
@@ -268,17 +267,9 @@ class RadioService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            "ACTION_PAUSE" -> {
-                player.pause()
-                updateNotification()
-            }
-            "ACTION_PLAY" -> {
-                player.play()
-                updateNotification()
-            }
-            "ACTION_CLOSE" -> {
-                stopAndExitApp()
-            }
+            "ACTION_PAUSE" -> { player.pause(); updateNotification() }
+            "ACTION_PLAY" -> { player.play(); updateNotification() }
+            "ACTION_CLOSE" -> { stopAndExitApp() }
         }
         return START_STICKY
     }
@@ -333,7 +324,12 @@ class RadioService : Service() {
                 .setMediaMetadata(metadata)
                 .build()
 
-            player.setMediaItem(mediaItem)
+            val mediaSource = mediaSourceFactory.createMediaSource(mediaItem)
+            
+            // ✅ تصفية الفيديو نهائياً (لن يتم تحميل أي فيديو حتى لو كان موجوداً)
+            val filteredSource = FilteringMediaSource(mediaSource, C.TRACK_TYPE_AUDIO)
+
+            player.setMediaSource(filteredSource)
             player.prepare()
             player.playWhenReady = true
         } catch (e: Exception) {
@@ -397,10 +393,7 @@ class RadioService : Service() {
     private fun stopAndExitApp() {
         sleepTimer?.cancel()
         stopRecording()
-        try {
-            player.stop()
-            player.release()
-        } catch (e: Exception) { e.printStackTrace() }
+        try { player.stop(); player.release() } catch (e: Exception) { e.printStackTrace() }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE)
         else { @Suppress("DEPRECATION") stopForeground(true) }
         releaseLocks()
@@ -441,9 +434,7 @@ class RadioService : Service() {
         stopRecording()
         releaseLocks()
         statsHandler.removeCallbacks(statsRunnable)
-        try {
-            player.release()
-        } catch (e: Exception) { e.printStackTrace() }
+        try { player.release() } catch (e: Exception) { e.printStackTrace() }
         super.onDestroy()
     }
 }
