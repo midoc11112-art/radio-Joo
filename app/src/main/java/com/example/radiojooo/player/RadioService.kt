@@ -125,15 +125,13 @@ class RadioService : Service() {
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
         }
 
-        // ✅ إعداد المشغل: منع الفيديو، وتحديد سقف 64Kbps (بدون فرض Mono)
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters()
-                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true) // منع الفيديو
-                .setMaxAudioBitrate(64000) // فرض 64Kbps كحد أقصى
+                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
+                .setMaxAudioBitrate(64000)
                 .build()
         }
 
-        // ✅ مخزن مؤقت 10-20 ثانية لتوفير البيانات عند التبديل
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(10000, 20000, 1500, 3000)
             .setPrioritizeTimeOverSizeThresholds(true)
@@ -324,8 +322,6 @@ class RadioService : Service() {
                 .build()
 
             val mediaSource = mediaSourceFactory.createMediaSource(mediaItem)
-            
-            // ✅ تصفية الفيديو نهائياً (لن يتم تحميل أي فيديو حتى لو كان موجوداً)
             val filteredSource = FilteringMediaSource(mediaSource, C.TRACK_TYPE_AUDIO)
 
             player.setMediaSource(filteredSource)
@@ -397,6 +393,8 @@ class RadioService : Service() {
         else { @Suppress("DEPRECATION") stopForeground(true) }
         releaseLocks()
         stopSelf()
+        // ✅ ضمان إغلاق التطبيق بالكامل عند انتهاء المؤقت
+        android.os.Process.killProcess(android.os.Process.myPid())
     }
 
     fun getListeningDurationFormatted(): String {
