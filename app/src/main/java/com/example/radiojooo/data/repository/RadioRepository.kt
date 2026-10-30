@@ -30,9 +30,7 @@ class RadioRepository(private val stationDao: StationDao) {
     suspend fun ensureInitialDataLoaded() {
         withContext(Dispatchers.IO) {
             if (stationDao.getStationsCount() == 0) {
-                // ✅ جلب ديناميكي من المصدر
                 refreshStations()
-                // ✅ إذا فشل الإنترنت تماماً، نضيف 3 محطات طوارئ فقط
                 if (stationDao.getStationsCount() == 0) {
                     insertEmergencyStations()
                 }
@@ -49,7 +47,6 @@ class RadioRepository(private val stationDao: StationDao) {
 
         for (offset in offsets) {
             val pageUrls = listOf(
-                // ✅ إضافة order=clickcount&reverse=true لجلب المحطات الأكثر شعبية والتي تعمل أولاً
                 "https://de1.api.radio-browser.info/json/stations/search?countrycode=EG&limit=$limit&offset=$offset&hidebroken=true&order=clickcount&reverse=true",
                 "https://de1.api.radio-browser.info/json/stations/search?language=arabic&limit=$limit&offset=$offset&hidebroken=true&order=clickcount&reverse=true"
             )
@@ -75,7 +72,8 @@ class RadioRepository(private val stationDao: StationDao) {
                             val bitrate = obj.optInt("bitrate", 32)
                             val uuid = obj.optString("stationuuid", java.util.UUID.randomUUID().toString())
 
-                            if (rawStreamUrl.isNotBlank()) {
+                            // ✅ الفلترة الصارمة: فقط المحطات التي يقل بت ريتها عن 64Kbps أو تساويه
+                            if (rawStreamUrl.isNotBlank() && bitrate in 1..64) {
                                 val category = StationNormalizer.classify(uuid = uuid, name = name, tags = tags)
                                 val proxiedUrl = wrapProxy(rawStreamUrl)
 
@@ -89,7 +87,7 @@ class RadioRepository(private val stationDao: StationDao) {
                                         country = country,
                                         category = category,
                                         countryCode = if (country.isBlank()) "EG" else country,
-                                        bitrate = if (bitrate <= 0) 32 else bitrate,
+                                        bitrate = bitrate,
                                         isFavorite = false,
                                         popularityScore = obj.optInt("clickcount", 100)
                                     )
@@ -114,12 +112,10 @@ class RadioRepository(private val stationDao: StationDao) {
         insertedCount
     }
 
-    // ✅ 3 محطات طوارئ فقط (تعمل دائماً حتى لو فشل الاتصال بالمصدر)
     private suspend fun insertEmergencyStations() {
         val emergencyList = listOf(
             StationEntity(uuid = "emergency_quran", name = "إذاعة القرآن الكريم", primaryUrl = wrapProxy("https://stream.zeno.fm/f3wvbb1ch3quv"), fallbackUrl = "", tags = "quran", country = "EG", category = "QURAN", countryCode = "EG", bitrate = 32, isFavorite = true, popularityScore = 1000),
-            StationEntity(uuid = "emergency_nogoum", name = "نجوم إف إم", primaryUrl = wrapProxy("https://audio.nrpstream.com/listen/nogoumfm/radio.mp3"), fallbackUrl = "", tags = "music", country = "EG", category = "MUSIC", countryCode = "EG", bitrate = 128, isFavorite = false, popularityScore = 990),
-            StationEntity(uuid = "emergency_radio_masr", name = "راديو مصر", primaryUrl = wrapProxy("https://audio.nrpstream.com/listen/radio_masr/radio.mp3"), fallbackUrl = "", tags = "news", country = "EG", category = "NEWS", countryCode = "EG", bitrate = 64, isFavorite = false, popularityScore = 980)
+            StationEntity(uuid = "emergency_radio_masr", name = "راديو مصر", primaryUrl = wrapProxy("https://audio.nrpstream.com/listen/radio_masr/radio.mp3"), fallbackUrl = "", tags = "news", country = "EG", category = "NEWS", countryCode = "EG", bitrate = 64, isFavorite = false, popularityScore = 990)
         )
         stationDao.insertStations(emergencyList)
     }
