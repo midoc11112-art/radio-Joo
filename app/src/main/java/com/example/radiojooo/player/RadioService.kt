@@ -126,13 +126,21 @@ class RadioService : Service() {
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters()
                 .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
+                .setMaxAudioBitrate(64000) // تفضيل جودة 64kbps لتوفير البيانات
+                .setMaxAudioChannelCount(1) // Mono
                 .build()
         }
 
+        // ✅ 1. تقليل المخزن المؤقت (10-20 ثانية) لتوفير البيانات عند التبديل
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(5000, 20000, 1500, 3000)
+            .setBufferDurationsMs(
+                10000, // minBufferMs: 10 ثوانٍ
+                20000, // maxBufferMs: 20 ثانية
+                1500,  // bufferForPlaybackMs: 1.5 ثانية للبدء
+                3000   // bufferForPlaybackAfterRebufferMs: 3 ثوانٍ بعد الانقطاع
+            )
             .setPrioritizeTimeOverSizeThresholds(true)
-            .setBackBuffer(0, false)
+            .setBackBuffer(0, false) // عدم الاحتفاظ بأي بيانات قديمة
             .build()
 
         val dataSourceFactory = DefaultHttpDataSource.Factory()
@@ -147,6 +155,8 @@ class RadioService : Service() {
             .setTrackSelector(trackSelector)
             .setLoadControl(loadControl)
             .setMediaSourceFactory(mediaSourceFactory)
+            // ✅ 2. إضافة سياسة معالجة الأخطاء لزيادة الاستقرار (إعادة المحاولة 5 مرات)
+            .setLoadErrorHandlingPolicy(LiveStreamLoadErrorHandlingPolicy())
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -235,7 +245,6 @@ class RadioService : Service() {
             this, 2, closeIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        // ✅ إصلاح: استخدام أيقونة التطبيق الأساسية المتاحة دائماً لتجنب الانهيار
         val iconResId = R.mipmap.ic_launcher 
 
         val builder = NotificationCompat.Builder(this, "radio_joo_service_channel")
@@ -289,12 +298,10 @@ class RadioService : Service() {
         stationStartTimeMs = System.currentTimeMillis()
 
         if (availableUrls.isNotEmpty()) {
-            // ابدأ بالـ Proxy مباشرة لضمان تجاوز الحظر
             startStream(availableUrls[0], useProxy = true)
         }
 
         try {
-            // ملاحظة: يجب استدعاء startForeground مبكراً لتجنب الانهيار في أندرويد 14+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(1001, buildNotification(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
             } else {
