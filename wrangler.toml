@@ -14,4 +14,4 @@ class_name = "FFmpegContainer"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["FFmpegContainer"]
+new_sqlite_classes = ["FFmpegContainer"]
