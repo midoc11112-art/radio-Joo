@@ -1,11 +1,6 @@
 package com.example.radiojooo.player
 
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.PendingIntent
-import android.app.Service
-import android.content.Context
 import android.content.Intent
 import android.media.MediaScannerConnection
 import android.net.TrafficStats
@@ -13,13 +8,13 @@ import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Binder
 import android.os.Build
+import android.os.Bundle
 import android.os.CountDownTimer
 import android.os.Environment
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
-import androidx.core.app.NotificationCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -34,8 +29,15 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.FilteringMediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.session.DefaultMediaNotificationProvider
+import androidx.media3.session.MediaSession
+import androidx.media3.session.MediaSessionService
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
 import com.example.radiojooo.R
 import com.example.radiojooo.ui.MainActivity
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -46,7 +48,7 @@ import java.net.URL
 import java.net.URLEncoder
 import java.util.Locale
 
-class RadioService : Service() {
+class RadioService : MediaSessionService() {
 
     private val cloudflareProxyBase = "https://radio-joo-proxy.midoc11112.workers.dev/?url="
     private var isUsingProxy = false
@@ -62,6 +64,7 @@ class RadioService : Service() {
     }
 
     private lateinit var player: ExoPlayer
+    private var mediaSession: MediaSession? = null
     private lateinit var trackSelector: DefaultTrackSelector
     private lateinit var mediaSourceFactory: DefaultMediaSourceFactory
 
@@ -98,14 +101,22 @@ class RadioService : Service() {
         }
     }
 
+    // ✅ LocalBinder للربط المباشر مع الواجهة
     inner class LocalBinder : Binder() {
         fun getService(): RadioService = this@RadioService
     }
 
     private val binder = LocalBinder()
 
-    override fun onBind(intent: Intent?): IBinder {
-        return binder
+    override fun onBind(intent: Intent?): IBinder? {
+        if (intent?.action == "ACTION_LOCAL_BIND") {
+            return binder
+        }
+        return super.onBind(intent)
+    }
+
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
+        return mediaSession
     }
 
     fun setAppForegroundState(inForeground: Boolean) {
@@ -117,10 +128,45 @@ class RadioService : Service() {
         }
     }
 
+    // ✅ التحكم في الأزرار التي تظهر على شاشة القفل والإشعارات
+    private val mediaSessionCallback = object : MediaSession.Callback {
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo
+        ): MediaSession.ConnectionResult {
+            // إزالة أزرار التالي، السابق، وشريط التقدم، وإبقاء التشغيل/الإيقاف وزر الإغلاق (Stop) فقط
+            val playerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
+                .remove(Player.COMMAND_SEEK_TO_NEXT)
+                .remove(Player.COMMAND_SEEK_TO_PREVIOUS)
+                .remove(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                .remove(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                .remove(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
+                .remove(Player.COMMAND_SEEK_TO_DEFAULT_POSITION)
+                .add(Player.COMMAND_STOP) // إضافة زر الإغلاق (X)
+                .build()
+
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailablePlayerCommands(playerCommands)
+                .build()
+        }
+
+        // ✅ عند الضغط على زر (X) في شاشة القفل أو الإشعار
+        override fun onPlayerCommandRequest(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            playerCommand: Int
+        ): Int {
+            if (playerCommand == Player.COMMAND_STOP) {
+                stopAndExitApp()
+                return SessionResult.RESULT_SUCCESS
+            }
+            return super.onPlayerCommandRequest(session, controller, playerCommand)
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         acquireLocks()
-        createNotificationChannel()
 
         val renderersFactory = DefaultRenderersFactory(this).apply {
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
@@ -133,12 +179,12 @@ class RadioService : Service() {
                 .build()
         }
 
-        // ✅ تعديل حاسم لتقليل استهلاك الإنترنت: تقليل حجم الذاكرة المؤقتة إلى 1 ميجابايت
+        // ✅ تقليل حجم الذاكرة المؤقتة إلى 1 ميجابايت لتوفير البيانات
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(10000, 20000, 1500, 3000)
-            .setTargetBufferBytes(1024 * 1024) // تحديد المخزن المؤقت بـ 1MB فقط لتوفير البيانات
+            .setTargetBufferBytes(1024 * 1024)
             .setPrioritizeTimeOverSizeThresholds(true)
-            .setBackBuffer(0, false) // عدم الاحتفاظ ببيانات سابقة
+            .setBackBuffer(0, false)
             .build()
 
         val dataSourceFactory = DefaultHttpDataSource.Factory()
@@ -166,6 +212,24 @@ class RadioService : Service() {
 
         player.setWakeMode(C.WAKE_MODE_NETWORK)
 
+        // ✅ تخصيص شكل الإشعار ليكون مميزاً (يمكنك تغيير الأيقونة الصغيرة إذا أردت)
+        val notificationProvider = DefaultMediaNotificationProvider.Builder(this)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .build()
+        setMediaNotificationProvider(notificationProvider)
+
+        // ✅ إنشاء MediaSession وربطه بالمشغل
+        val sessionActivity = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        mediaSession = MediaSession.Builder(this, player)
+            .setSessionActivity(sessionActivity)
+            .setCallback(mediaSessionCallback) // ربط التخصيص بالأزرار
+            .build()
+
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 val currentUrl = availableUrls.getOrNull(currentUrlIndex) ?: ""
@@ -175,24 +239,24 @@ class RadioService : Service() {
                     tryNextMirrorServer()
                 }
             }
-
-            override fun onIsPlayingChanged(isPlaying: Boolean) {
-                updateNotification()
-            }
         })
 
         statsHandler.post(statsRunnable)
     }
 
-    override fun onTaskRemoved(rootIntent: Intent?) { }
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        if (!player.isPlaying) {
+            stopSelf()
+        }
+    }
 
     private fun acquireLocks() {
         try {
-            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            val pm = getSystemService(POWER_SERVICE) as PowerManager
             wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "RadioJoo::ServiceWakeLock")
             wakeLock?.acquire(10 * 60 * 60 * 1000L)
 
-            val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            val wm = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
             wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "RadioJoo::ServiceWifiLock")
             wifiLock?.acquire()
         } catch (e: Exception) { e.printStackTrace() }
@@ -203,73 +267,6 @@ class RadioService : Service() {
             if (wakeLock?.isHeld == true) wakeLock?.release()
             if (wifiLock?.isHeld == true) wifiLock?.release()
         } catch (e: Exception) { e.printStackTrace() }
-    }
-
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                "radio_joo_service_channel",
-                "تشغيل راديو جو",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "التحكم في بث الراديو المباشر"
-                setShowBadge(false)
-            }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager?.createNotificationChannel(channel)
-        }
-    }
-
-    private fun buildNotification(): Notification {
-        val intent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
-        val playPauseIntent = Intent(this, RadioService::class.java).apply {
-            action = if (isPlaying()) "ACTION_PAUSE" else "ACTION_PLAY"
-        }
-        val playPausePending = PendingIntent.getService(
-            this, 1, playPauseIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-        val playPauseIcon = if (isPlaying()) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
-        val playPauseTitle = if (isPlaying()) "إيقاف مؤقت" else "تشغيل"
-
-        val closeIntent = Intent(this, RadioService::class.java).apply { action = "ACTION_CLOSE" }
-        val closePending = PendingIntent.getService(
-            this, 2, closeIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
-        val iconResId = R.mipmap.ic_launcher
-
-        return NotificationCompat.Builder(this, "radio_joo_service_channel")
-            .setContentTitle(currentTitle)
-            .setContentText(currentLiveProgram)
-            .setSmallIcon(iconResId)
-            .setContentIntent(pendingIntent)
-            .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .addAction(playPauseIcon, playPauseTitle, playPausePending)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "خروج X", closePending)
-            .build()
-    }
-
-    private fun updateNotification() {
-        try {
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.notify(1001, buildNotification())
-        } catch (e: Exception) { e.printStackTrace() }
-    }
-
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            "ACTION_PAUSE" -> { player.pause(); updateNotification() }
-            "ACTION_PLAY" -> { player.play(); updateNotification() }
-            "ACTION_CLOSE" -> { stopAndExitApp() }
-        }
-        return START_STICKY
     }
 
     fun playStation(title: String, uuid: String, pUrl: String, fUrl: String) {
@@ -288,14 +285,6 @@ class RadioService : Service() {
         if (availableUrls.isNotEmpty()) {
             startStream(availableUrls[0], useProxy = true)
         }
-
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(1001, buildNotification(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
-            } else {
-                startForeground(1001, buildNotification())
-            }
-        } catch (e: Exception) { e.printStackTrace() }
     }
 
     private fun startStream(streamUrl: String, useProxy: Boolean = false) {
@@ -324,7 +313,6 @@ class RadioService : Service() {
                 .build()
 
             val mediaSource = mediaSourceFactory.createMediaSource(mediaItem)
-            // ✅ إجبار ExoPlayer على استخدام مسار الصوت فقط
             val filteredSource = FilteringMediaSource(mediaSource, C.TRACK_TYPE_AUDIO)
 
             player.setMediaSource(filteredSource)
@@ -388,12 +376,11 @@ class RadioService : Service() {
         }.start()
     }
 
+    // ✅ دالة الخروج (تستدعى من زر X في شاشة القفل أو من داخل التطبيق)
     private fun stopAndExitApp() {
         sleepTimer?.cancel()
         stopRecording()
         try { player.stop(); player.release() } catch (e: Exception) { e.printStackTrace() }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE)
-        else { @Suppress("DEPRECATION") stopForeground(true) }
         releaseLocks()
         stopSelf()
         android.os.Process.killProcess(android.os.Process.myPid())
@@ -433,7 +420,11 @@ class RadioService : Service() {
         stopRecording()
         releaseLocks()
         statsHandler.removeCallbacks(statsRunnable)
-        try { player.release() } catch (e: Exception) { e.printStackTrace() }
+        mediaSession?.run {
+            player.release()
+            release()
+            mediaSession = null
+        }
         super.onDestroy()
     }
 }
