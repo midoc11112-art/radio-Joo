@@ -47,7 +47,6 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         val stationDao = AppDatabase.getDatabase(application).stationDao()
-        // ✅ تمرير cacheDir لدعم كاش OkHttp
         repository = RadioRepository(stationDao, application.cacheDir)
 
         val rawFlow = MutableStateFlow<List<StationEntity>>(emptyList())
@@ -83,6 +82,7 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
+                // ✅ الترتيب حسب الشهرة تنازلياً
                 filtered.sortedByDescending { it.popularityScore }
             }.collect {
                 filteredFlow.value = it
@@ -99,15 +99,7 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
         val music = list.count { it.category.equals("MUSIC", ignoreCase = true) }
         val sports = list.count { it.category.equals("SPORTS", ignoreCase = true) }
 
-        categoryCounts.value = CategoryCounts(
-            allCount = all,
-            favCount = fav,
-            egyptCount = eg,
-            quranCount = quran,
-            newsCount = news,
-            musicCount = music,
-            sportsCount = sports
-        )
+        categoryCounts.value = CategoryCounts(all, fav, eg, quran, news, music, sports)
     }
 
     fun setCurrentStation(station: StationEntity?) {
