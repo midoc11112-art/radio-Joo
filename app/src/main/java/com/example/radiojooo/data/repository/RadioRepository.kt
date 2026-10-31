@@ -82,13 +82,13 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
     suspend fun refreshStations(): Int = withContext(Dispatchers.IO) {
         try {
             supervisorScope {
+                // ✅ تم إزالة مصدر IPTV TV نهائياً لجلب الراديو فقط
                 val jobs = listOf(
                     async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowser("bycountrycodeexact/EG", "EG", null) } },
                     async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowser("bylanguage/arabic", null, null) } },
                     async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowser("bytag/news", null, "NEWS") } },
                     async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowser("bytag/talkshow", null, "NEWS") } },
                     async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowser("bytag/quran", null, "QURAN") } },
-                    async { withTimeoutOrNull(15_000L) { fetchFromIptvOrgArabic() } },
                     async { withTimeoutOrNull(15_000L) { fetchFromBinaryMagic() } },
                     async { withTimeoutOrNull(15_000L) { fetchFromIslamicRadioApi() } },
                     async { withTimeoutOrNull(15_000L) { fetchFromTuneInOpml() } }
@@ -109,8 +109,6 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
         }
         stationDao.getStationsCount()
     }
-
-    suspend fun validateAndHealStations(): Int = 0
 
     private fun fetchFromRadioBrowser(
         endpoint: String,
@@ -135,28 +133,6 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                     if (rawUrl.isNotBlank() && StationNormalizer.isArabicStation(name, lang, country)) {
                         val category = forcedCategory ?: StationNormalizer.classify(uuid, name, "")
                         list.add(StationEntity(uuid, name, wrapProxy(rawUrl), "", "", country, category, country, bitrate, false, obj.optInt("clickcount", 100)))
-                    }
-                }
-            }
-        } catch (e: Exception) { e.printStackTrace() }
-        return list
-    }
-
-    private fun fetchFromIptvOrgArabic(): List<StationEntity> {
-        val list = mutableListOf<StationEntity>()
-        val url = "https://iptv-org.github.io/iptv/languages/ara.m3u"
-        try {
-            val response = okHttpClient.newCall(Request.Builder().url(url).build()).execute()
-            if (response.isSuccessful || response.code == 304) {
-                var currentName = ""
-                val lines = response.body?.string()?.lines() ?: emptyList()
-                for (line in lines) {
-                    if (line.startsWith("#EXTINF:")) {
-                        currentName = line.substringAfterLast(",").trim()
-                    } else if (line.startsWith("http") && currentName.isNotEmpty()) {
-                        val uuid = "iptv_${currentName.hashCode()}_${line.hashCode()}"
-                        list.add(StationEntity(uuid, currentName, wrapProxy(line), "", "", "AR", StationNormalizer.classify(uuid, currentName, ""), "AR", 64, false, 60))
-                        currentName = ""
                     }
                 }
             }
