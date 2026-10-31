@@ -41,11 +41,9 @@ class RadioRepository(private val stationDao: StationDao, cacheDir: File) {
 
     suspend fun ensureInitialDataLoaded() {
         withContext(Dispatchers.IO) {
-            // عرض المحطات المخزنة فوراً
             if (stationDao.getStationsCount() == 0) {
                 stationDao.insertStations(getSeedStations())
             }
-            // التحديث في الخلفية يحدث بصمت تام ولا يظهر Spinner
             refreshStations()
         }
     }
@@ -60,7 +58,6 @@ class RadioRepository(private val stationDao: StationDao, cacheDir: File) {
                 async { withTimeoutOrNull(15_000L) { fetchFromEgyptM3U() } }
             )
             
-            // الحفظ التدريجي: كل مصدر ينتهي يتم حفظه فوراً
             jobs.forEach { job ->
                 val list = job.await()
                 if (list != null && list.isNotEmpty()) {
@@ -85,13 +82,15 @@ class RadioRepository(private val stationDao: StationDao, cacheDir: File) {
                     val obj = jsonArray.getJSONObject(i)
                     val name = obj.optString("name", "محطة").trim()
                     val lang = obj.optString("language", "")
+                    val country = obj.optString("countrycode", "EG")
                     val rawUrl = obj.optString("url_resolved", obj.optString("url", "")).trim()
                     val bitrate = obj.optInt("bitrate", 64)
                     val uuid = obj.optString("stationuuid", java.util.UUID.randomUUID().toString())
                     
-                    if (rawUrl.isNotBlank() && bitrate <= 128 && StationNormalizer.isArabicStation(name, lang)) {
+                    // ✅ تمرير الاسم واللغة والدولة للفلترة الذكية
+                    if (rawUrl.isNotBlank() && bitrate <= 128 && StationNormalizer.isArabicStation(name, lang, country)) {
                         val category = StationNormalizer.classify(uuid, name, "")
-                        list.add(StationEntity(uuid, name, wrapProxy(rawUrl), "", "", "EG", category, "EG", bitrate, false, obj.optInt("clickcount", 100)))
+                        list.add(StationEntity(uuid, name, wrapProxy(rawUrl), "", "", country, category, country, bitrate, false, obj.optInt("clickcount", 100)))
                     }
                 }
             }
@@ -110,12 +109,12 @@ class RadioRepository(private val stationDao: StationDao, cacheDir: File) {
                     val obj = jsonArray.getJSONObject(i)
                     val name = obj.optString("name", "محطة").trim()
                     val lang = obj.optString("language", "arabic")
+                    val country = obj.optString("countrycode", "AR")
                     val rawUrl = obj.optString("url_resolved", obj.optString("url", "")).trim()
                     val bitrate = obj.optInt("bitrate", 64)
-                    val country = obj.optString("countrycode", "AR")
                     val uuid = obj.optString("stationuuid", java.util.UUID.randomUUID().toString())
                     
-                    if (rawUrl.isNotBlank() && bitrate <= 128 && StationNormalizer.isArabicStation(name, lang)) {
+                    if (rawUrl.isNotBlank() && bitrate <= 128 && StationNormalizer.isArabicStation(name, lang, country)) {
                         val category = StationNormalizer.classify(uuid, name, "")
                         list.add(StationEntity(uuid, name, wrapProxy(rawUrl), "", "", country, category, country, bitrate, false, obj.optInt("clickcount", 100)))
                     }
@@ -136,12 +135,12 @@ class RadioRepository(private val stationDao: StationDao, cacheDir: File) {
                     val obj = jsonArray.getJSONObject(i)
                     val name = obj.optString("name", "محطة").trim()
                     val lang = obj.optString("language", "")
+                    val country = obj.optString("countrycode", "")
                     val rawUrl = obj.optString("url_resolved", obj.optString("url", "")).trim()
                     val bitrate = obj.optInt("bitrate", 64)
-                    val country = obj.optString("countrycode", "AR")
                     val uuid = obj.optString("stationuuid", java.util.UUID.randomUUID().toString())
                     
-                    if (rawUrl.isNotBlank() && bitrate <= 128 && StationNormalizer.isArabicStation(name, lang)) {
+                    if (rawUrl.isNotBlank() && bitrate <= 128 && StationNormalizer.isArabicStation(name, lang, country)) {
                         list.add(StationEntity(uuid, name, wrapProxy(rawUrl), "", "", country, "NEWS", country, bitrate, false, obj.optInt("clickcount", 100)))
                     }
                 }
@@ -163,7 +162,8 @@ class RadioRepository(private val stationDao: StationDao, cacheDir: File) {
                         currentName = line.substringAfterLast(",").trim()
                     } else if (line.startsWith("http") && currentName.isNotEmpty()) {
                         val isVideo = line.lowercase().contains(".m3u8") || line.lowercase().contains(".mp4") || line.lowercase().contains(".ts")
-                        if (!isVideo && StationNormalizer.isArabicStation(currentName, "arabic")) {
+                        // ✅ قائمة ara.m3u هي قائمة عربية 100%، لذلك نقبلها جميعاً بدون فلترة
+                        if (!isVideo) {
                             val uuid = "iptv_${currentName.hashCode()}_${line.hashCode()}"
                             list.add(StationEntity(uuid, currentName, wrapProxy(line), "", "", "AR", StationNormalizer.classify(uuid, currentName, ""), "AR", 64, false, 60))
                         }
@@ -187,10 +187,9 @@ class RadioRepository(private val stationDao: StationDao, cacheDir: File) {
                     if (line.startsWith("#EXTINF:")) {
                         currentName = line.substringAfterLast(",").trim()
                     } else if (line.startsWith("http") && currentName.isNotEmpty()) {
-                        if (StationNormalizer.isArabicStation(currentName, "")) {
-                            val uuid = "egypt_${currentName.hashCode()}_${line.hashCode()}"
-                            list.add(StationEntity(uuid, currentName, wrapProxy(line), "", "", "EG", StationNormalizer.classify(uuid, currentName, ""), "EG", 64, false, 85))
-                        }
+                        // ✅ هذه القائمة مصرية 100%، نقبلها جميعاً
+                        val uuid = "egypt_${currentName.hashCode()}_${line.hashCode()}"
+                        list.add(StationEntity(uuid, currentName, wrapProxy(line), "", "", "EG", StationNormalizer.classify(uuid, currentName, ""), "EG", 64, false, 85))
                         currentName = ""
                     }
                 }
