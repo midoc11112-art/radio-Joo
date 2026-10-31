@@ -35,7 +35,7 @@
             android:name=".ui.PlayerActivity"
             android:exported="false" />
 
-        <!-- ✅ تعديل الخدمة لدعم MediaSessionService -->
+        <!-- ✅ تم تعديل الخدمة لتدعم MediaSessionService -->
         <service
             android:name=".player.RadioService"
             android:foregroundServiceType="mediaPlayback"
