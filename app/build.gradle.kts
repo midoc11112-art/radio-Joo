@@ -14,6 +14,7 @@ android {
         targetSdk = 35
         versionCode = 3
         versionName = "3.0.0"
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -44,7 +45,7 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     
-    // ✅ مكتبة السحب للتحديث (تأكدنا من وجودها)
+    // ✅ مكتبة السحب للتحديث (مهمة جداً)
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
 
     // Lifecycle & ViewModel
@@ -65,9 +66,12 @@ dependencies {
     implementation("androidx.media3:media3-session:$media3Version")
     implementation("androidx.media3:media3-ui:$media3Version")
 
+    // ✅ OkHttp (دي اللي كانت ناقصة وعملت المشكلة الأخيرة)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
-    // ✅ WorkManager
+    // ✅ WorkManager (للتحديث التلقائي في الخلفية)
     implementation("androidx.work:work-runtime-ktx:2.9.1")
 }
