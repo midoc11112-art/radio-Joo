@@ -124,7 +124,6 @@ class RadioService : Service() {
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
         }
 
-        // 1. منع الفيديو + سقف 128 كيلوبت (طبقة دفاع أولى)
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters()
                 .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
@@ -138,20 +137,17 @@ class RadioService : Service() {
             .setBackBuffer(0, false)
             .build()
 
-        // 2. إنشاء DataSource الأساسي (DefaultHttpDataSource)
         val baseDataSourceFactory = DefaultHttpDataSource.Factory()
             .setConnectTimeoutMs(15000)
             .setReadTimeoutMs(15000)
             .setAllowCrossProtocolRedirects(true)
             .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 
-        // 3. ✅ تغليف DataSource الأساسي بصمام الأمان (ThrottledDataSourceFactory)
         val throttledDataSourceFactory = ThrottledDataSourceFactory(
             upstreamFactory = baseDataSourceFactory,
-            maxBytesPerSecond = 16 * 1024L // 16 KB/s = 128 kbps
+            maxBytesPerSecond = 16 * 1024L
         )
 
-        // 4. استخدام الصمام في مصنع المصادر
         mediaSourceFactory = DefaultMediaSourceFactory(this)
             .setDataSourceFactory(throttledDataSourceFactory)
 
