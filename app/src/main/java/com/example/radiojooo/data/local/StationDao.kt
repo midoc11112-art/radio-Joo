@@ -13,19 +13,37 @@ interface StationDao {
     @Query("SELECT * FROM stations ORDER BY popularityScore DESC")
     fun getAllStations(): Flow<List<StationEntity>>
 
-    @Query("SELECT * FROM stations ORDER BY popularityScore DESC")
-    fun getStationsListDirect(): List<StationEntity>
+    @Query("SELECT * FROM stations")
+    suspend fun getStationsListDirect(): List<StationEntity>
+
+    @Query("SELECT COUNT(*) FROM stations")
+    suspend fun getStationsCount(): Int
+
+    @Query("SELECT * FROM stations WHERE isFavorite = 1 ORDER BY popularityScore DESC")
+    fun getFavoriteStations(): Flow<List<StationEntity>>
+
+    @Query("SELECT * FROM stations WHERE category = :category ORDER BY popularityScore DESC")
+    fun getStationsByCategory(category: String): Flow<List<StationEntity>>
+
+    @Query("SELECT * FROM stations WHERE name LIKE '%' || :query || '%' ORDER BY popularityScore DESC")
+    fun searchStations(query: String): Flow<List<StationEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertStations(stations: List<StationEntity>)
 
-    @Query("SELECT COUNT(*) FROM stations")
-    fun getStationsCount(): Int
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertStation(station: StationEntity)
 
-    @Query("UPDATE stations SET isFavorite = :isFav WHERE uuid = :uuid")
-    suspend fun updateFavoriteStatus(uuid: String, isFav: Boolean)
+    @Query("UPDATE stations SET isFavorite = :isFavorite WHERE uuid = :uuid")
+    suspend fun updateFavorite(uuid: String, isFavorite: Boolean)
 
-    // ✅ الدالة الجديدة اللي بتحدث الرابط التلقائي
+    @Query("UPDATE stations SET isFavorite = :isFavorite WHERE uuid = :uuid")
+    suspend fun updateFavoriteStatus(uuid: String, isFavorite: Boolean)
+
+    @Query("DELETE FROM stations")
+    suspend fun clearAll()
+
+    // ✅ التعديل الوحيد: إضافة الدالة دي عشان الفحص التلقائي يشتغل
     @Query("UPDATE stations SET streamUrl = :newUrl WHERE uuid = :uuid")
     suspend fun updateStreamUrl(uuid: String, newUrl: String)
 }
