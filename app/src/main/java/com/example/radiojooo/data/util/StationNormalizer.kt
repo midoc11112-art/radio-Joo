@@ -1,12 +1,11 @@
 package com.example.radiojooo.data.util
 
-import com.example.radiojooo.data.model.StationEntity
 import java.util.Locale
 
 object StationNormalizer {
 
     private val quranKeywords = listOf("quran", "koran", "islamic", "قرآن", "قرأن", "تلاوة", "إسلامي")
-    private val newsKeywords = listOf("news", "talk", "أخبار", "اخبار", "حوار", "الجزيرة", "العربية", "bbc", "sky news", "sputnik", "الحدث", "روسيا اليوم", "مونت كارلو", "mcd")
+    private val newsKeywords = listOf("news", "talk", "أخبار", "اخبار", "حوار", "الجزيرة", "العربية", "الحدث", "روسيا اليوم", "مونت كارلو")
     private val sportsKeywords = listOf("sport", "sports", "رياضة", "سبورت", "أهلي", "زمالك")
     private val musicKeywords = listOf("music", "hits", "pop", "موسيقى", "أغاني", "طرب", "نجوم", "شعبي", "نغم")
 
@@ -29,43 +28,45 @@ object StationNormalizer {
         }
     }
 
-    // ✅ خوارزمية الفلترة الذكية: لا نستبعد إلا إذا تأكدنا 100% أنها أجنبية
+    // ✅ خوارزمية الفلترة الجديدة: تعتمد على اللغة أولاً، وليس على اسم العلامة التجارية
     fun isArabicStation(name: String, language: String, countryCode: String): Boolean {
         val n = name.lowercase(Locale.ROOT)
         val l = language.lowercase(Locale.ROOT)
         val c = countryCode.uppercase(Locale.ROOT)
 
-        // 1. قبول فوري إذا كان الاسم يحتوي على حروف عربية
+        // 1. إذا كان الاسم يحتوي على أحرف عربية، اقبل فوراً
         if (name.any { it in '\u0600'..'\u06FF' }) return true
 
-        // 2. قبول فوري إذا كانت اللغة عربية
+        // 2. إذا كانت اللغة عربية، اقبل فوراً
         if (l.contains("arabic") || l == "ar" || l.contains(",ar") || l.contains("ar,")) return true
 
-        // 3. قبول فوري إذا كانت الدولة عربية
+        // 3. إذا كان الاسم يحتوي على كلمة "arabic" أو "عربي" أو "عربية"، اقبل فوراً
+        if (n.contains("arabic") || n.contains("عربي") || n.contains("عربية")) return true
+
+        // 4. أسماء النسخ العربية المعروفة (يجب أن تكون صريحة)
+        val arabicBrands = listOf(
+            "aljazeera", "alarabiya", "alhadath", "sky news arabia",
+            "rt arabic", "france 24 arabic", "dw arabic", "monte carlo", "mcd"
+        )
+        if (arabicBrands.any { n.contains(it) }) return true
+
+        // 5. إذا كانت اللغة أجنبية صريحة، ارفض (ما لم تستوفِ الشروط أعلاه)
+        val foreignLangs = listOf(
+            "english", "french", "german", "spanish", "italian",
+            "russian", "chinese", "japanese", "korean", "portuguese",
+            "dutch", "polish", "turkish", "greek"
+        )
+        if (foreignLangs.any { l.contains(it) }) return false
+
+        // 6. إذا كانت الدولة عربية، اقبل (حتى لو كانت اللغة غير معروفة)
         val arabCountries = listOf(
-            "EG", "SA", "AE", "QA", "KW", "BH", "OM", "JO", "LB", 
-            "SY", "IQ", "PS", "YE", "SD", "LY", "TN", "DZ", "MA", 
+            "EG", "SA", "AE", "QA", "KW", "BH", "OM", "JO", "LB",
+            "SY", "IQ", "PS", "YE", "SD", "LY", "TN", "DZ", "MA",
             "MR", "SO", "DJ", "KM"
         )
         if (c in arabCountries) return true
 
-        // 4. قبول فوري إذا كان اسم المحطة معروفاً كعلامة إخبارية عربية (حتى لو كانت اللغة إنجليزية)
-        val arabicBrands = listOf(
-            "arab", "jazeera", "alarabiya", "bbc arabic", "sputnik", 
-            "monte carlo", "mcd", "sky news arabia", "alhadath", 
-            "rt arabic", "france 24 arabic", "dw arabic"
-        )
-        if (arabicBrands.any { n.contains(it) }) return true
-
-        // 5. الاستبعاد فقط إذا كانت اللغة أجنبية صريحة والدولة غير عربية
-        val foreignLangs = listOf(
-            "french", "german", "spanish", "italian", "russian", 
-            "chinese", "japanese", "korean", "portuguese", "dutch", 
-            "polish", "turkish", "greek"
-        )
-        if (foreignLangs.any { l.contains(it) }) return false
-
-        // 6. إذا لم نستطع التأكد، نقبلها (لضمان عدم خسارة أي محطة عربية)
+        // 7. القبول الافتراضي (لتجنب الحجب الخاطئ لمحطة عربية غير معروفة)
         return true
     }
 }
