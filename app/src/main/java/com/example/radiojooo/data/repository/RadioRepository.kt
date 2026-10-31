@@ -114,8 +114,8 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
         val allStationsList = stationDao.getStationsListDirect()
         var healedCount = 0
         allStationsList.forEach { station ->
-            // ✅ التعديل هنا: تغيير streamUrl إلى url
-            if (!isUrlReachable(station.url)) {
+            // ✅ التعديل: استخدام primaryUrl
+            if (!isUrlReachable(station.primaryUrl)) {
                 val fallbacks = station.fallbackUrl.split(",").map { it.trim() }.filter { it.isNotBlank() }
                 val workingFallback = fallbacks.firstOrNull { isUrlReachable(wrapProxy(it)) }
                 if (workingFallback != null) {
@@ -161,7 +161,7 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
                     if (rawUrl.isNotBlank() && bitrate <= 128 && StationNormalizer.isArabicStation(name, lang, country)) {
                         val category = StationNormalizer.classify(uuid, name, "")
-                        list.add(StationEntity(uuid, name, wrapProxy(rawUrl), "", "", country, category, bitrate, 1, false, obj.optInt("clickcount", 100)))
+                        list.add(StationEntity(uuid, name, wrapProxy(rawUrl), "", "", country, category, country, bitrate, false, obj.optInt("clickcount", 100)))
                     }
                 }
             }
@@ -187,7 +187,7 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
                     if (rawUrl.isNotBlank() && bitrate <= 128 && StationNormalizer.isArabicStation(name, lang, country)) {
                         val category = StationNormalizer.classify(uuid, name, "")
-                        list.add(StationEntity(uuid, name, wrapProxy(rawUrl), "", "", country, category, bitrate, 1, false, obj.optInt("clickcount", 100)))
+                        list.add(StationEntity(uuid, name, wrapProxy(rawUrl), "", "", country, category, country, bitrate, false, obj.optInt("clickcount", 100)))
                     }
                 }
             }
@@ -212,7 +212,7 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                     val uuid = obj.optString("stationuuid", java.util.UUID.randomUUID().toString())
 
                     if (rawUrl.isNotBlank() && bitrate <= 128 && StationNormalizer.isArabicStation(name, lang, country)) {
-                        list.add(StationEntity(uuid, name, wrapProxy(rawUrl), "", "", country, "NEWS", bitrate, 1, false, obj.optInt("clickcount", 100)))
+                        list.add(StationEntity(uuid, name, wrapProxy(rawUrl), "", "", country, "NEWS", country, bitrate, false, obj.optInt("clickcount", 100)))
                     }
                 }
             }
@@ -245,7 +245,7 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                     val uuid = obj.optString("stationuuid", java.util.UUID.randomUUID().toString())
 
                     if (rawUrl.isNotBlank() && bitrate <= 128 && StationNormalizer.isArabicStation(name, lang, country)) {
-                        list.add(StationEntity(uuid, name, wrapProxy(rawUrl), "", "", country, forcedCategory, bitrate, 1, false, obj.optInt("clickcount", 100)))
+                        list.add(StationEntity(uuid, name, wrapProxy(rawUrl), "", "", country, forcedCategory, country, bitrate, false, obj.optInt("clickcount", 100)))
                     }
                 }
             }
@@ -268,7 +268,7 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                         val isVideo = line.lowercase().contains(".m3u8") || line.lowercase().contains(".mp4") || line.lowercase().contains(".ts")
                         if (!isVideo) {
                             val uuid = "iptv_${currentName.hashCode()}_${line.hashCode()}"
-                            list.add(StationEntity(uuid, currentName, wrapProxy(line), "", "", "AR", StationNormalizer.classify(uuid, currentName, ""), 64, 1, false, 60))
+                            list.add(StationEntity(uuid, currentName, wrapProxy(line), "", "", "AR", StationNormalizer.classify(uuid, currentName, ""), "AR", 64, false, 60))
                         }
                         currentName = ""
                     }
@@ -291,7 +291,7 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                         currentName = line.substringAfterLast(",").trim()
                     } else if (line.startsWith("http") && currentName.isNotEmpty()) {
                         val uuid = "egypt_${currentName.hashCode()}_${line.hashCode()}"
-                        list.add(StationEntity(uuid, currentName, wrapProxy(line), "", "", "EG", StationNormalizer.classify(uuid, currentName, ""), 64, 1, false, 85))
+                        list.add(StationEntity(uuid, currentName, wrapProxy(line), "", "", "EG", StationNormalizer.classify(uuid, currentName, ""), "EG", 64, false, 85))
                         currentName = ""
                     }
                 }
@@ -350,7 +350,7 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                 val category = if (name.contains("قرآن", true) ||
                     name.contains("quran", true) ||
                     name.contains("القرآن", true)) "QURAN" else "QURAN"
-                list.add(StationEntity(uuid, name, wrapProxy(rawUrl), "", "", "EG", category, 48, 1, false, 95))
+                list.add(StationEntity(uuid, name, wrapProxy(rawUrl), "", "", "EG", category, "EG", 48, false, 95))
             }
         } catch (e: Exception) { e.printStackTrace() }
         return list
@@ -398,7 +398,7 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                                 StationEntity(
                                     uuid, text, wrapProxy(streamUrl), "", "", "AR",
                                     StationNormalizer.classify(uuid, text, ""),
-                                    bitrate, 1, false, 70
+                                    "AR", bitrate, false, 70
                                 )
                             )
                         }
@@ -412,17 +412,17 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
     private fun getSeedStations(): List<StationEntity> {
         return listOf(
-            StationEntity("eg_quran_cairo", "إذاعة القرآن الكريم - القاهرة", wrapProxy("https://stream.zeno.fm/f3wvbb1ch3quv"), "", "", "EG", "QURAN", "EG", 32, 1, true, 10000),
-            StationEntity("eg_radio_masr", "راديو مصر 88.7", wrapProxy("https://audio.nrpstream.com/listen/radio_masr/radio.mp3"), "", "", "EG", "NEWS", "EG", 64, 1, true, 9900),
-            StationEntity("eg_nogoum_fm", "نجوم إف إم 100.6", wrapProxy("https://audio.nrpstream.com/listen/nogoumfm/radio.mp3"), "", "", "EG", "MUSIC", "EG", 128, 1, true, 9950),
-            StationEntity("eg_nile_fm", "نايل إف إم 104.2", wrapProxy("https://audio.nrpstream.com/listen/nile_fm/radio.mp3"), "", "", "EG", "MUSIC", "EG", 128, 1, true, 9940),
-            StationEntity("eg_9090_fm", "راديو 9090", wrapProxy("https://9090streaming.mobtada.com/9090FMEGYPT"), "", "", "EG", "NEWS", "EG", 64, 1, true, 9850),
-            StationEntity("eg_mega_fm", "ميجا إف إم 92.7", wrapProxy("http://nebula.shoutca.st:8211/mp3"), "", "", "EG", "MUSIC", "EG", 128, 1, true, 9850),
-            StationEntity("eg_sha3by_fm", "شعبي إف إم 95.0", wrapProxy("https://radio95.radioca.st/"), "", "", "EG", "MUSIC", "EG", 128, 1, true, 9750),
-            StationEntity("eg_nagham_fm", "نغم إف إم 105.3", wrapProxy("https://ahmsamir.radioca.st/stream"), "", "", "EG", "MUSIC", "EG", 128, 1, true, 9800),
-            StationEntity("ar_jazeera_voice", "الجزيرة - صوت", wrapProxy("https://live-hls-audio-web-aja.getaj.net/VOICE-AJA/01.m3u8"), "", "", "QA", "NEWS", "QA", 64, 1, true, 9900),
-            StationEntity("ar_alarabiya", "العربية - صوت", wrapProxy("https://live.alarabiya.net/alarabiya/live.m3u8"), "", "", "SA", "NEWS", "SA", 64, 1, true, 9850),
-            StationEntity("ar_bbc_arabic", "بي بي سي عربي", wrapProxy("https://stream.live.vc.bbcmedia.co.uk/bbc_arabic_radio"), "", "", "GB", "NEWS", "GB", 64, 1, true, 9700)
+            StationEntity("eg_quran_cairo", "إذاعة القرآن الكريم - القاهرة", wrapProxy("https://stream.zeno.fm/f3wvbb1ch3quv"), "", "", "EG", "QURAN", "EG", 32, true, 10000),
+            StationEntity("eg_radio_masr", "راديو مصر 88.7", wrapProxy("https://audio.nrpstream.com/listen/radio_masr/radio.mp3"), "", "", "EG", "NEWS", "EG", 64, true, 9900),
+            StationEntity("eg_nogoum_fm", "نجوم إف إم 100.6", wrapProxy("https://audio.nrpstream.com/listen/nogoumfm/radio.mp3"), "", "", "EG", "MUSIC", "EG", 128, true, 9950),
+            StationEntity("eg_nile_fm", "نايل إف إم 104.2", wrapProxy("https://audio.nrpstream.com/listen/nile_fm/radio.mp3"), "", "", "EG", "MUSIC", "EG", 128, true, 9940),
+            StationEntity("eg_9090_fm", "راديو 9090", wrapProxy("https://9090streaming.mobtada.com/9090FMEGYPT"), "", "", "EG", "NEWS", "EG", 64, true, 9850),
+            StationEntity("eg_mega_fm", "ميجا إف إم 92.7", wrapProxy("http://nebula.shoutca.st:8211/mp3"), "", "", "EG", "MUSIC", "EG", 128, true, 9850),
+            StationEntity("eg_sha3by_fm", "شعبي إف إم 95.0", wrapProxy("https://radio95.radioca.st/"), "", "", "EG", "MUSIC", "EG", 128, true, 9750),
+            StationEntity("eg_nagham_fm", "نغم إف إم 105.3", wrapProxy("https://ahmsamir.radioca.st/stream"), "", "", "EG", "MUSIC", "EG", 128, true, 9800),
+            StationEntity("ar_jazeera_voice", "الجزيرة - صوت", wrapProxy("https://live-hls-audio-web-aja.getaj.net/VOICE-AJA/01.m3u8"), "", "", "QA", "NEWS", "QA", 64, true, 9900),
+            StationEntity("ar_alarabiya", "العربية - صوت", wrapProxy("https://live.alarabiya.net/alarabiya/live.m3u8"), "", "", "SA", "NEWS", "SA", 64, true, 9850),
+            StationEntity("ar_bbc_arabic", "بي بي سي عربي", wrapProxy("https://stream.live.vc.bbcmedia.co.uk/bbc_arabic_radio"), "", "", "GB", "NEWS", "GB", 64, true, 9700)
         )
     }
 
