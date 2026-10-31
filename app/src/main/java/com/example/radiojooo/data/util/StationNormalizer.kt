@@ -1,40 +1,53 @@
 package com.example.radiojooo.data.util
 
+import com.example.radiojooo.data.model.Station
 import com.example.radiojooo.data.model.StationEntity
+import java.util.Locale
 
 object StationNormalizer {
 
-    private val FAMOUS_STATION_CATEGORIES = mapOf(
-        "eg_nogoum_fm" to "MUSIC",
-        "eg_quran_cairo" to "QURAN",
-        "eg_radio_masr" to "NEWS",
-        "eg_mega_fm" to "MUSIC",
-        "eg_nagham_fm" to "MUSIC",
-        "eg_mix_fm" to "MUSIC",
-        "eg_aljazeera" to "NEWS"
-    )
+    private val quranKeywords = listOf("quran", "koran", "islamic", "قرآن", "قرأن", "تلاوة", "إسلامي")
+    private val newsKeywords = listOf("news", "talk", "أخبار", "اخبار", "حوار", "الجزيرة", "العربية", "bbc", "sky news", "sputnik", "الحدث", "روسيا اليوم")
+    private val sportsKeywords = listOf("sport", "sports", "رياضة", "سبورت", "أهلي", "زمالك")
+    private val musicKeywords = listOf("music", "hits", "pop", "موسيقى", "أغاني", "طرب", "نجوم", "شعبي", "نغم")
 
-    fun classify(station: StationEntity): String {
-        return classify(uuid = station.uuid, name = station.name, tags = station.tags)
+    fun classify(uuid: String, name: String, tags: String): String {
+        val n = name.lowercase(Locale.ROOT)
+        val t = tags.lowercase(Locale.ROOT)
+
+        val isQuran = quranKeywords.any { n.contains(it) || t.contains(it) }
+        val isNews = newsKeywords.any { n.contains(it) || t.contains(it) }
+        val isSports = sportsKeywords.any { n.contains(it) || t.contains(it) }
+        val isMusic = musicKeywords.any { n.contains(it) || t.contains(it) }
+
+        // الأولوية الصارمة: القرآن أولاً، ثم الأخبار، ثم الرياضة، ثم الموسيقى
+        return when {
+            isQuran -> "QURAN"
+            isNews -> "NEWS"
+            isSports -> "SPORTS"
+            isMusic -> "MUSIC"
+            uuid.startsWith("eg_") -> "EGYPT"
+            else -> "GENERAL"
+        }
     }
 
-    fun classify(uuid: String, name: String, tags: String = ""): String {
-        val cleanUuid = uuid.lowercase().trim()
-        val cleanTags = tags.lowercase().trim()
-        val cleanName = name.lowercase().trim()
+    // دالة الفلترة اللغوية: نستبعد المحطات الأجنبية ونبقي المحطات العربية
+    fun isArabicStation(name: String, language: String): Boolean {
+        val n = name.lowercase(Locale.ROOT)
+        val l = language.lowercase(Locale.ROOT)
 
-        FAMOUS_STATION_CATEGORIES[cleanUuid]?.let { return it }
+        // إذا كانت اللغة عربية، اقبلها فوراً
+        if (l.contains("arabic") || l.contains("ar")) return true
 
-        if (cleanTags.contains("quran") || cleanTags.contains("islamic") || cleanTags.contains("quranic")) return "QURAN"
-        if (cleanTags.contains("news") || cleanTags.contains("talk") || cleanTags.contains("information")) return "NEWS"
-        if (cleanTags.contains("sport") || cleanTags.contains("sports")) return "SPORTS"
-        if (cleanTags.contains("music") || cleanTags.contains("pop") || cleanTags.contains("rock") || cleanTags.contains("hits")) return "MUSIC"
+        // إذا كان الاسم يحتوي على كلمات عربية أو محطات إخبارية معروفة بالعربية، اقبلها
+        val arabicKeywords = listOf("عربي", "عربية", "arab", "arabic", "الجزيرة", "العربية", "الحدث", "سبوتنيك", "bbc", "sky")
+        if (arabicKeywords.any { n.contains(it) }) return true
 
-        if (cleanName.contains("القرآن") || cleanName.contains("قرآن") || cleanName.contains("quran")) return "QURAN"
-        if (cleanName.contains("أخبار") || cleanName.contains("اخبار") || cleanName.contains("news") || cleanName.contains("جزيرة") || cleanName.contains("حدث")) return "NEWS"
-        if (cleanName.contains("رياضة") || cleanName.contains("sport")) return "SPORTS"
-        if (cleanName.contains("نجوم") || cleanName.contains("موسيقى") || cleanName.contains("نغم") || cleanName.contains("ميجا") || cleanName.contains("fm") || cleanName.contains("music")) return "MUSIC"
+        // استبعاد المحطات الأجنبية الصريحة
+        val foreignKeywords = listOf("french", "german", "italian", "spanish", "english", "deutsch", "français", "italiano", "español")
+        if (foreignKeywords.any { n.contains(it) || l.contains(it) }) return false
 
-        return "GENERAL"
+        // القبول كخيار أخير إذا كان المصدر عربي (مثل EG)
+        return true 
     }
 }
