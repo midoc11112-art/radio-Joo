@@ -101,7 +101,6 @@ class RadioService : MediaSessionService() {
         }
     }
 
-    // ✅ LocalBinder للربط المباشر مع الواجهة
     inner class LocalBinder : Binder() {
         fun getService(): RadioService = this@RadioService
     }
@@ -212,7 +211,7 @@ class RadioService : MediaSessionService() {
 
         player.setWakeMode(C.WAKE_MODE_NETWORK)
 
-        // ✅ تخصيص شكل الإشعار ليكون مميزاً (يمكنك تغيير الأيقونة الصغيرة إذا أردت)
+        // ✅ تخصيص شكل الإشعار
         val notificationProvider = DefaultMediaNotificationProvider.Builder(this)
             .setSmallIcon(R.mipmap.ic_launcher)
             .build()
@@ -227,7 +226,7 @@ class RadioService : MediaSessionService() {
 
         mediaSession = MediaSession.Builder(this, player)
             .setSessionActivity(sessionActivity)
-            .setCallback(mediaSessionCallback) // ربط التخصيص بالأزرار
+            .setCallback(mediaSessionCallback)
             .build()
 
         player.addListener(object : Player.Listener {
@@ -376,7 +375,6 @@ class RadioService : MediaSessionService() {
         }.start()
     }
 
-    // ✅ دالة الخروج (تستدعى من زر X في شاشة القفل أو من داخل التطبيق)
     private fun stopAndExitApp() {
         sleepTimer?.cancel()
         stopRecording()
