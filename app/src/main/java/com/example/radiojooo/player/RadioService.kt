@@ -29,7 +29,6 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.FilteringMediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
-import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.example.radiojooo.ui.MainActivity
@@ -122,7 +121,6 @@ class RadioService : MediaSessionService() {
         }
     }
 
-    // ✅ دالة إضافية للتحكم من الواجهة الرئيسية
     fun pausePlayback() {
         if (::player.isInitialized) player.pause()
     }
@@ -177,18 +175,13 @@ class RadioService : MediaSessionService() {
 
         player.setWakeMode(C.WAKE_MODE_NETWORK)
 
-        val notificationProvider = DefaultMediaNotificationProvider.Builder(this)
-            .setSmallIcon(android.R.drawable.ic_media_play)
-            .build()
-        setMediaNotificationProvider(notificationProvider)
-
         val sessionActivity = PendingIntent.getActivity(
             this, 0,
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        // ✅ استخدام ForwardingPlayer لاعتراض زر الإغلاق (Stop) من شاشة القفل
+        // ✅ استخدام ForwardingPlayer لاعتراض زر الإغلاق (Stop)
         val forwardingPlayer = object : ForwardingPlayer(player) {
             override fun stop() {
                 stopAndExitApp()
@@ -227,7 +220,7 @@ class RadioService : MediaSessionService() {
                 .remove(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
                 .remove(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
                 .remove(Player.COMMAND_SEEK_TO_DEFAULT_POSITION)
-                .add(Player.COMMAND_STOP) // إضافة زر الخروج (X)
+                .add(Player.COMMAND_STOP)
                 .build()
 
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
