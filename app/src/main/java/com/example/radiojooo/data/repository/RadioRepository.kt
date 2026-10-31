@@ -13,7 +13,6 @@ import okhttp3.Cache
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
 import org.xmlpull.v1.XmlPullParser
@@ -27,7 +26,6 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
     private val PROXY_BASE_URL = "https://radio-joo-proxy.midoc11112.workers.dev/?stream_url="
 
-    // ✅ جديد: اعتراض تلقائي يعيد المحاولة على مسار بديل عند فشل الشبكة أو خطأ الخادم
     private val failoverInterceptor = Interceptor { chain ->
         val originalRequest = chain.request()
         try {
@@ -36,7 +34,6 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                 response
             } else if (response.code in listOf(502, 503, 504)) {
                 response.close()
-                // إعادة المحاولة مرة واحدة مع إضافة هيدر يمنع التكرار اللانهائي
                 val retryRequest = originalRequest.newBuilder()
                     .header("X-Retry-Attempt", "1")
                     .build()
@@ -45,7 +42,6 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                 response
             }
         } catch (e: IOException) {
-            // فشل اتصال: إعادة محاولة واحدة فقط
             if (originalRequest.header("X-Retry-Attempt") == null) {
                 val retryRequest = originalRequest.newBuilder()
                     .header("X-Retry-Attempt", "1")
@@ -62,7 +58,7 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
             .cache(Cache(File(cacheDir, "radio_http_cache"), 10L * 1024 * 1024))
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
-            .addInterceptor(failoverInterceptor) // ✅ تفعيل الاعتراض التلقائي
+            .addInterceptor(failoverInterceptor)
             .build()
     }
 
@@ -114,22 +110,16 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
         stationDao.getStationsCount()
     }
 
-    // ✅ جديد: فحص صحة كل المحطات وتحديث الروابط الميتة تلقائيًا
     suspend fun validateAndHealStations(): Int = withContext(Dispatchers.IO) {
         val allStationsList = stationDao.getStationsListDirect()
         var healedCount = 0
         allStationsList.forEach { station ->
             if (!isUrlReachable(station.streamUrl)) {
-                // الرابط الأساسي ميت: جرّب الروابط البديلة إن وجدت
                 val fallbacks = station.fallbackUrl.split(",").map { it.trim() }.filter { it.isNotBlank() }
                 val workingFallback = fallbacks.firstOrNull { isUrlReachable(wrapProxy(it)) }
                 if (workingFallback != null) {
-                    // تحديث الرابط الأساسي إلى البديل العامل
                     stationDao.updateStreamUrl(station.uuid, wrapProxy(workingFallback))
                     healedCount++
-                } else {
-                    // لا يوجد بديل عامل: علم المحطة كغير نشطة (اختياري)
-                    // stationDao.updateActiveStatus(station.uuid, false)
                 }
             }
         }
@@ -139,10 +129,7 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
     private fun isUrlReachable(url: String, timeoutMs: Long = 8000L): Boolean {
         if (url.isBlank()) return false
         return try {
-            val request = Request.Builder()
-                .url(url)
-                .head() // HEAD أخف من GET
-                .build()
+            val request = Request.Builder().url(url).head().build()
             val client = okHttpClient.newBuilder()
                 .connectTimeout(timeoutMs, TimeUnit.MILLISECONDS)
                 .readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
