@@ -16,7 +16,7 @@ class RadioHealthWorker(
             val dao = AppDatabase.getDatabase(applicationContext).stationDao()
             val repo = RadioRepository(dao, applicationContext.cacheDir)
             val healed = repo.validateAndHealStations()
-            android.util.Log.d("RadioHealthWorker", "تم فحص المحطات وإصلاح $healed رابط.")
+            android.util.Log.d("RadioHealthWorker", "تم إصلاح $healed رابط.")
             Result.success()
         } catch (e: Exception) {
             android.util.Log.e("RadioHealthWorker", "فشل فحص الصحة", e)
