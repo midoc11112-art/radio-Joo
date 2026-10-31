@@ -32,7 +32,6 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import androidx.media3.exoplayer.source.FilteringMediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import com.example.radiojooo.R
 import com.example.radiojooo.ui.MainActivity
@@ -125,10 +124,11 @@ class RadioService : Service() {
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
         }
 
+        // 1. منع الفيديو + سقف 128 كيلوبت (طبقة دفاع أولى)
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters()
                 .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
-                .setMaxAudioBitrate(64000)
+                .setMaxAudioBitrate(128000)
                 .build()
         }
 
@@ -138,15 +138,22 @@ class RadioService : Service() {
             .setBackBuffer(0, false)
             .build()
 
-        val dataSourceFactory = DefaultHttpDataSource.Factory()
+        // 2. إنشاء DataSource الأساسي (DefaultHttpDataSource)
+        val baseDataSourceFactory = DefaultHttpDataSource.Factory()
             .setConnectTimeoutMs(15000)
             .setReadTimeoutMs(15000)
             .setAllowCrossProtocolRedirects(true)
-            .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+            .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 
+        // 3. ✅ تغليف DataSource الأساسي بصمام الأمان (ThrottledDataSourceFactory)
+        val throttledDataSourceFactory = ThrottledDataSourceFactory(
+            upstreamFactory = baseDataSourceFactory,
+            maxBytesPerSecond = 16 * 1024L // 16 KB/s = 128 kbps
+        )
+
+        // 4. استخدام الصمام في مصنع المصادر
         mediaSourceFactory = DefaultMediaSourceFactory(this)
-            .setDataSourceFactory(dataSourceFactory)
-            .setLoadErrorHandlingPolicy(LiveStreamLoadErrorHandlingPolicy())
+            .setDataSourceFactory(throttledDataSourceFactory)
 
         player = ExoPlayer.Builder(this, renderersFactory)
             .setTrackSelector(trackSelector)
@@ -173,7 +180,6 @@ class RadioService : Service() {
                     tryNextMirrorServer()
                 }
             }
-
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 updateNotification()
             }
@@ -189,7 +195,6 @@ class RadioService : Service() {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
             wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "RadioJoo::ServiceWakeLock")
             wakeLock?.acquire(10 * 60 * 60 * 1000L)
-
             val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
             wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "RadioJoo::ServiceWifiLock")
             wifiLock?.acquire()
@@ -224,7 +229,6 @@ class RadioService : Service() {
             this, 0, intent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-
         val playPauseIntent = Intent(this, RadioService::class.java).apply {
             action = if (isPlaying()) "ACTION_PAUSE" else "ACTION_PLAY"
         }
@@ -233,15 +237,13 @@ class RadioService : Service() {
         )
         val playPauseIcon = if (isPlaying()) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
         val playPauseTitle = if (isPlaying()) "إيقاف مؤقت" else "تشغيل"
-
         val closeIntent = Intent(this, RadioService::class.java).apply { action = "ACTION_CLOSE" }
         val closePending = PendingIntent.getService(
             this, 2, closeIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-
         val iconResId = R.mipmap.ic_launcher
 
-        val builder = NotificationCompat.Builder(this, "radio_joo_service_channel")
+        return NotificationCompat.Builder(this, "radio_joo_service_channel")
             .setContentTitle(currentTitle)
             .setContentText(currentLiveProgram)
             .setSmallIcon(iconResId)
@@ -251,8 +253,7 @@ class RadioService : Service() {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .addAction(playPauseIcon, playPauseTitle, playPausePending)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "خروج X", closePending)
-
-        return builder.build()
+            .build()
     }
 
     private fun updateNotification() {
@@ -321,15 +322,10 @@ class RadioService : Service() {
                 .setMediaMetadata(metadata)
                 .build()
 
-            val mediaSource = mediaSourceFactory.createMediaSource(mediaItem)
-            val filteredSource = FilteringMediaSource(mediaSource, C.TRACK_TYPE_AUDIO)
-
-            player.setMediaSource(filteredSource)
+            player.setMediaItem(mediaItem)
             player.prepare()
             player.playWhenReady = true
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        } catch (e: Exception) { e.printStackTrace() }
     }
 
     fun isPlaying(): Boolean = ::player.isInitialized && player.isPlaying
@@ -357,7 +353,7 @@ class RadioService : Service() {
                 val file = File(dir, "Rec_${safeTitle}_${System.currentTimeMillis()}.mp3")
                 val connection = URL(finalUrl).openConnection().apply {
                     connectTimeout = 10000; readTimeout = 10000
-                    setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                    setRequestProperty("User-Agent", "Mozilla/5.0")
                 }
                 connection.getInputStream().use { input ->
                     FileOutputStream(file).use { output ->
@@ -393,8 +389,6 @@ class RadioService : Service() {
         else { @Suppress("DEPRECATION") stopForeground(true) }
         releaseLocks()
         stopSelf()
-        // ✅ ضمان إغلاق التطبيق بالكامل عند انتهاء المؤقت
-        android.os.Process.killProcess(android.os.Process.myPid())
     }
 
     fun getListeningDurationFormatted(): String {
