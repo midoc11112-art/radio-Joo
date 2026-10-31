@@ -24,8 +24,8 @@ import java.util.concurrent.TimeUnit
 
 class RadioRepository(private val stationDao: StationDao, private val cacheDir: File) {
 
-    // ⚠️ استبدل هذا برابط الـ Worker الذي حصلت عليه
-    private val PROXY_BASE_URL = "https://radio-proxy.YOUR_SUBDOMAIN.workers.dev/?url="
+    // ✅ تم إرجاع رابط البروكسي الأصلي الخاص بك الذي يعمل
+    private val PROXY_BASE_URL = "https://radio-joo-proxy.midoc11112.workers.dev/?stream_url="
 
     private val failoverInterceptor = Interceptor { chain ->
         val originalRequest = chain.request()
@@ -63,7 +63,7 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
     private fun wrapProxy(rawUrl: String): String {
         if (rawUrl.isBlank()) return ""
-        if (rawUrl.contains("workers.dev")) return rawUrl
+        if (rawUrl.contains("radio-joo-proxy")) return rawUrl
         return try {
             "$PROXY_BASE_URL${URLEncoder.encode(rawUrl, "UTF-8")}"
         } catch (e: Exception) {
@@ -82,21 +82,15 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
     suspend fun refreshStations(): Int = withContext(Dispatchers.IO) {
         try {
             supervisorScope {
-                // ✅ مصادر متعددة، بدون فلترة بتريت
                 val jobs = listOf(
-                    // Radio Browser: مصر، عربي، أخبار، توك شو، قرآن
                     async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowser("bycountrycodeexact/EG", "EG", null) } },
                     async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowser("bylanguage/arabic", null, null) } },
                     async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowser("bytag/news", null, "NEWS") } },
                     async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowser("bytag/talkshow", null, "NEWS") } },
                     async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowser("bytag/quran", null, "QURAN") } },
-                    // IPTV-org (روابط m3u8 قد تحتوي على صوت فقط)
                     async { withTimeoutOrNull(15_000L) { fetchFromIptvOrgArabic() } },
-                    // binarymagic (قوائم M3U عربية محدثة)
                     async { withTimeoutOrNull(15_000L) { fetchFromBinaryMagic() } },
-                    // Islamic Radio API (محطات قرآنية)
                     async { withTimeoutOrNull(15_000L) { fetchFromIslamicRadioApi() } },
-                    // TuneIn OPML (محطات مشهورة)
                     async { withTimeoutOrNull(15_000L) { fetchFromTuneInOpml() } }
                 )
 
@@ -118,7 +112,6 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
     suspend fun validateAndHealStations(): Int = 0
 
-    // ✅ Radio Browser: جلب بدون فلترة بتريت
     private fun fetchFromRadioBrowser(
         endpoint: String,
         countryCode: String? = null,
@@ -149,7 +142,6 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
         return list
     }
 
-    // ✅ IPTV-org
     private fun fetchFromIptvOrgArabic(): List<StationEntity> {
         val list = mutableListOf<StationEntity>()
         val url = "https://iptv-org.github.io/iptv/languages/ara.m3u"
@@ -172,7 +164,6 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
         return list
     }
 
-    // ✅ binarymagic (قوائم عربية محدثة)
     private fun fetchFromBinaryMagic(): List<StationEntity> {
         val list = mutableListOf<StationEntity>()
         val urls = listOf(
@@ -200,7 +191,6 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
         return list
     }
 
-    // ✅ Islamic Radio API
     private fun fetchFromIslamicRadioApi(): List<StationEntity> {
         val candidateUrls = listOf(
             "https://uthumany.github.io/islamic-radio-api/radios.json",
@@ -245,7 +235,6 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
         return list
     }
 
-    // ✅ TuneIn OPML
     private fun fetchFromTuneInOpml(): List<StationEntity> {
         val candidateUrls = listOf(
             "https://opml.radiotime.com/Search.ashx?query=arabic&render=opml",
