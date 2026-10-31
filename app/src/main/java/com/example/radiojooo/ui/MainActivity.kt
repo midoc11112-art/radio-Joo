@@ -65,13 +65,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private val hideSuccessRunnable = Runnable {
-        binding.tvUpdateSuccess.animate()
-            .alpha(0f)
-            .setDuration(300)
-            .withEndAction {
-                binding.tvUpdateSuccess.visibility = View.GONE
-            }
-            .start()
+        binding.tvUpdateSuccess.animate().alpha(0f).setDuration(300).withEndAction {
+            binding.tvUpdateSuccess.visibility = View.GONE
+        }.start()
     }
 
     private val serviceConnection = object : ServiceConnection {
@@ -83,7 +79,6 @@ class MainActivity : AppCompatActivity() {
             updateMiniPlayer()
             updateSleepTimerButton()
         }
-
         override fun onServiceDisconnected(name: ComponentName?) {
             radioService = null
             isBound = false
@@ -98,6 +93,9 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // ✅ إخفاء الـ Spinner فوراً عند فتح التطبيق
+        binding.swipeRefreshLayout.isRefreshing = false
+
         setupRecyclerView()
         setupSearch()
         setupChipGroup()
@@ -108,54 +106,27 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun scheduleStationSync() {
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
-
-        val syncRequest = PeriodicWorkRequestBuilder<StationSyncWorker>(6, TimeUnit.HOURS)
-            .setConstraints(constraints)
-            .build()
-
-        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-            "station_sync_work",
-            ExistingPeriodicWorkPolicy.KEEP,
-            syncRequest
-        )
+        val constraints = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
+        val syncRequest = PeriodicWorkRequestBuilder<StationSyncWorker>(6, TimeUnit.HOURS).setConstraints(constraints).build()
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork("station_sync_work", ExistingPeriodicWorkPolicy.KEEP, syncRequest)
     }
 
     private fun requestAllPermissions() {
         val permissionsToRequest = mutableListOf<String>()
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
-            }
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(Manifest.permission.READ_MEDIA_AUDIO)
-            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_AUDIO) != PackageManager.PERMISSION_GRANTED) permissionsToRequest.add(Manifest.permission.READ_MEDIA_AUDIO)
         } else {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(Manifest.permission.READ_EXTERNAL_STORAGE)
-            }
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) permissionsToRequest.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) permissionsToRequest.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }
-
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            permissionsToRequest.add(Manifest.permission.RECORD_AUDIO)
-        }
-
-        if (permissionsToRequest.isNotEmpty()) {
-            requestPermissionLauncher.launch(permissionsToRequest.toTypedArray())
-        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) permissionsToRequest.add(Manifest.permission.RECORD_AUDIO)
+        if (permissionsToRequest.isNotEmpty()) requestPermissionLauncher.launch(permissionsToRequest.toTypedArray())
     }
 
     override fun onStart() {
         super.onStart()
-        val intent = Intent(this, RadioService::class.java).apply {
-            action = "ACTION_LOCAL_BIND"
-        }
+        val intent = Intent(this, RadioService::class.java).apply { action = "ACTION_LOCAL_BIND" }
         bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
         radioService?.setAppForegroundState(true)
         updateHandler.post(updateRunnable)
@@ -165,21 +136,11 @@ class MainActivity : AppCompatActivity() {
         super.onStop()
         radioService?.setAppForegroundState(false)
         updateHandler.removeCallbacks(updateRunnable)
-        if (isBound) {
-            unbindService(serviceConnection)
-            isBound = false
-        }
+        if (isBound) { unbindService(serviceConnection); isBound = false }
     }
 
     private fun setupRecyclerView() {
-        stationAdapter = StationAdapter(
-            onItemClick = { station ->
-                playStation(station)
-            },
-            onFavoriteClick = { station ->
-                viewModel.toggleFavorite(station)
-            }
-        )
+        stationAdapter = StationAdapter(onItemClick = { playStation(it) }, onFavoriteClick = { viewModel.toggleFavorite(it) })
         binding.rvStations.apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
             adapter = stationAdapter
@@ -213,6 +174,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupSwipeRefresh() {
         binding.swipeRefreshLayout.setOnRefreshListener {
+            // ✅ إظهار الـ Spinner فقط عند السحب اليدوي
             viewModel.refreshData()
         }
     }
@@ -221,7 +183,6 @@ class MainActivity : AppCompatActivity() {
         binding.btnRefreshHeader.setOnClickListener {
             viewModel.refreshData()
         }
-
         binding.btnSleepTimerHeader.setOnClickListener {
             showSleepTimerDialog()
         }
@@ -229,10 +190,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupMiniPlayer() {
         binding.miniPlayerHeader.setOnClickListener {
-            val intent = Intent(this, PlayerActivity::class.java)
-            startActivity(intent)
+            startActivity(Intent(this, PlayerActivity::class.java))
         }
-
         binding.btnMiniPlayPause.setOnClickListener {
             radioService?.let { service ->
                 val intent = Intent(this, RadioService::class.java).apply {
@@ -245,17 +204,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun playStation(station: StationEntity) {
         viewModel.setCurrentStation(station)
-
         val serviceIntent = Intent(this, RadioService::class.java)
         ContextCompat.startForegroundService(this, serviceIntent)
-
-        radioService?.playStation(
-            title = station.name,
-            uuid = station.uuid,
-            pUrl = station.primaryUrl,
-            fUrl = station.fallbackUrl
-        )
-
+        radioService?.playStation(station.name, station.uuid, station.primaryUrl, station.fallbackUrl)
         updateMiniPlayer()
     }
 
@@ -276,23 +227,15 @@ class MainActivity : AppCompatActivity() {
     private fun updateMiniPlayer() {
         val currentStation = viewModel.currentPlayingStation.value
         val service = radioService
-
         if (currentStation != null || (service != null && service.currentTitle != "راديو جو PRO")) {
             binding.miniPlayerContainer.visibility = View.VISIBLE
             binding.tvMiniStationName.text = currentStation?.name ?: service?.currentTitle
-
             if (currentStation != null) {
                 binding.tvMiniCategoryBadge.text = getCategoryArabicTitle(currentStation.category)
                 binding.tvMiniBitrateBadge.text = if (currentStation.bitrate > 0) "${currentStation.bitrate} Kbps" else "32 Kbps"
                 binding.tvMiniCountryBadge.text = currentStation.countryCode
                 binding.tvMiniServersBadge.text = "1 خادم"
-            } else {
-                binding.tvMiniCategoryBadge.text = "عام"
-                binding.tvMiniBitrateBadge.text = "32 Kbps"
-                binding.tvMiniCountryBadge.text = "EG"
-                binding.tvMiniServersBadge.text = "1 خادم"
             }
-
             if (service != null) {
                 binding.btnMiniPlayPause.text = if (service.isPlaying()) "إيقاف" else "تشغيل"
                 binding.tvMiniDataMb.text = String.format(Locale.US, "%.2f MB", service.totalDataMb)
@@ -320,7 +263,6 @@ class MainActivity : AppCompatActivity() {
                 binding.tvEmptyState.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
             }
         }
-
         lifecycleScope.launch {
             viewModel.categoryCounts.collectLatest { counts ->
                 binding.chipAll.text = "🔥 الكل (${counts.allCount})"
@@ -332,77 +274,41 @@ class MainActivity : AppCompatActivity() {
                 binding.chipSports.text = "⚽ الرياضة (${counts.sportsCount})"
             }
         }
-
         lifecycleScope.launch {
             viewModel.isLoading.collectLatest { isLoading ->
+                // ✅ التحكم في Spinner
                 binding.swipeRefreshLayout.isRefreshing = isLoading
             }
         }
-
         lifecycleScope.launch {
             viewModel.refreshResult.collectLatest { count ->
                 showSuccessMessage("✅ تم تحديث $count محطة بنجاح")
             }
         }
-
         lifecycleScope.launch {
-            viewModel.currentPlayingStation.collectLatest {
-                updateMiniPlayer()
-            }
+            viewModel.currentPlayingStation.collectLatest { updateMiniPlayer() }
         }
     }
 
     private fun showSuccessMessage(message: String) {
         binding.tvUpdateSuccess.text = message
         binding.tvUpdateSuccess.visibility = View.VISIBLE
-        
-        binding.tvUpdateSuccess.animate()
-            .alpha(1f)
-            .setDuration(300)
-            .start()
-
+        binding.tvUpdateSuccess.animate().alpha(1f).setDuration(300).start()
         updateHandler.removeCallbacks(hideSuccessRunnable)
         updateHandler.postDelayed(hideSuccessRunnable, 2000)
     }
 
     private fun showSleepTimerDialog() {
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(60, 40, 60, 20)
-        }
-
+        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(60, 40, 60, 20) }
         val etHours = EditText(this).apply {
-            hint = "عدد الساعات (مثال: 1)"
-            inputType = InputType.TYPE_CLASS_NUMBER
-            setTextColor(0xFFFFFFFF.toInt())
-            setHintTextColor(0xFF94A3B8.toInt())
-            textSize = 16f
-            setPadding(30, 30, 30, 30)
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(0xFF1E293B.toInt())
-                cornerRadius = 20f
-                setStroke(2, 0xFF8B5CF6.toInt())
-            }
+            hint = "عدد الساعات (مثال: 1)"; inputType = InputType.TYPE_CLASS_NUMBER; setTextColor(0xFFFFFFFF.toInt()); setHintTextColor(0xFF94A3B8.toInt()); textSize = 16f; setPadding(30, 30, 30, 30)
+            background = android.graphics.drawable.GradientDrawable().apply { setColor(0xFF1E293B.toInt()); cornerRadius = 20f; setStroke(2, 0xFF8B5CF6.toInt()) }
         }
-
         val etMinutes = EditText(this).apply {
-            hint = "عدد الدقائق (مثال: 30)"
-            inputType = InputType.TYPE_CLASS_NUMBER
-            setTextColor(0xFFFFFFFF.toInt())
-            setHintTextColor(0xFF94A3B8.toInt())
-            textSize = 16f
-            setPadding(30, 30, 30, 30)
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(0xFF1E293B.toInt())
-                cornerRadius = 20f
-                setStroke(2, 0xFF8B5CF6.toInt())
-            }
+            hint = "عدد الدقائق (مثال: 30)"; inputType = InputType.TYPE_CLASS_NUMBER; setTextColor(0xFFFFFFFF.toInt()); setHintTextColor(0xFF94A3B8.toInt()); textSize = 16f; setPadding(30, 30, 30, 30)
+            background = android.graphics.drawable.GradientDrawable().apply { setColor(0xFF1E293B.toInt()); cornerRadius = 20f; setStroke(2, 0xFF8B5CF6.toInt()) }
         }
-
-        val spacer = android.widget.Space(this).apply {
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 30)
-        }
-
+        val spacer = android.widget.Space(this).apply { layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 30) }
         layout.addView(etHours, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         layout.addView(spacer)
         layout.addView(etMinutes, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
@@ -410,19 +316,15 @@ class MainActivity : AppCompatActivity() {
         radioService?.let { service ->
             if (service.sleepTimeRemainingMs > 0) {
                 val totalMins = (service.sleepTimeRemainingMs / 1000 / 60).toInt()
-                etHours.setText((totalMins / 60).toString())
-                etMinutes.setText((totalMins % 60).toString())
+                etHours.setText((totalMins / 60).toString()); etMinutes.setText((totalMins % 60).toString())
             }
         }
 
-        AlertDialog.Builder(this)
-            .setTitle("⏱️ ضبط مؤقت النوم (يدوي)")
-            .setView(layout)
+        AlertDialog.Builder(this).setTitle("⏱️ ضبط مؤقت النوم").setView(layout)
             .setPositiveButton("تشغيل") { _, _ ->
                 val h = etHours.text.toString().toIntOrNull() ?: 0
                 val m = etMinutes.text.toString().toIntOrNull() ?: 0
                 val totalMinutes = (h * 60) + m
-
                 if (totalMinutes > 0) {
                     radioService?.startSleepTimer(totalMinutes)
                     Toast.makeText(this, "تم ضبط المؤقت: $h ساعة و $m دقيقة", Toast.LENGTH_SHORT).show()
@@ -435,7 +337,6 @@ class MainActivity : AppCompatActivity() {
                 updateSleepTimerButton()
                 Toast.makeText(this, "تم إلغاء مؤقت النوم", Toast.LENGTH_SHORT).show()
             }
-            .setNeutralButton("رجوع", null)
-            .show()
+            .setNeutralButton("رجوع", null).show()
     }
 }
