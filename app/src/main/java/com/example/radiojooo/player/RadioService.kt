@@ -126,10 +126,11 @@ class RadioService : Service() {
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
         }
 
-        // ✅ حظر مسارات الفيديو إجبارياً في جميع الحالات
+        // ✅ 1. حظر الفيديو + ✅ 2. إجبار اختيار أقل بتريت صوتي متاح
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters()
-                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true) // الحظر الإجباري
+                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true) // حظر الفيديو إجبارياً
+                .setForceLowestBitrate(true) // إجبار اختيار أقل جودة صوتية متاحة
                 .build()
         }
 
@@ -166,16 +167,12 @@ class RadioService : Service() {
 
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
-                // ✅ إذا فشل السيرفر، جرب الرابط المباشر لضمان التشغيل 100%
                 val currentUrl = availableUrls.getOrNull(currentUrlIndex) ?: ""
                 if (isUsingProxy && currentUrl.isNotBlank()) {
-                    // فشل السيرفر؟ جرب الرابط المباشر
                     startStream(currentUrl, useProxy = false)
                 } else if (!isUsingProxy && currentUrl.isNotBlank()) {
-                    // فشل المباشر؟ جرب السيرفر
                     startStream(currentUrl, useProxy = true)
                 } else {
-                    // فشل الاثنان؟ جرب الخادم البديل
                     tryNextMirrorServer()
                 }
             }
@@ -328,7 +325,7 @@ class RadioService : Service() {
                 .build()
 
             val mediaSource = mediaSourceFactory.createMediaSource(mediaItem)
-            // ✅ تطبيق الفلترة الإجبارية (صوت فقط)
+            // ✅ تطبيق الفلترة الإجبارية (صوت فقط) لضمان عدم سحب أي فيديو
             val filteredSource = FilteringMediaSource(mediaSource, C.TRACK_TYPE_AUDIO)
 
             player.setMediaSource(filteredSource)
