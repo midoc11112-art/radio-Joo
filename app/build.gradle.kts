@@ -14,7 +14,6 @@ android {
         targetSdk = 35
         versionCode = 3
         versionName = "3.0.0"
-
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -67,6 +66,9 @@ dependencies {
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
-    // ✅ WorkManager (للتحديث التلقائي في الخلفية)
+    // ✅ إضافة OkHttp (مهم جداً للكاش و Delta Sync)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // WorkManager
     implementation("androidx.work:work-runtime-ktx:2.9.1")
 }
