@@ -43,7 +43,7 @@ interface StationDao {
     @Query("DELETE FROM stations")
     suspend fun clearAll()
 
-    // ✅ التعديل الوحيد: إضافة الدالة دي عشان الفحص التلقائي يشتغل
-    @Query("UPDATE stations SET streamUrl = :newUrl WHERE uuid = :uuid")
+    // ✅ التعديل هنا: تغيير streamUrl إلى url
+    @Query("UPDATE stations SET url = :newUrl WHERE uuid = :uuid")
     suspend fun updateStreamUrl(uuid: String, newUrl: String)
 }
