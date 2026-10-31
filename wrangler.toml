@@ -1,7 +1,6 @@
 name = "radio-joo-gateway"
 main = "src/worker.js"
 compatibility_date = "2026-10-31"
-account_id = "193b5905b5c9d6a9d5959bde257b1c36"
 
 [[containers]]
 class_name = "FFmpegContainer"
