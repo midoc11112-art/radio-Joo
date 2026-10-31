@@ -92,13 +92,44 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
 
                 if (query.isNotBlank()) {
                     val q = query.trim().lowercase()
-                    filtered = filtered.filter { 
-                        // ✅ إضافة البحث بالبيت ريت (Bitrate)
-                        it.name.lowercase().contains(q) || 
-                        it.category.lowercase().contains(q) || 
-                        it.countryCode.lowercase().contains(q) ||
-                        it.bitrate.toString().contains(q) ||
-                        it.actualBitrate.toString().contains(q)
+                    val isGreater = q.contains("اكبر") || q.contains("أكبر") || q.contains(">")
+                    val isLess = q.contains("اصغر") || q.contains("أصغر") || q.contains("<")
+
+                    if (isGreater) {
+                        val numStr = q.replace("اكبر", "").replace("أكبر", "").replace(">", "").trim()
+                        val bitrateNum = numStr.toIntOrNull()
+                        if (bitrateNum != null) {
+                            filtered = filtered.filter { 
+                                (it.bitrate > bitrateNum && it.bitrate > 0) || 
+                                (it.actualBitrate > bitrateNum && it.actualBitrate > 0) 
+                            }
+                        } else {
+                            filtered = emptyList()
+                        }
+                    } else if (isLess) {
+                        val numStr = q.replace("اصغر", "").replace("أصغر", "").replace("<", "").trim()
+                        val bitrateNum = numStr.toIntOrNull()
+                        if (bitrateNum != null) {
+                            filtered = filtered.filter { 
+                                (it.bitrate in 1 until bitrateNum) || 
+                                (it.actualBitrate in 1 until bitrateNum) 
+                            }
+                        } else {
+                            filtered = emptyList()
+                        }
+                    } else if (q.toIntOrNull() != null) {
+                        // بحث دقيق بالرقم فقط (مثال: 32 لا يطابق 320)
+                        val bitrateNum = q.toInt()
+                        filtered = filtered.filter { 
+                            it.bitrate == bitrateNum || it.actualBitrate == bitrateNum 
+                        }
+                    } else {
+                        // بحث نصي عادي
+                        filtered = filtered.filter { 
+                            it.name.lowercase().contains(q) || 
+                            it.category.lowercase().contains(q) || 
+                            it.countryCode.lowercase().contains(q)
+                        }
                     }
                 }
 
@@ -134,7 +165,6 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ✅ التعديل هنا: التحديث يعمل في الخلفية بدون إظهار تحميل يهنج الشاشة
     fun refreshData() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
