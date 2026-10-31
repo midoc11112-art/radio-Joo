@@ -1,6 +1,11 @@
 package com.example.radiojooo.player
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.media.MediaScannerConnection
 import android.net.TrafficStats
@@ -8,16 +13,19 @@ import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Binder
 import android.os.Build
-import android.os.Bundle
 import android.os.CountDownTimer
 import android.os.Environment
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.support.v4.media.MediaMetadataCompat
+import android.support.v4.media.session.MediaSessionCompat
+import android.support.v4.media.session.PlaybackStateCompat
+import androidx.core.app.NotificationCompat
+import androidx.media.app.NotificationCompat.MediaStyle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
-import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
@@ -30,9 +38,6 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.FilteringMediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
-import androidx.media3.session.DefaultMediaNotificationProvider
-import androidx.media3.session.MediaSession
-import androidx.media3.session.MediaSessionService
 import com.example.radiojooo.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -44,7 +49,7 @@ import java.net.URL
 import java.net.URLEncoder
 import java.util.Locale
 
-class RadioService : MediaSessionService() {
+class RadioService : Service() {
 
     private val cloudflareProxyBase = "https://radio-joo-proxy.midoc11112.workers.dev/?url="
     private var isUsingProxy = false
@@ -60,7 +65,7 @@ class RadioService : MediaSessionService() {
     }
 
     private lateinit var player: ExoPlayer
-    private var mediaSession: MediaSession? = null
+    private var mediaSession: MediaSessionCompat? = null
     private lateinit var trackSelector: DefaultTrackSelector
     private lateinit var mediaSourceFactory: DefaultMediaSourceFactory
 
@@ -103,15 +108,8 @@ class RadioService : MediaSessionService() {
 
     private val binder = LocalBinder()
 
-    override fun onBind(intent: Intent?): IBinder? {
-        if (intent?.action == "ACTION_LOCAL_BIND") {
-            return binder
-        }
-        return super.onBind(intent)
-    }
-
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
-        return mediaSession
+    override fun onBind(intent: Intent?): IBinder {
+        return binder
     }
 
     fun setAppForegroundState(inForeground: Boolean) {
@@ -134,6 +132,7 @@ class RadioService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         acquireLocks()
+        createNotificationChannel()
 
         val renderersFactory = DefaultRenderersFactory(this).apply {
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
@@ -177,29 +176,21 @@ class RadioService : MediaSessionService() {
 
         player.setWakeMode(C.WAKE_MODE_NETWORK)
 
-        val sessionActivity = PendingIntent.getActivity(
-            this, 0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
-        // ✅ ForwardingPlayer لاعتراض أمر Stop (ليغلق التطبيق)
-        val forwardingPlayer = object : ForwardingPlayer(player) {
-            override fun stop() {
-                super.stop()
-                stopAndExitApp()
-            }
+        // ✅ إعداد MediaSessionCompat (الذي يفهمه نظام سامسونج)
+        mediaSession = MediaSessionCompat(this, "RadioJooSession").apply {
+            setCallback(object : MediaSessionCompat.Callback() {
+                override fun onPlay() {
+                    resumePlayback()
+                }
+                override fun onPause() {
+                    pausePlayback()
+                }
+                override fun onStop() {
+                    stopAndExitApp()
+                }
+            })
+            isActive = true
         }
-
-        // ✅ استخدام مزود الإشعارات الافتراضي الآمن (بدون كراش)
-        val notificationProvider = DefaultMediaNotificationProvider.Builder(this).build()
-        setMediaNotificationProvider(notificationProvider)
-
-        mediaSession = MediaSession.Builder(this, forwardingPlayer)
-            .setSessionActivity(sessionActivity)
-            .build()
-
-        addSession(mediaSession!!)
 
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
@@ -210,15 +201,99 @@ class RadioService : MediaSessionService() {
                     tryNextMirrorServer()
                 }
             }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                val state = if (isPlaying) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED
+                mediaSession?.setPlaybackState(
+                    PlaybackStateCompat.Builder()
+                        .setActions(PlaybackStateCompat.ACTION_PLAY or PlaybackStateCompat.ACTION_PAUSE or PlaybackStateCompat.ACTION_STOP)
+                        .setState(state, PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, 1f)
+                        .build()
+                )
+                updateNotification()
+            }
         })
 
         statsHandler.post(statsRunnable)
     }
 
-    override fun onTaskRemoved(rootIntent: Intent?) {
-        if (!::player.isInitialized || !player.isPlaying) {
-            stopSelf()
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                "radio_joo_service_channel",
+                "تشغيل راديو جو",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "التحكم في بث الراديو المباشر"
+                setShowBadge(false)
+            }
+            val manager = getSystemService(NotificationManager::class.java)
+            manager?.createNotificationChannel(channel)
         }
+    }
+
+    // ✅ بناء الإشعار المخصص الذي يحتوي على (اسم المحطة + زر تشغيل/إيقاف + زر إغلاق)
+    private fun buildNotification(): Notification {
+        val intent = Intent(this, MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0, intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val playPauseIntent = Intent(this, RadioService::class.java).apply {
+            action = "ACTION_PLAY_PAUSE"
+        }
+        val playPausePending = PendingIntent.getService(
+            this, 1, playPauseIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val playPauseIcon = if (isPlaying()) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+        val playPauseTitle = if (isPlaying()) "إيقاف مؤقت" else "تشغيل"
+
+        val closeIntent = Intent(this, RadioService::class.java).apply { action = "ACTION_CLOSE" }
+        val closePending = PendingIntent.getService(
+            this, 2, closeIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        // تحديث بيانات الجلسة لتظهر على شاشة القفل
+        mediaSession?.setMetadata(
+            MediaMetadataCompat.Builder()
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentTitle)
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, currentLiveProgram)
+                .build()
+        )
+
+        val mediaStyle = MediaStyle()
+            .setMediaSession(mediaSession?.sessionToken)
+            .setShowActionsInCompactView(0, 1) // إظهار الزرين في العرض المصغر
+
+        return NotificationCompat.Builder(this, "radio_joo_service_channel")
+            .setContentTitle(currentTitle)
+            .setContentText(currentLiveProgram)
+            .setSmallIcon(android.R.drawable.ic_media_play) // يمكنك تغييرها لأيقونة تطبيقك
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setStyle(mediaStyle)
+            .addAction(playPauseIcon, playPauseTitle, playPausePending)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "إغلاق", closePending)
+            .build()
+    }
+
+    private fun updateNotification() {
+        try {
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.notify(1001, buildNotification())
+        } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            "ACTION_PLAY_PAUSE" -> { if (isPlaying()) pausePlayback() else resumePlayback() }
+            "ACTION_CLOSE" -> { stopAndExitApp() }
+        }
+        return START_STICKY
     }
 
     private fun acquireLocks() {
@@ -256,6 +331,15 @@ class RadioService : MediaSessionService() {
         if (availableUrls.isNotEmpty()) {
             startStream(availableUrls[0], useProxy = true)
         }
+
+        // ✅ بدء الخدمة في المقدمة مع الإشعار المخصص
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(1001, buildNotification(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+            } else {
+                startForeground(1001, buildNotification())
+            }
+        } catch (e: Exception) { e.printStackTrace() }
     }
 
     private fun startStream(streamUrl: String, useProxy: Boolean = false) {
@@ -289,6 +373,7 @@ class RadioService : MediaSessionService() {
             player.setMediaSource(filteredSource)
             player.prepare()
             player.playWhenReady = true
+            updateNotification()
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -350,14 +435,12 @@ class RadioService : MediaSessionService() {
     private fun stopAndExitApp() {
         sleepTimer?.cancel()
         stopRecording()
-        try {
-            if (::player.isInitialized) {
-                player.stop()
-                player.release()
-            }
-        } catch (e: Exception) { e.printStackTrace() }
+        try { player.stop(); player.release() } catch (e: Exception) { e.printStackTrace() }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE)
+        else { @Suppress("DEPRECATION") stopForeground(true) }
         releaseLocks()
         stopSelf()
+        android.os.Process.killProcess(android.os.Process.myPid())
     }
 
     fun getListeningDurationFormatted(): String {
@@ -394,11 +477,8 @@ class RadioService : MediaSessionService() {
         stopRecording()
         releaseLocks()
         statsHandler.removeCallbacks(statsRunnable)
-        mediaSession?.run {
-            player.release()
-            release()
-            mediaSession = null
-        }
+        mediaSession?.release()
+        try { player.release() } catch (e: Exception) { e.printStackTrace() }
         super.onDestroy()
     }
 }
