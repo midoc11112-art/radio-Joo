@@ -19,7 +19,7 @@ class ThrottledDataSource(
 
     override fun open(dataSpec: DataSpec): Long {
         val length = upstream.open(dataSpec)
-        inputStream = upstream.inputStream
+        inputStream = upstream.inputStream() // ✅ التعديل هنا: إضافة الأقواس
         bytesReadInWindow = 0
         windowStartTimeMs = System.currentTimeMillis()
         return length
@@ -28,17 +28,14 @@ class ThrottledDataSource(
     override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
         val stream = inputStream ?: return -1
 
-        // حساب الوقت المنقضي في النافذة الحالية (1 ثانية)
         val now = System.currentTimeMillis()
         val elapsed = now - windowStartTimeMs
 
-        // إذا مرت ثانية، نعيد تعيين العداد
         if (elapsed >= 1000) {
             bytesReadInWindow = 0
             windowStartTimeMs = now
         }
 
-        // إذا تجاوزنا الحد المسموح في هذه الثانية، ننتظر حتى تمر الثانية
         if (bytesReadInWindow >= maxBytesPerSecond) {
             val sleepTime = 1000 - elapsed
             if (sleepTime > 0) {
@@ -52,7 +49,6 @@ class ThrottledDataSource(
             windowStartTimeMs = System.currentTimeMillis()
         }
 
-        // حساب أقصى عدد بايتات يمكن قراءته في هذه الدفعة
         val remaining = maxBytesPerSecond - bytesReadInWindow
         val toRead = max(1, minOf(length.toLong(), remaining).toInt())
 
