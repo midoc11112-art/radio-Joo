@@ -8,6 +8,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.asLiveData // ✅ ضروري عشان الـ StateFlow يشتغل
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
@@ -67,15 +68,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupRecyclerView() {
-        // TODO: قم بإضافة كود الـ RecyclerView الخاص بك هنا
+        // TODO: كود الـ RecyclerView
     }
 
     private fun setupSearch() {
-        // TODO: قم بإضافة كود البحث هنا
+        // TODO: كود البحث
     }
 
     private fun setupChipGroup() {
-        // TODO: قم بإضافة كود الفلاتر (ChipGroup) هنا
+        // TODO: كود الفلاتر
     }
 
     private fun setupSwipeRefresh() {
@@ -93,7 +94,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun observeViewModel() {
-        viewModel.isLoading.observe(this) { isLoading ->
+        // ✅ التعديل: تحويل الـ StateFlow لـ LiveData عشان يشتغل مع observe
+        viewModel.isLoading.asLiveData().observe(this) { isLoading ->
             binding.swipeRefreshLayout.isRefreshing = isLoading
         }
     }
