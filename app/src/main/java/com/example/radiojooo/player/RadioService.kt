@@ -16,7 +16,6 @@ import android.os.Looper
 import android.os.PowerManager
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
-import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
@@ -29,9 +28,11 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.FilteringMediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.example.radiojooo.ui.MainActivity
+import com.google.common.collect.ImmutableList
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -181,18 +182,12 @@ class RadioService : MediaSessionService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val forwardingPlayer = object : ForwardingPlayer(player) {
-            override fun stop() {
-                stopAndExitApp()
-            }
-        }
-
-        mediaSession = MediaSession.Builder(this, forwardingPlayer)
+        // ✅ إصلاح: استخدام player مباشرة بدلاً من ForwardingPlayer لضمان ظهور الأزرار
+        mediaSession = MediaSession.Builder(this, player)
             .setSessionActivity(sessionActivity)
             .setCallback(mediaSessionCallback)
             .build()
 
-        // ✅ تسجيل الجلسة (هذا السطر هو المسؤول عن ظهور الودجت في شريط الإشعارات وشاشة القفل)
         addSession(mediaSession!!)
 
         player.addListener(object : Player.Listener {
@@ -214,24 +209,48 @@ class RadioService : MediaSessionService() {
             session: MediaSession,
             controller: MediaSession.ControllerInfo
         ): MediaSession.ConnectionResult {
+            // ✅ إصلاح: تفعيل أوامر التشغيل والإيقاف والإنهاء
             val playerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
+                .add(Player.COMMAND_PLAY_PAUSE)
+                .add(Player.COMMAND_STOP)
                 .remove(Player.COMMAND_SEEK_TO_NEXT)
                 .remove(Player.COMMAND_SEEK_TO_PREVIOUS)
                 .remove(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
                 .remove(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
                 .remove(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
                 .remove(Player.COMMAND_SEEK_TO_DEFAULT_POSITION)
-                .add(Player.COMMAND_STOP)
                 .build()
+
+            // ✅ إضافة زر الإنهاء (X) كزر مخصص
+            val customButtons = ImmutableList.of(
+                CommandButton.Builder()
+                    .setDisplayName("إنهاء")
+                    .setIconResId(android.R.drawable.ic_menu_close_clear_cancel)
+                    .setSessionCommand(androidx.media3.session.SessionCommand("ACTION_STOP", androidx.media3.common.Bundleable.EMPTY_BUNDLE))
+                    .build()
+            )
 
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailablePlayerCommands(playerCommands)
+                .setCustomLayout(customButtons)
                 .build()
+        }
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: androidx.media3.session.SessionCommand,
+            args: android.os.Bundle
+        ): com.google.common.util.concurrent.ListenableFuture<androidx.media3.session.SessionResult> {
+            if (customCommand.customAction == "ACTION_STOP") {
+                stopAndExitApp()
+                return com.google.common.util.concurrent.Futures.immediateFuture(androidx.media3.session.SessionResult.RESULT_SUCCESS)
+            }
+            return super.onCustomCommand(session, controller, customCommand, args)
         }
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // ✅ [إصلاح الانهيار]: لا نغلق التطبيق بالقوة، بل نوقفه فقط إذا كان البث متوقفاً
         if (!player.isPlaying) {
             stopSelf()
         }
