@@ -1,13 +1,17 @@
 package com.example.radiojooo.ui
 
 import android.Manifest
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
+import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.IBinder
 import android.text.Editable
 import android.text.TextWatcher
-import android.view.ViewGroup
+import android.view.View
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
@@ -16,13 +20,14 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import com.example.radiojooo.R
 import com.example.radiojooo.databinding.ActivityMainBinding
+import com.example.radiojooo.player.RadioService
 import com.example.radiojooo.worker.RadioHealthWorker
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
@@ -32,7 +37,22 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private val viewModel: RadioViewModel by viewModels()
     private lateinit var stationAdapter: StationAdapter
-    private var recyclerView: RecyclerView? = null
+
+    // متغيرات المشغل
+    private var radioService: RadioService? = null
+    private var isBound = false
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            val binder = service as RadioService.LocalBinder
+            radioService = binder.getService()
+            isBound = true
+            updateMiniPlayerUI()
+        }
+        override fun onServiceDisconnected(name: ComponentName?) {
+            isBound = false
+            radioService = null
+        }
+    }
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { _ -> }
 
@@ -48,13 +68,20 @@ class MainActivity : AppCompatActivity() {
 
         setupRecyclerView()
         setupSearch()
+        setupChipGroup()
         setupSwipeRefresh()
+        setupHeaderButtons()
+        setupMiniPlayer()
         observeViewModel()
+
+        // ربط خدمة المشغل
+        Intent(this, RadioService::class.java).also { intent ->
+            bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+        }
     }
 
     private fun requestAllPermissions() {
         val permissions = mutableListOf<String>()
-        
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.POST_NOTIFICATIONS)
             permissions.add(Manifest.permission.READ_MEDIA_AUDIO)
@@ -69,7 +96,6 @@ class MainActivity : AppCompatActivity() {
         val missingPermissions = permissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
-
         if (missingPermissions.isNotEmpty()) {
             permissionLauncher.launch(missingPermissions.toTypedArray())
         }
@@ -79,11 +105,9 @@ class MainActivity : AppCompatActivity() {
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
-
         val healthRequest = PeriodicWorkRequestBuilder<RadioHealthWorker>(12, TimeUnit.HOURS)
             .setConstraints(constraints)
             .build()
-
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             "RadioHealthCheck",
             ExistingPeriodicWorkPolicy.KEEP,
@@ -91,41 +115,27 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    // ✅ دالة ذكية بتدور على الـ RecyclerView مهما كان اسمه في الـ XML
-    private fun findRecyclerView(viewGroup: ViewGroup): RecyclerView? {
-        for (i in 0 until viewGroup.childCount) {
-            val child = viewGroup.getChildAt(i)
-            if (child is RecyclerView) return child
-            if (child is ViewGroup) {
-                val found = findRecyclerView(child)
-                if (found != null) return found
-            }
-        }
-        return null
-    }
-
     private fun setupRecyclerView() {
         stationAdapter = StationAdapter(
             onItemClick = { station ->
-                val intent = Intent(this, PlayerActivity::class.java)
-                intent.putExtra("STATION_UUID", station.uuid)
-                startActivity(intent)
+                // تشغيل المحطة
+                radioService?.playStation(station.name, station.uuid, station.primaryUrl, station.fallbackUrl)
+                // عرض المشغل المصغر
+                showMiniPlayer(station.name)
             },
             onFavoriteClick = { station ->
                 viewModel.toggleFavorite(station)
             }
         )
-        
-        // بنجيب الـ RecyclerView أوتوماتيك ومش محتاجين اسمه في الـ XML
-        recyclerView = findRecyclerView(binding.root)
-        recyclerView?.apply {
+        // ⚠️ تنبيه: لو ظهر خطأ هنا، غير اسم recyclerView للاسم الموجود في activity_main.xml
+        binding.recyclerView.apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
             adapter = stationAdapter
         }
     }
 
     private fun setupSearch() {
-        // لو اسم البحث في الـ XML مش etSearch، ممكن نستخدم دالة مشابهة أو نغير الاسم هنا
+        // ⚠️ تنبيه: لو ظهر خطأ هنا، غير اسم etSearch للاسم الموجود في activity_main.xml
         binding.etSearch.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
@@ -135,10 +145,36 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
+    private fun setupChipGroup() {
+        // ربط أزرار الفلترة (لو موجودة)
+    }
+
     private fun setupSwipeRefresh() {
         binding.swipeRefreshLayout.setOnRefreshListener {
             viewModel.refreshData()
         }
+    }
+
+    private fun setupHeaderButtons() {
+        // أزرار الهيدر (لو موجودة)
+    }
+
+    private fun setupMiniPlayer() {
+        // ⚠️ تنبيه: لو ظهر خطأ هنا، غير اسم miniPlayerLayout للاسم الموجود في activity_main.xml
+        binding.miniPlayerLayout.setOnClickListener {
+            val intent = Intent(this, PlayerActivity::class.java)
+            startActivity(intent)
+        }
+        binding.miniPlayerLayout.visibility = View.GONE
+    }
+
+    private fun showMiniPlayer(stationName: String) {
+        binding.miniPlayerLayout.visibility = View.VISIBLE
+        binding.tvMiniPlayerStationName.text = stationName
+    }
+
+    private fun updateMiniPlayerUI() {
+        // تحديث حالة المشغل المصغر لو شغال
     }
 
     private fun observeViewModel() {
@@ -149,13 +185,20 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 viewModel.stations.collect { stations ->
                     stationAdapter.submitList(stations)
                 }
             }
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (isBound) {
+            unbindService(serviceConnection)
+            isBound = false
         }
     }
 }
