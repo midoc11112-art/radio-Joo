@@ -5,6 +5,7 @@ import com.example.radiojooo.data.model.StationEntity
 import com.example.radiojooo.data.util.StationNormalizer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -45,68 +46,59 @@ class RadioRepository(private val stationDao: StationDao) {
         }
     }
 
-    // ✅ الحل الثوري: supervisorScope + Timeout إجمالي 20 ثانية
+    // ✅ الحل الثوري: جلب متوازي، مهلة 8 ثوانٍ لكل مصدر، حفظ واحد فقط
     suspend fun refreshStations(): Int = withContext(Dispatchers.IO) {
         val fetchedList = mutableListOf<StationEntity>()
 
-        // مهلة إجمالية 20 ثانية للتحديث بأكمله
-        withTimeoutOrNull(20_000L) {
+        // مهلة إجمالية 15 ثانية للتحديث بأكمله
+        withTimeoutOrNull(15_000L) {
             supervisorScope {
                 val jobs = listOf(
-                    async { fetchFromRadioBrowserAllArab() },
-                    async { fetchFromRadioBrowserByTags() },
-                    async { fetchFromIPRD() },
-                    async { fetchFromIslamicAPI() },
-                    async { fetchFromM3U() },
-                    async { fetchFromTuneIn() },
-                    async { fetchFromIHeart() },
-                    async { fetchFromRadioGarden() },
-                    async { fetchFromMp3Quran() },
-                    async { fetchFromCountryM3U() },
-                    async { fetchFromIptvOrg() },
-                    async { fetchFromM3URadioMusic() },
-                    async { fetchFromRadioPlayer() },
-                    async { fetchFromIslamicAPIUpdated() },
-                    async { fetchFromCoranProM3U() },
-                    async { fetchFromMp3QuranM3U() },
-                    async { fetchFromArabicMusicM3U() },
-                    async { fetchFromEgyptM3U() },
-                    async { fetchFromIptvNews() },
-                    async { fetchFromIptvArabic() },
-                    async { fetchFromIPRDCountries() },
-                    async { fetchFromBinaryMagicArabic() },
-                    async { fetchFromBinaryMagicCountries() },
-                    async { fetchFromIptvArabicAudioOnly() },
-                    async { fetchFromIptvNewsAudioOnly() }
+                    async { withTimeoutOrNull(8_000L) { fetchFromRadioBrowserAllArab() } },
+                    async { withTimeoutOrNull(8_000L) { fetchFromRadioBrowserByTags() } },
+                    async { withTimeoutOrNull(8_000L) { fetchFromIPRD() } },
+                    async { withTimeoutOrNull(8_000L) { fetchFromIslamicAPI() } },
+                    async { withTimeoutOrNull(8_000L) { fetchFromM3U() } },
+                    async { withTimeoutOrNull(8_000L) { fetchFromTuneIn() } },
+                    async { withTimeoutOrNull(8_000L) { fetchFromIHeart() } },
+                    async { withTimeoutOrNull(8_000L) { fetchFromRadioGarden() } },
+                    async { withTimeoutOrNull(8_000L) { fetchFromMp3Quran() } },
+                    async { withTimeoutOrNull(8_000L) { fetchFromCountryM3U() } },
+                    async { withTimeoutOrNull(8_000L) { fetchFromIptvOrg() } },
+                    async { withTimeoutOrNull(8_000L) { fetchFromM3URadioMusic() } },
+                    async { withTimeoutOrNull(8_000L) { fetchFromRadioPlayer() } },
+                    async { withTimeoutOrNull(8_000L) { fetchFromIslamicAPIUpdated() } },
+                    async { withTimeoutOrNull(8_000L) { fetchFromCoranProM3U() } },
+                    async { withTimeoutOrNull(8_000L) { fetchFromMp3QuranM3U() } },
+                    async { withTimeoutOrNull(8_000L) { fetchFromArabicMusicM3U() } },
+                    async { withTimeoutOrNull(8_000L) { fetchFromEgyptM3U() } },
+                    async { withTimeoutOrNull(8_000L) { fetchFromIptvNews() } },
+                    async { withTimeoutOrNull(8_000L) { fetchFromIptvArabic() } },
+                    async { withTimeoutOrNull(8_000L) { fetchFromIPRDCountries() } },
+                    async { withTimeoutOrNull(8_000L) { fetchFromBinaryMagicArabic() } },
+                    async { withTimeoutOrNull(8_000L) { fetchFromBinaryMagicCountries() } },
+                    async { withTimeoutOrNull(8_000L) { fetchFromIptvArabicAudioOnly() } },
+                    async { withTimeoutOrNull(8_000L) { fetchFromIptvNewsAudioOnly() } }
                 )
-                jobs.forEach { job ->
-                    // مهلة فردية 10 ثوانٍ لكل مصدر
-                    val result = withTimeoutOrNull(10_000L) { job.await() }
-                    if (result != null) {
-                        fetchedList.addAll(result)
-                        // ✅ حفظ فوري في قاعدة البيانات بعد كل مصدر ناجح
-                        if (fetchedList.isNotEmpty()) {
-                            val distinct = fetchedList.distinctBy { it.uuid }
-                            val currentFavs = stationDao.getStationsListDirect().filter { it.isFavorite }.map { it.uuid }.toSet()
-                            val updated = distinct.map { it.copy(isFavorite = currentFavs.contains(it.uuid)) }
-                            stationDao.insertStations(updated)
-                        }
-                    }
+                // awaitAll يعيد قائمة من النتائج (بما فيها null)
+                val results = jobs.awaitAll()
+                results.filterNotNull().forEach { list ->
+                    fetchedList.addAll(list)
                 }
             }
         }
 
-        // حفظ نهائي (لأي نتائج إضافية)
+        // ✅ حفظ واحد فقط بعد جمع كل النتائج
         if (fetchedList.isNotEmpty()) {
             val distinctList = fetchedList.distinctBy { it.uuid }
             val currentFavs = stationDao.getStationsListDirect().filter { it.isFavorite }.map { it.uuid }.toSet()
             val updated = distinctList.map { it.copy(isFavorite = currentFavs.contains(it.uuid)) }
             stationDao.insertStations(updated)
-            return@withContext updated.size
+            updated.size
         } else {
             // إذا فشل كل شيء، أضف محطات الطوارئ
             insertEmergencyStations()
-            return@withContext stationDao.getStationsCount()
+            stationDao.getStationsCount()
         }
     }
 
