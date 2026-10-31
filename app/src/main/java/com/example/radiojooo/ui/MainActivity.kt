@@ -21,7 +21,6 @@ import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.example.radiojooo.databinding.ActivityMainBinding
-import com.example.radiojooo.player.RadioService
 import com.example.radiojooo.worker.RadioHealthWorker
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
@@ -43,12 +42,10 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // إخفاء مؤشر التحميل عند البداية
         binding.swipeRefreshLayout.isRefreshing = false
 
         setupRecyclerView()
         setupSearch()
-        setupChipGroup()
         setupSwipeRefresh()
         observeViewModel()
     }
@@ -56,13 +53,12 @@ class MainActivity : AppCompatActivity() {
     private fun requestAllPermissions() {
         val permissions = mutableListOf<String>()
         
-        // صلاحيات الإشعارات والتسجيل والملفات
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.POST_NOTIFICATIONS)
             permissions.add(Manifest.permission.READ_MEDIA_AUDIO)
         } else {
             permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
-            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
                 permissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
             }
         }
@@ -120,11 +116,6 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-    private fun setupChipGroup() {
-        // ربط أزرار الفلترة (لو موجودة في الـ XML)
-        // binding.chipGroup.setOnCheckedStateChangeListener { group, checkedIds -> ... }
-    }
-
     private fun setupSwipeRefresh() {
         binding.swipeRefreshLayout.setOnRefreshListener {
             viewModel.refreshData()
@@ -132,7 +123,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun observeViewModel() {
-        // مراقبة حالة التحميل
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 viewModel.isLoading.collect { isLoading ->
@@ -141,7 +131,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // مراقبة قائمة المحطات وعرضها
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 viewModel.stations.collect { stations ->
