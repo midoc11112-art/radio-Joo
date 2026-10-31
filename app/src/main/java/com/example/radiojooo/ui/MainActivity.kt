@@ -203,13 +203,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupSwipeRefresh() {
         binding.swipeRefreshLayout.setOnRefreshListener {
+            // ✅ التعديل: إخفاء الكورة فوراً والاعتماد على التحديث في الخلفية
+            binding.swipeRefreshLayout.isRefreshing = false
             viewModel.refreshData()
         }
     }
 
     private fun setupHeaderButtons() {
         binding.btnRefreshHeader.setOnClickListener {
+            // ✅ التعديل: نفس فكرة السحب
             viewModel.refreshData()
+            Toast.makeText(this, "جاري التحديث في الخلفية...", Toast.LENGTH_SHORT).show()
         }
 
         binding.btnSleepTimerHeader.setOnClickListener {
@@ -324,13 +328,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         lifecycleScope.launch {
-            viewModel.isLoading.collectLatest { isLoading ->
-                binding.swipeRefreshLayout.isRefreshing = isLoading
-            }
-        }
-
-        lifecycleScope.launch {
             viewModel.refreshResult.collectLatest { count ->
+                // ✅ إخفاء الكورة البيضاء (إن وجدت) وإظهار رسالة نجاح
+                binding.swipeRefreshLayout.isRefreshing = false
                 Toast.makeText(this@MainActivity, "تم تحديث $count محطة بنجاح", Toast.LENGTH_SHORT).show()
             }
         }
