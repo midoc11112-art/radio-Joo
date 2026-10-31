@@ -76,7 +76,6 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
     suspend fun ensureInitialDataLoaded() {
         withContext(Dispatchers.IO) {
-            // ✅ التعديل هنا: تحديث المحطات من النت يحدث فقط لو الداتا بيز فاضية
             if (stationDao.getStationsCount() == 0) {
                 stationDao.insertStations(getSeedStations())
                 refreshStations() 
@@ -115,7 +114,8 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
         val allStationsList = stationDao.getStationsListDirect()
         var healedCount = 0
         allStationsList.forEach { station ->
-            if (!isUrlReachable(station.streamUrl)) {
+            // ✅ التعديل هنا: تغيير streamUrl إلى url
+            if (!isUrlReachable(station.url)) {
                 val fallbacks = station.fallbackUrl.split(",").map { it.trim() }.filter { it.isNotBlank() }
                 val workingFallback = fallbacks.firstOrNull { isUrlReachable(wrapProxy(it)) }
                 if (workingFallback != null) {
