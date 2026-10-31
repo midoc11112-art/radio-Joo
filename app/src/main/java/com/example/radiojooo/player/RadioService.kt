@@ -35,6 +35,7 @@ import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaNotification
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import androidx.media3.session.MediaStyleNotificationHelper // ✅ الحل السحري للربط
 import com.example.radiojooo.ui.MainActivity
 import com.google.common.collect.ImmutableList
 import kotlinx.coroutines.CoroutineScope
@@ -166,14 +167,9 @@ class RadioService : MediaSessionService() {
             val closePending = PendingIntent.getService(context, 2, closeIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             builder.addAction(NotificationCompat.Action(android.R.drawable.ic_menu_close_clear_cancel, "إغلاق", closePending))
 
-            // ✅ تصحيح الخطأ: استخدام platformToken بدلاً من sessionCompatToken
-            val mediaStyle = androidx.media.app.NotificationCompat.MediaStyle()
+            // ✅ ربط الجلسة بالإشعار باستخدام Helper الخاص بـ Media3
+            val mediaStyle = MediaStyleNotificationHelper.MediaStyle(mediaSession)
                 .setShowActionsInCompactView(0, 1)
-            
-            val token = mediaSession.platformToken
-            if (token is android.support.v4.media.session.MediaSessionCompat.Token) {
-                mediaStyle.setMediaSession(token)
-            }
 
             builder.setStyle(mediaStyle)
 
