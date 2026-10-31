@@ -192,9 +192,8 @@ class RadioService : MediaSessionService() {
             .setCallback(mediaSessionCallback)
             .build()
 
-        // ✅ [إصلاح جذري]: تسجيل الجلسة لإظهار الإشعار في شريط الإشعارات
+        // ✅ تسجيل الجلسة (هذا السطر هو المسؤول عن ظهور الودجت في شريط الإشعارات وشاشة القفل)
         addSession(mediaSession!!)
-        setShowNotificationForIdlePlayer(true)
 
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
@@ -375,7 +374,6 @@ class RadioService : MediaSessionService() {
         } catch (e: Exception) { e.printStackTrace() }
         releaseLocks()
         stopSelf()
-        // لا نستخدم killProcess هنا لتجنب الانهيار، بل نترك النظام يغلق الخدمة
     }
 
     fun getListeningDurationFormatted(): String {
