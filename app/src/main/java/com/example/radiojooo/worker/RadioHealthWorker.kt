@@ -15,11 +15,17 @@ class RadioHealthWorker(
         return try {
             val dao = AppDatabase.getDatabase(applicationContext).stationDao()
             val repo = RadioRepository(dao, applicationContext.cacheDir)
+            
+            // 1. تحديث المحطات من المصادر الخمسة (يضيف الجديد ويحدث القديم)
+            repo.refreshStations()
+            
+            // 2. فحص الروابط القديمة وإصلاح الميت منها
             val healed = repo.validateAndHealStations()
-            android.util.Log.d("RadioHealthWorker", "تم إصلاح $healed رابط.")
+            
+            android.util.Log.d("RadioHealthWorker", "تم التحديث التلقائي وإصلاح $healed رابط.")
             Result.success()
         } catch (e: Exception) {
-            android.util.Log.e("RadioHealthWorker", "فشل فحص الصحة", e)
+            android.util.Log.e("RadioHealthWorker", "فشل التحديث الدوري", e)
             Result.retry()
         }
     }
