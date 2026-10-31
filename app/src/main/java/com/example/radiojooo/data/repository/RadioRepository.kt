@@ -76,36 +76,44 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
     suspend fun ensureInitialDataLoaded() {
         withContext(Dispatchers.IO) {
-            if (stationDao.getStationsCount() == 0) {
-                stationDao.insertStations(getSeedStations())
-                refreshStations() 
+            try {
+                if (stationDao.getStationsCount() == 0) {
+                    stationDao.insertStations(getSeedStations())
+                    refreshStations() 
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
         }
     }
 
     suspend fun refreshStations(): Int = withContext(Dispatchers.IO) {
-        supervisorScope {
-            val jobs = listOf(
-                async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowserEG() } },
-                async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowserArabic() } },
-                async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowserNews() } },
-                async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowserTalkshow() } },
-                async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowserQuran() } },
-                async { withTimeoutOrNull(15_000L) { fetchFromIptvOrgArabic() } },
-                async { withTimeoutOrNull(15_000L) { fetchFromEgyptM3U() } },
-                async { withTimeoutOrNull(15_000L) { fetchFromIslamicRadioApi() } },
-                async { withTimeoutOrNull(15_000L) { fetchFromTuneInOpml() } }
-            )
+        try {
+            supervisorScope {
+                val jobs = listOf(
+                    async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowserEG() } },
+                    async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowserArabic() } },
+                    async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowserNews() } },
+                    async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowserTalkshow() } },
+                    async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowserQuran() } },
+                    async { withTimeoutOrNull(15_000L) { fetchFromIptvOrgArabic() } },
+                    async { withTimeoutOrNull(15_000L) { fetchFromEgyptM3U() } },
+                    async { withTimeoutOrNull(15_000L) { fetchFromIslamicRadioApi() } },
+                    async { withTimeoutOrNull(15_000L) { fetchFromTuneInOpml() } }
+                )
 
-            jobs.forEach { job ->
-                val list = job.await()
-                if (list != null && list.isNotEmpty()) {
-                    val distinctList = list.distinctBy { it.uuid }
-                    val currentFavs = stationDao.getStationsListDirect().filter { it.isFavorite }.map { it.uuid }.toSet()
-                    val updated = distinctList.map { it.copy(isFavorite = currentFavs.contains(it.uuid)) }
-                    stationDao.insertStations(updated)
+                jobs.forEach { job ->
+                    val list = job.await()
+                    if (list != null && list.isNotEmpty()) {
+                        val distinctList = list.distinctBy { it.uuid }
+                        val currentFavs = stationDao.getStationsListDirect().filter { it.isFavorite }.map { it.uuid }.toSet()
+                        val updated = distinctList.map { it.copy(isFavorite = currentFavs.contains(it.uuid)) }
+                        stationDao.insertStations(updated)
+                    }
                 }
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
         stationDao.getStationsCount()
     }
@@ -114,7 +122,6 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
         val allStationsList = stationDao.getStationsListDirect()
         var healedCount = 0
         allStationsList.forEach { station ->
-            // ✅ التعديل: استخدام primaryUrl
             if (!isUrlReachable(station.primaryUrl)) {
                 val fallbacks = station.fallbackUrl.split(",").map { it.trim() }.filter { it.isNotBlank() }
                 val workingFallback = fallbacks.firstOrNull { isUrlReachable(wrapProxy(it)) }
