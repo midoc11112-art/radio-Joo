@@ -110,6 +110,10 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
         stationDao.getStationsCount()
     }
 
+    // ✅ تم إعادة هذه الدالة الفارغة مؤقتاً لكي ينجح بناء المشروع (Build)
+    // يجب حذف StationSyncWorker.kt و RadioHealthWorker.kt لأننا لم نعد نستخدمهما
+    suspend fun validateAndHealStations(): Int = 0
+
     private fun fetchFromRadioBrowser(
         endpoint: String,
         countryCode: String? = null,
