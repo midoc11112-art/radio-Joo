@@ -59,7 +59,7 @@ class MainActivity : AppCompatActivity() {
     private val updateRunnable = object : Runnable {
         override fun run() {
             updateMiniPlayer()
-            updateSleepTimerButton() // ✅ تحديث العداد التنازلي
+            updateSleepTimerButton()
             updateHandler.postDelayed(this, 1000)
         }
     }
@@ -249,7 +249,6 @@ class MainActivity : AppCompatActivity() {
         updateMiniPlayer()
     }
 
-    // ✅ تحديث زر المؤقت بالعداد التنازلي
     private fun updateSleepTimerButton() {
         val timeRemaining = radioService?.sleepTimeRemainingMs ?: 0L
         if (timeRemaining > 0) {
@@ -257,10 +256,10 @@ class MainActivity : AppCompatActivity() {
             val min = (timeRemaining / (1000 * 60)) % 60
             val hr = (timeRemaining / (1000 * 60 * 60)) % 24
             binding.btnSleepTimerHeader.text = String.format(Locale.US, "⏱️ %02d:%02d:%02d", hr, min, sec)
-            binding.btnSleepTimerHeader.setTextColor(0xFFFF9800.toInt()) // لون برتقالي للفت الانتباه
+            binding.btnSleepTimerHeader.setTextColor(0xFFFF9800.toInt())
         } else {
             binding.btnSleepTimerHeader.text = "مؤقت النوم ⏱️"
-            binding.btnSleepTimerHeader.setTextColor(0xFFE2E8F0.toInt()) // اللون الأصلي
+            binding.btnSleepTimerHeader.setTextColor(0xFFE2E8F0.toInt())
         }
     }
 
@@ -343,25 +342,23 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ✅ تم تحسين ألوان وتصميم نافذة المؤقت لتكون أوضح
     private fun showSleepTimerDialog() {
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(60, 50, 60, 30)
+            setPadding(60, 40, 60, 20)
         }
 
         val etHours = EditText(this).apply {
             hint = "عدد الساعات (مثال: 1)"
             inputType = InputType.TYPE_CLASS_NUMBER
             setTextColor(0xFFFFFFFF.toInt())
-            setHintTextColor(0xFFCBD5E1.toInt())
-            textSize = 18f
+            setHintTextColor(0xFF94A3B8.toInt())
+            textSize = 16f
             setPadding(30, 30, 30, 30)
-            // خلفية أوضح مع إطار بنفسجي ساطع
             background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(0xFF334155.toInt()) // لون أزرق رمادي فاتح
+                setColor(0xFF1E293B.toInt())
                 cornerRadius = 20f
-                setStroke(3, 0xFFA78BFA.toInt()) // إطار بنفسجي فاتح
+                setStroke(2, 0xFF8B5CF6.toInt())
             }
         }
 
@@ -369,13 +366,13 @@ class MainActivity : AppCompatActivity() {
             hint = "عدد الدقائق (مثال: 30)"
             inputType = InputType.TYPE_CLASS_NUMBER
             setTextColor(0xFFFFFFFF.toInt())
-            setHintTextColor(0xFFCBD5E1.toInt())
-            textSize = 18f
+            setHintTextColor(0xFF94A3B8.toInt())
+            textSize = 16f
             setPadding(30, 30, 30, 30)
             background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(0xFF334155.toInt())
+                setColor(0xFF1E293B.toInt())
                 cornerRadius = 20f
-                setStroke(3, 0xFFA78BFA.toInt())
+                setStroke(2, 0xFF8B5CF6.toInt())
             }
         }
 
@@ -395,7 +392,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        AlertDialog.Builder(this, R.style.Theme_RadioJooo) // استخدام الثيم الخاص بك
+        AlertDialog.Builder(this)
             .setTitle("⏱️ ضبط مؤقت النوم (يدوي)")
             .setView(layout)
             .setPositiveButton("تشغيل") { _, _ ->
