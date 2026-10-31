@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
+import android.view.ViewGroup
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
@@ -15,6 +16,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
@@ -30,8 +32,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private val viewModel: RadioViewModel by viewModels()
     private lateinit var stationAdapter: StationAdapter
+    private var recyclerView: RecyclerView? = null
 
-    // طلب الصلاحيات
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { _ -> }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -89,6 +91,19 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    // ✅ دالة ذكية بتدور على الـ RecyclerView مهما كان اسمه في الـ XML
+    private fun findRecyclerView(viewGroup: ViewGroup): RecyclerView? {
+        for (i in 0 until viewGroup.childCount) {
+            val child = viewGroup.getChildAt(i)
+            if (child is RecyclerView) return child
+            if (child is ViewGroup) {
+                val found = findRecyclerView(child)
+                if (found != null) return found
+            }
+        }
+        return null
+    }
+
     private fun setupRecyclerView() {
         stationAdapter = StationAdapter(
             onItemClick = { station ->
@@ -100,13 +115,17 @@ class MainActivity : AppCompatActivity() {
                 viewModel.toggleFavorite(station)
             }
         )
-        binding.recyclerView.apply {
+        
+        // بنجيب الـ RecyclerView أوتوماتيك ومش محتاجين اسمه في الـ XML
+        recyclerView = findRecyclerView(binding.root)
+        recyclerView?.apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
             adapter = stationAdapter
         }
     }
 
     private fun setupSearch() {
+        // لو اسم البحث في الـ XML مش etSearch، ممكن نستخدم دالة مشابهة أو نغير الاسم هنا
         binding.etSearch.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
