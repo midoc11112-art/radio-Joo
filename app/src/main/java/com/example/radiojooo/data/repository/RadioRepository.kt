@@ -13,7 +13,10 @@ import okhttp3.Cache
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
+import org.json.JSONObject
+import org.xmlpull.v1.XmlPullParser
 import java.io.File
+import java.io.StringReader
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
@@ -56,10 +59,17 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                 async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowserEG() } },
                 async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowserArabic() } },
                 async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowserNews() } },
+                // ✅ جديد: الاستعلامات الإضافية الموصى بها
+                async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowserTalkshow() } },
+                async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowserQuran() } },
+                // الموجود سابقًا
                 async { withTimeoutOrNull(15_000L) { fetchFromIptvOrgArabic() } },
-                async { withTimeoutOrNull(15_000L) { fetchFromEgyptM3U() } }
+                async { withTimeoutOrNull(15_000L) { fetchFromEgyptM3U() } },
+                // ✅ جديد: المصدران الإضافيان الموصى بهما
+                async { withTimeoutOrNull(15_000L) { fetchFromIslamicRadioApi() } },
+                async { withTimeoutOrNull(15_000L) { fetchFromTuneInOpml() } }
             )
-            
+
             jobs.forEach { job ->
                 val list = job.await()
                 if (list != null && list.isNotEmpty()) {
@@ -88,7 +98,7 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                     val rawUrl = obj.optString("url_resolved", obj.optString("url", "")).trim()
                     val bitrate = obj.optInt("bitrate", 64)
                     val uuid = obj.optString("stationuuid", java.util.UUID.randomUUID().toString())
-                    
+
                     if (rawUrl.isNotBlank() && bitrate <= 128 && StationNormalizer.isArabicStation(name, lang, country)) {
                         val category = StationNormalizer.classify(uuid, name, "")
                         list.add(StationEntity(uuid, name, wrapProxy(rawUrl), "", "", country, category, bitrate, 1, false, obj.optInt("clickcount", 100)))
@@ -114,7 +124,7 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                     val rawUrl = obj.optString("url_resolved", obj.optString("url", "")).trim()
                     val bitrate = obj.optInt("bitrate", 64)
                     val uuid = obj.optString("stationuuid", java.util.UUID.randomUUID().toString())
-                    
+
                     if (rawUrl.isNotBlank() && bitrate <= 128 && StationNormalizer.isArabicStation(name, lang, country)) {
                         val category = StationNormalizer.classify(uuid, name, "")
                         list.add(StationEntity(uuid, name, wrapProxy(rawUrl), "", "", country, category, bitrate, 1, false, obj.optInt("clickcount", 100)))
@@ -140,9 +150,45 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                     val rawUrl = obj.optString("url_resolved", obj.optString("url", "")).trim()
                     val bitrate = obj.optInt("bitrate", 64)
                     val uuid = obj.optString("stationuuid", java.util.UUID.randomUUID().toString())
-                    
+
                     if (rawUrl.isNotBlank() && bitrate <= 128 && StationNormalizer.isArabicStation(name, lang, country)) {
                         list.add(StationEntity(uuid, name, wrapProxy(rawUrl), "", "", country, "NEWS", bitrate, 1, false, obj.optInt("clickcount", 100)))
+                    }
+                }
+            }
+        } catch (e: Exception) { e.printStackTrace() }
+        return list
+    }
+
+    // ✅ جديد: Radio Browser bytag/talkshow
+    private fun fetchFromRadioBrowserTalkshow(): List<StationEntity> {
+        return fetchFromRadioBrowserByTag("talkshow", "NEWS")
+    }
+
+    // ✅ جديد: Radio Browser bytag/quran
+    private fun fetchFromRadioBrowserQuran(): List<StationEntity> {
+        return fetchFromRadioBrowserByTag("quran", "QURAN")
+    }
+
+    // ✅ دالة مساعدة موحدة لاستعلامات Radio Browser بالوسم
+    private fun fetchFromRadioBrowserByTag(tag: String, forcedCategory: String): List<StationEntity> {
+        val list = mutableListOf<StationEntity>()
+        val url = "https://de1.api.radio-browser.info/json/stations/bytag/$tag"
+        try {
+            val response = okHttpClient.newCall(Request.Builder().url(url).build()).execute()
+            if (response.isSuccessful || response.code == 304) {
+                val jsonArray = JSONArray(response.body?.string() ?: "[]")
+                for (i in 0 until jsonArray.length()) {
+                    val obj = jsonArray.getJSONObject(i)
+                    val name = obj.optString("name", "محطة").trim()
+                    val lang = obj.optString("language", "")
+                    val country = obj.optString("countrycode", "")
+                    val rawUrl = obj.optString("url_resolved", obj.optString("url", "")).trim()
+                    val bitrate = obj.optInt("bitrate", 64)
+                    val uuid = obj.optString("stationuuid", java.util.UUID.randomUUID().toString())
+
+                    if (rawUrl.isNotBlank() && bitrate <= 128 && StationNormalizer.isArabicStation(name, lang, country)) {
+                        list.add(StationEntity(uuid, name, wrapProxy(rawUrl), "", "", country, forcedCategory, bitrate, 1, false, obj.optInt("clickcount", 100)))
                     }
                 }
             }
@@ -192,6 +238,122 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                         currentName = ""
                     }
                 }
+            }
+        } catch (e: Exception) { e.printStackTrace() }
+        return list
+    }
+
+    // ✅ جديد: Islamic Radio API (uthumany/islamic-radio-api)
+    // ملاحظة: نحاول مسارين محتملين لتغطية اختلاف بنية المستودع.
+    private fun fetchFromIslamicRadioApi(): List<StationEntity> {
+        val candidateUrls = listOf(
+            "https://uthumany.github.io/islamic-radio-api/radios.json",
+            "https://raw.githubusercontent.com/uthumany/islamic-radio-api/main/radios.json"
+        )
+        for (url in candidateUrls) {
+            try {
+                val response = okHttpClient.newCall(Request.Builder().url(url).build()).execute()
+                if (response.isSuccessful) {
+                    val bodyStr = response.body?.string() ?: continue
+                    val parsed = parseIslamicRadioJson(bodyStr)
+                    if (parsed.isNotEmpty()) return parsed
+                }
+            } catch (e: Exception) { e.printStackTrace() }
+        }
+        return emptyList()
+    }
+
+    // ✅ جديد: محلل JSON مرن يدعم أكثر من شكل استجابة
+    private fun parseIslamicRadioJson(jsonStr: String): List<StationEntity> {
+        val list = mutableListOf<StationEntity>()
+        try {
+            val jsonArray: JSONArray = try {
+                JSONArray(jsonStr)
+            } catch (e: Exception) {
+                val obj = JSONObject(jsonStr)
+                when {
+                    obj.has("radios") -> obj.getJSONArray("radios")
+                    obj.has("data") -> obj.getJSONArray("data")
+                    obj.has("stations") -> obj.getJSONArray("stations")
+                    else -> JSONArray()
+                }
+            }
+            for (i in 0 until jsonArray.length()) {
+                val obj = jsonArray.optJSONObject(i) ?: continue
+                val name = obj.optString("name", "")
+                    .ifBlank { obj.optString("title", "") }
+                    .trim()
+                val rawUrl = obj.optString("url", "")
+                    .ifBlank { obj.optString("stream", "") }
+                    .ifBlank { obj.optString("streamUrl", "") }
+                    .trim()
+                if (name.isBlank() || rawUrl.isBlank()) continue
+                if (rawUrl.lowercase().contains(".m3u8") ||
+                    rawUrl.lowercase().contains(".mp4") ||
+                    rawUrl.lowercase().contains(".ts")) continue
+
+                val uuid = "islamic_${name.hashCode()}_${rawUrl.hashCode()}"
+                val category = if (name.contains("قرآن", true) ||
+                    name.contains("quran", true) ||
+                    name.contains("القرآن", true)) "QURAN" else "QURAN"
+                // البتريت غير معلن في هذا المصدر — نستخدم تقديرًا محافظًا 48kbps
+                list.add(StationEntity(uuid, name, wrapProxy(rawUrl), "", "", "EG", category, 48, 1, false, 95))
+            }
+        } catch (e: Exception) { e.printStackTrace() }
+        return list
+    }
+
+    // ✅ جديد: TuneIn OPML (مع فلترة عربية)
+    private fun fetchFromTuneInOpml(): List<StationEntity> {
+        val candidateUrls = listOf(
+            "https://opml.radiotime.com/Search.ashx?query=arabic&render=opml",
+            "https://opml.radiotime.com/Browse.ashx?render=opml"
+        )
+        for (url in candidateUrls) {
+            try {
+                val response = okHttpClient.newCall(Request.Builder().url(url).build()).execute()
+                if (response.isSuccessful || response.code == 304) {
+                    val body = response.body?.string() ?: continue
+                    val parsed = parseTuneInOpml(body)
+                    if (parsed.isNotEmpty()) return parsed
+                }
+            } catch (e: Exception) { e.printStackTrace() }
+        }
+        return emptyList()
+    }
+
+    // ✅ جديد: محلل OPML خفيف يعتمد على XmlPullParser المدمج (بدون تبعيات)
+    private fun parseTuneInOpml(opml: String): List<StationEntity> {
+        val list = mutableListOf<StationEntity>()
+        try {
+            val parser = android.util.Xml.newPullParser()
+            parser.setInput(StringReader(opml))
+            var eventType = parser.eventType
+            while (eventType != XmlPullParser.END_DOCUMENT) {
+                if (eventType == XmlPullParser.START_TAG && parser.name == "outline") {
+                    val text = parser.getAttributeValue(null, "text") ?: ""
+                    val streamUrl = parser.getAttributeValue(null, "URL") ?: ""
+                    val bitrateStr = parser.getAttributeValue(null, "bitrate")
+                    val bitrate = bitrateStr?.toIntOrNull() ?: 64
+
+                    if (text.isNotBlank() && streamUrl.isNotBlank()) {
+                        val isVideo = streamUrl.lowercase().contains(".m3u8") ||
+                            streamUrl.lowercase().contains(".mp4") ||
+                            streamUrl.lowercase().contains(".ts")
+                        if (!isVideo && bitrate <= 128 &&
+                            StationNormalizer.isArabicStation(text, "", "")) {
+                            val uuid = "tunein_${text.hashCode()}_${streamUrl.hashCode()}"
+                            list.add(
+                                StationEntity(
+                                    uuid, text, wrapProxy(streamUrl), "", "", "AR",
+                                    StationNormalizer.classify(uuid, text, ""),
+                                    bitrate, 1, false, 70
+                                )
+                            )
+                        }
+                    }
+                }
+                eventType = parser.next()
             }
         } catch (e: Exception) { e.printStackTrace() }
         return list
