@@ -3,6 +3,6 @@
   "version": "1.0.0",
   "dependencies": {
     "@cloudflare/containers": "^0.0.6",
-    "wrangler": "^3.78.0"
+    "wrangler": "^4.0.0"
   }
 }
