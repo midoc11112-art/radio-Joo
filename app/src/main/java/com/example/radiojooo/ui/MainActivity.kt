@@ -201,12 +201,14 @@ class MainActivity : AppCompatActivity() {
             startActivity(intent)
         }
 
+        // ✅ التعديل: استخدام دوال الخدمة المباشرة بدلاً من startService
         binding.btnMiniPlayPause.setOnClickListener {
             radioService?.let { service ->
-                val intent = Intent(this, RadioService::class.java).apply {
-                    action = if (service.isPlaying()) "ACTION_PAUSE" else "ACTION_PLAY"
+                if (service.isPlaying()) {
+                    service.pausePlayback()
+                } else {
+                    service.resumePlayback()
                 }
-                startService(intent)
             }
         }
     }
