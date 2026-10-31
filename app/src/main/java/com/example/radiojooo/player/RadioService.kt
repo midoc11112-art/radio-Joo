@@ -17,6 +17,7 @@ import android.os.Looper
 import android.os.PowerManager
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
@@ -30,7 +31,6 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.FilteringMediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.session.CommandButton
-import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
@@ -188,22 +188,21 @@ class RadioService : MediaSessionService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        // ✅ الحل: استخدام player مباشرة (بدون ForwardingPlayer) لضمان ظهور الأزرار
-        mediaSession = MediaSession.Builder(this, player)
+        // ✅ استخدام ForwardingPlayer لاعتراض زر الإغلاق (Stop) القياسي
+        val forwardingPlayer = object : ForwardingPlayer(player) {
+            override fun stop() {
+                super.stop()
+                stopAndExitApp()
+            }
+        }
+
+        mediaSession = MediaSession.Builder(this, forwardingPlayer)
             .setSessionActivity(sessionActivity)
             .setCallback(mediaSessionCallback)
             .build()
 
-        // ✅ تسجيل الجلسة (ضروري جداً لظهور الإشعار وشاشة القفل)
+        // ✅ تسجيل الجلسة (هذا السطر هو المسؤول عن ظهور الودجت)
         addSession(mediaSession!!)
-
-        // ✅ إعدادات إضافية لضمان ظهور الإشعار حتى في وضع الخمول (إذا كانت متاحة)
-        try {
-            val method = MediaSessionService::class.java.getMethod("setShowNotificationForIdlePlayer", Boolean::class.javaPrimitiveType)
-            method.invoke(this, true)
-        } catch (e: Exception) {
-            // تجاهل الخطأ إذا كانت الدالة غير موجودة في الإصدار الحالي
-        }
 
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
@@ -224,7 +223,6 @@ class RadioService : MediaSessionService() {
             session: MediaSession,
             controller: MediaSession.ControllerInfo
         ): MediaSession.ConnectionResult {
-            // ✅ تفعيل أوامر التشغيل، الإيقاف، والإنهاء القياسية
             val playerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
                 .add(Player.COMMAND_PLAY_PAUSE)
                 .add(Player.COMMAND_STOP)
@@ -233,7 +231,7 @@ class RadioService : MediaSessionService() {
                 .remove(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
                 .build()
 
-            // ✅ إضافة زر إغلاق مخصص
+            // ✅ إضافة زر إغلاق مخصص ليظهر بجانب زر التشغيل
             val customButtons = ImmutableList.of(
                 CommandButton.Builder()
                     .setDisplayName("إغلاق")
@@ -319,7 +317,7 @@ class RadioService : MediaSessionService() {
                 else -> MimeTypes.AUDIO_MPEG
             }
 
-            // ✅ تعيين البيانات الوصفية (الاسم والفنان) لتظهر في الإشعار وشاشة القفل
+            // ✅ تعيين البيانات الوصفية (الاسم والفنان) لتظهر في الودجت وشاشة القفل
             val metadata = MediaMetadata.Builder()
                 .setTitle(currentTitle)
                 .setArtist(currentLiveProgram)
