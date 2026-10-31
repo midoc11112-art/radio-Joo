@@ -119,7 +119,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
-        val intent = Intent(this, RadioService::class.java)
+        val intent = Intent(this, RadioService::class.java).apply {
+            action = "ACTION_LOCAL_BIND"
+        }
         bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
         radioService?.setAppForegroundState(true)
         updateHandler.post(updateRunnable)
@@ -214,7 +216,8 @@ class MainActivity : AppCompatActivity() {
         viewModel.setCurrentStation(station)
 
         val serviceIntent = Intent(this, RadioService::class.java)
-        ContextCompat.startForegroundService(this, serviceIntent)
+        // ✅ استخدام startService العادي لأن MediaSessionService سيتولى البقاء في الخلفية تلقائياً
+        startService(serviceIntent)
 
         radioService?.playStation(
             title = station.name,
