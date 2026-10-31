@@ -17,9 +17,6 @@ jobs:
       - name: Install Dependencies
         run: npm install
           
-      - name: Clear Wrangler Cache
-        run: rm -rf node_modules/.cache
-        
       - name: Deploy to Cloudflare
         run: npx wrangler deploy
         env:
