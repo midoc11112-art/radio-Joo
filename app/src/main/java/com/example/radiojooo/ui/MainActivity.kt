@@ -216,7 +216,8 @@ class MainActivity : AppCompatActivity() {
         viewModel.setCurrentStation(station)
 
         val serviceIntent = Intent(this, RadioService::class.java)
-        ContextCompat.startForegroundService(this, serviceIntent)
+        // ✅ تم التعديل هنا: استخدام startService بدلاً من startForegroundService لمنع الانهيار
+        startService(serviceIntent)
 
         radioService?.playStation(
             title = station.name,
