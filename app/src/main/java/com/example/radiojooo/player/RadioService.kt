@@ -181,7 +181,6 @@ class RadioService : MediaSessionService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        // ✅ استخدام ForwardingPlayer لاعتراض زر الإغلاق (Stop)
         val forwardingPlayer = object : ForwardingPlayer(player) {
             override fun stop() {
                 stopAndExitApp()
@@ -192,6 +191,10 @@ class RadioService : MediaSessionService() {
             .setSessionActivity(sessionActivity)
             .setCallback(mediaSessionCallback)
             .build()
+
+        // ✅ [إصلاح جذري]: تسجيل الجلسة لإظهار الإشعار في شريط الإشعارات
+        addSession(mediaSession!!)
+        setShowNotificationForIdlePlayer(true)
 
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
@@ -207,7 +210,6 @@ class RadioService : MediaSessionService() {
         statsHandler.post(statsRunnable)
     }
 
-    // ✅ إعداد الأزرار المتاحة لشاشة القفل
     private val mediaSessionCallback = object : MediaSession.Callback {
         override fun onConnect(
             session: MediaSession,
@@ -230,6 +232,7 @@ class RadioService : MediaSessionService() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
+        // ✅ [إصلاح الانهيار]: لا نغلق التطبيق بالقوة، بل نوقفه فقط إذا كان البث متوقفاً
         if (!player.isPlaying) {
             stopSelf()
         }
@@ -372,7 +375,7 @@ class RadioService : MediaSessionService() {
         } catch (e: Exception) { e.printStackTrace() }
         releaseLocks()
         stopSelf()
-        android.os.Process.killProcess(android.os.Process.myPid())
+        // لا نستخدم killProcess هنا لتجنب الانهيار، بل نترك النظام يغلق الخدمة
     }
 
     fun getListeningDurationFormatted(): String {
