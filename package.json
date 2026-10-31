@@ -1,0 +1,8 @@
+{
+  "name": "radio-joo-gateway",
+  "version": "1.0.0",
+  "dependencies": {
+    "@cloudflare/containers": "^0.0.6",
+    "wrangler": "^3.78.0"
+  }
+}
