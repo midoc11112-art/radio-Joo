@@ -4,8 +4,6 @@ import android.net.Uri
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.TransferListener
-import java.io.IOException
-import java.io.InputStream
 import kotlin.math.max
 
 class ThrottledDataSource(
@@ -15,19 +13,15 @@ class ThrottledDataSource(
 
     private var bytesReadInWindow = 0L
     private var windowStartTimeMs = 0L
-    private var inputStream: InputStream? = null
 
     override fun open(dataSpec: DataSpec): Long {
         val length = upstream.open(dataSpec)
-        inputStream = upstream.inputStream() // ✅ التعديل هنا: إضافة الأقواس
         bytesReadInWindow = 0
         windowStartTimeMs = System.currentTimeMillis()
         return length
     }
 
     override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
-        val stream = inputStream ?: return -1
-
         val now = System.currentTimeMillis()
         val elapsed = now - windowStartTimeMs
 
@@ -52,7 +46,8 @@ class ThrottledDataSource(
         val remaining = maxBytesPerSecond - bytesReadInWindow
         val toRead = max(1, minOf(length.toLong(), remaining).toInt())
 
-        val read = stream.read(buffer, offset, toRead)
+        // ✅ قراءة مباشرة من المصدر الأساسي
+        val read = upstream.read(buffer, offset, toRead)
         if (read > 0) {
             bytesReadInWindow += read
         }
@@ -62,11 +57,7 @@ class ThrottledDataSource(
     override fun getUri(): Uri? = upstream.uri
 
     override fun close() {
-        try {
-            upstream.close()
-        } finally {
-            inputStream = null
-        }
+        upstream.close()
     }
 
     override fun addTransferListener(transferListener: TransferListener) {
