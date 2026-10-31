@@ -15,7 +15,6 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
-import androidx.core.app.NotificationCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.ForwardingPlayer
@@ -31,13 +30,10 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.FilteringMediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
-import androidx.media3.session.CommandButton
-import androidx.media3.session.MediaNotification
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
-import androidx.media3.session.MediaStyleNotificationHelper // ✅ الحل السحري للربط
 import com.example.radiojooo.ui.MainActivity
-import com.google.common.collect.ImmutableList
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -135,52 +131,6 @@ class RadioService : MediaSessionService() {
         if (::player.isInitialized) player.play()
     }
 
-    // ✅ مزود الإشعارات المخصص (الذي سيعرض الاسم والأزرار على سامسونج)
-    private val customNotificationProvider = object : MediaNotification.Provider {
-        override fun createNotification(
-            mediaSession: MediaSession,
-            customLayout: ImmutableList<CommandButton>,
-            actionFactory: MediaNotification.ActionFactory,
-            onNotificationChangedCallback: MediaNotification.Provider.Callback
-        ): MediaNotification {
-            val context = this@RadioService
-            val intent = Intent(context, MainActivity::class.java)
-            val pendingIntent = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-
-            val builder = NotificationCompat.Builder(context, "radio_joo_service_channel")
-                .setContentTitle(mediaSession.player.mediaMetadata.title ?: "راديو جو")
-                .setContentText(mediaSession.player.mediaMetadata.artist ?: "بث مباشر")
-                .setSmallIcon(android.R.drawable.ic_media_play)
-                .setContentIntent(pendingIntent)
-                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                .setOngoing(true)
-                .setPriority(NotificationCompat.PRIORITY_LOW)
-
-            // زر التشغيل والإيقاف
-            val playPauseIntent = Intent(context, RadioService::class.java).apply { action = "ACTION_PLAY_PAUSE" }
-            val playPausePending = PendingIntent.getService(context, 1, playPauseIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-            val playPauseIcon = if (mediaSession.player.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
-            builder.addAction(NotificationCompat.Action(playPauseIcon, "تشغيل/إيقاف", playPausePending))
-
-            // زر الخروج (X)
-            val closeIntent = Intent(context, RadioService::class.java).apply { action = "ACTION_CLOSE" }
-            val closePending = PendingIntent.getService(context, 2, closeIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-            builder.addAction(NotificationCompat.Action(android.R.drawable.ic_menu_close_clear_cancel, "إغلاق", closePending))
-
-            // ✅ ربط الجلسة بالإشعار باستخدام Helper الخاص بـ Media3
-            val mediaStyle = MediaStyleNotificationHelper.MediaStyle(mediaSession)
-                .setShowActionsInCompactView(0, 1)
-
-            builder.setStyle(mediaStyle)
-
-            return MediaNotification(1001, builder.build())
-        }
-
-        override fun handleCustomCommand(session: MediaSession, action: String, extras: Bundle): Boolean {
-            return false
-        }
-    }
-
     override fun onCreate() {
         super.onCreate()
         acquireLocks()
@@ -233,6 +183,7 @@ class RadioService : MediaSessionService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        // ✅ ForwardingPlayer لاعتراض أمر Stop (ليغلق التطبيق)
         val forwardingPlayer = object : ForwardingPlayer(player) {
             override fun stop() {
                 super.stop()
@@ -240,12 +191,13 @@ class RadioService : MediaSessionService() {
             }
         }
 
+        // ✅ استخدام مزود الإشعارات الافتراضي الآمن (بدون كراش)
+        val notificationProvider = DefaultMediaNotificationProvider.Builder(this).build()
+        setMediaNotificationProvider(notificationProvider)
+
         mediaSession = MediaSession.Builder(this, forwardingPlayer)
             .setSessionActivity(sessionActivity)
             .build()
-
-        // ✅ تعيين المزود المخصص للإشعار
-        setMediaNotificationProvider(customNotificationProvider)
 
         addSession(mediaSession!!)
 
@@ -261,20 +213,6 @@ class RadioService : MediaSessionService() {
         })
 
         statsHandler.post(statsRunnable)
-    }
-
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            "ACTION_PLAY_PAUSE" -> {
-                if (::player.isInitialized) {
-                    if (player.isPlaying) player.pause() else player.play()
-                }
-            }
-            "ACTION_CLOSE" -> {
-                stopAndExitApp()
-            }
-        }
-        return super.onStartCommand(intent, flags, startId)
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
