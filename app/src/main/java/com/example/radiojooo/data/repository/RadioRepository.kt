@@ -10,12 +10,15 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.Flow
 import okhttp3.Cache
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
 import org.xmlpull.v1.XmlPullParser
 import java.io.File
+import java.io.IOException
 import java.io.StringReader
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
@@ -24,11 +27,42 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
     private val PROXY_BASE_URL = "https://radio-joo-proxy.midoc11112.workers.dev/?stream_url="
 
+    // ✅ جديد: اعتراض تلقائي يعيد المحاولة على مسار بديل عند فشل الشبكة أو خطأ الخادم
+    private val failoverInterceptor = Interceptor { chain ->
+        val originalRequest = chain.request()
+        try {
+            val response = chain.proceed(originalRequest)
+            if (response.isSuccessful || response.code == 304) {
+                response
+            } else if (response.code in listOf(502, 503, 504)) {
+                response.close()
+                // إعادة المحاولة مرة واحدة مع إضافة هيدر يمنع التكرار اللانهائي
+                val retryRequest = originalRequest.newBuilder()
+                    .header("X-Retry-Attempt", "1")
+                    .build()
+                chain.proceed(retryRequest)
+            } else {
+                response
+            }
+        } catch (e: IOException) {
+            // فشل اتصال: إعادة محاولة واحدة فقط
+            if (originalRequest.header("X-Retry-Attempt") == null) {
+                val retryRequest = originalRequest.newBuilder()
+                    .header("X-Retry-Attempt", "1")
+                    .build()
+                chain.proceed(retryRequest)
+            } else {
+                throw e
+            }
+        }
+    }
+
     private val okHttpClient by lazy {
         OkHttpClient.Builder()
             .cache(Cache(File(cacheDir, "radio_http_cache"), 10L * 1024 * 1024))
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
+            .addInterceptor(failoverInterceptor) // ✅ تفعيل الاعتراض التلقائي
             .build()
     }
 
@@ -59,13 +93,10 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                 async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowserEG() } },
                 async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowserArabic() } },
                 async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowserNews() } },
-                // ✅ جديد: الاستعلامات الإضافية الموصى بها
                 async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowserTalkshow() } },
                 async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowserQuran() } },
-                // الموجود سابقًا
                 async { withTimeoutOrNull(15_000L) { fetchFromIptvOrgArabic() } },
                 async { withTimeoutOrNull(15_000L) { fetchFromEgyptM3U() } },
-                // ✅ جديد: المصدران الإضافيان الموصى بهما
                 async { withTimeoutOrNull(15_000L) { fetchFromIslamicRadioApi() } },
                 async { withTimeoutOrNull(15_000L) { fetchFromTuneInOpml() } }
             )
@@ -81,6 +112,47 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
             }
         }
         stationDao.getStationsCount()
+    }
+
+    // ✅ جديد: فحص صحة كل المحطات وتحديث الروابط الميتة تلقائيًا
+    suspend fun validateAndHealStations(): Int = withContext(Dispatchers.IO) {
+        val allStationsList = stationDao.getStationsListDirect()
+        var healedCount = 0
+        allStationsList.forEach { station ->
+            if (!isUrlReachable(station.streamUrl)) {
+                // الرابط الأساسي ميت: جرّب الروابط البديلة إن وجدت
+                val fallbacks = station.fallbackUrl.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                val workingFallback = fallbacks.firstOrNull { isUrlReachable(wrapProxy(it)) }
+                if (workingFallback != null) {
+                    // تحديث الرابط الأساسي إلى البديل العامل
+                    stationDao.updateStreamUrl(station.uuid, wrapProxy(workingFallback))
+                    healedCount++
+                } else {
+                    // لا يوجد بديل عامل: علم المحطة كغير نشطة (اختياري)
+                    // stationDao.updateActiveStatus(station.uuid, false)
+                }
+            }
+        }
+        healedCount
+    }
+
+    private fun isUrlReachable(url: String, timeoutMs: Long = 8000L): Boolean {
+        if (url.isBlank()) return false
+        return try {
+            val request = Request.Builder()
+                .url(url)
+                .head() // HEAD أخف من GET
+                .build()
+            val client = okHttpClient.newBuilder()
+                .connectTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+                .readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+                .build()
+            client.newCall(request).execute().use { response ->
+                response.isSuccessful || response.code in 200..399
+            }
+        } catch (e: Exception) {
+            false
+        }
     }
 
     private fun fetchFromRadioBrowserEG(): List<StationEntity> {
@@ -160,17 +232,14 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
         return list
     }
 
-    // ✅ جديد: Radio Browser bytag/talkshow
     private fun fetchFromRadioBrowserTalkshow(): List<StationEntity> {
         return fetchFromRadioBrowserByTag("talkshow", "NEWS")
     }
 
-    // ✅ جديد: Radio Browser bytag/quran
     private fun fetchFromRadioBrowserQuran(): List<StationEntity> {
         return fetchFromRadioBrowserByTag("quran", "QURAN")
     }
 
-    // ✅ دالة مساعدة موحدة لاستعلامات Radio Browser بالوسم
     private fun fetchFromRadioBrowserByTag(tag: String, forcedCategory: String): List<StationEntity> {
         val list = mutableListOf<StationEntity>()
         val url = "https://de1.api.radio-browser.info/json/stations/bytag/$tag"
@@ -243,8 +312,6 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
         return list
     }
 
-    // ✅ جديد: Islamic Radio API (uthumany/islamic-radio-api)
-    // ملاحظة: نحاول مسارين محتملين لتغطية اختلاف بنية المستودع.
     private fun fetchFromIslamicRadioApi(): List<StationEntity> {
         val candidateUrls = listOf(
             "https://uthumany.github.io/islamic-radio-api/radios.json",
@@ -263,7 +330,6 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
         return emptyList()
     }
 
-    // ✅ جديد: محلل JSON مرن يدعم أكثر من شكل استجابة
     private fun parseIslamicRadioJson(jsonStr: String): List<StationEntity> {
         val list = mutableListOf<StationEntity>()
         try {
@@ -296,14 +362,12 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                 val category = if (name.contains("قرآن", true) ||
                     name.contains("quran", true) ||
                     name.contains("القرآن", true)) "QURAN" else "QURAN"
-                // البتريت غير معلن في هذا المصدر — نستخدم تقديرًا محافظًا 48kbps
                 list.add(StationEntity(uuid, name, wrapProxy(rawUrl), "", "", "EG", category, 48, 1, false, 95))
             }
         } catch (e: Exception) { e.printStackTrace() }
         return list
     }
 
-    // ✅ جديد: TuneIn OPML (مع فلترة عربية)
     private fun fetchFromTuneInOpml(): List<StationEntity> {
         val candidateUrls = listOf(
             "https://opml.radiotime.com/Search.ashx?query=arabic&render=opml",
@@ -322,7 +386,6 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
         return emptyList()
     }
 
-    // ✅ جديد: محلل OPML خفيف يعتمد على XmlPullParser المدمج (بدون تبعيات)
     private fun parseTuneInOpml(opml: String): List<StationEntity> {
         val list = mutableListOf<StationEntity>()
         try {
