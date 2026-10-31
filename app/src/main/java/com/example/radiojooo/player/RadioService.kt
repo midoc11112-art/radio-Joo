@@ -48,7 +48,7 @@ import java.util.Locale
 
 class RadioService : Service() {
 
-    private val cloudflareProxyBase = "https://radio-joo-proxy.midoc11112.workers.dev/?stream_url="
+    private val cloudflareProxyBase = "https://radio-joo-proxy.midoc11112.workers.dev/?url="
     private var isUsingProxy = false
 
     private fun getProxiedUrl(rawUrl: String): String {
@@ -126,11 +126,10 @@ class RadioService : Service() {
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
         }
 
-        // ✅ التعديل هنا: إزالة setMaxAudioBitrate التي كانت تمنع المحطات
+        // ✅ حظر مسارات الفيديو إجبارياً في جميع الحالات
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters()
-                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
-                // .setMaxAudioBitrate(32000) تم إزالتها
+                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true) // الحظر الإجباري
                 .build()
         }
 
@@ -167,10 +166,16 @@ class RadioService : Service() {
 
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
+                // ✅ إذا فشل السيرفر، جرب الرابط المباشر لضمان التشغيل 100%
                 val currentUrl = availableUrls.getOrNull(currentUrlIndex) ?: ""
-                if (!isUsingProxy && currentUrl.isNotBlank()) {
+                if (isUsingProxy && currentUrl.isNotBlank()) {
+                    // فشل السيرفر؟ جرب الرابط المباشر
+                    startStream(currentUrl, useProxy = false)
+                } else if (!isUsingProxy && currentUrl.isNotBlank()) {
+                    // فشل المباشر؟ جرب السيرفر
                     startStream(currentUrl, useProxy = true)
                 } else {
+                    // فشل الاثنان؟ جرب الخادم البديل
                     tryNextMirrorServer()
                 }
             }
@@ -323,7 +328,7 @@ class RadioService : Service() {
                 .build()
 
             val mediaSource = mediaSourceFactory.createMediaSource(mediaItem)
-            // ✅ إجبار ExoPlayer على استخدام مسار الصوت فقط
+            // ✅ تطبيق الفلترة الإجبارية (صوت فقط)
             val filteredSource = FilteringMediaSource(mediaSource, C.TRACK_TYPE_AUDIO)
 
             player.setMediaSource(filteredSource)
