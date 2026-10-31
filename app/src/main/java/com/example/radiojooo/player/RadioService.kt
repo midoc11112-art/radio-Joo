@@ -8,7 +8,6 @@ import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Binder
 import android.os.Build
-import android.os.Bundle
 import android.os.CountDownTimer
 import android.os.Environment
 import android.os.Handler
@@ -17,6 +16,7 @@ import android.os.Looper
 import android.os.PowerManager
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
@@ -32,12 +32,7 @@ import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
-import androidx.media3.session.SessionCommand
-import androidx.media3.session.SessionResult
-import com.example.radiojooo.R
 import com.example.radiojooo.ui.MainActivity
-import com.google.common.util.concurrent.Futures
-import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -127,40 +122,13 @@ class RadioService : MediaSessionService() {
         }
     }
 
-    // ✅ التحكم في الأزرار التي تظهر على شاشة القفل والإشعارات
-    private val mediaSessionCallback = object : MediaSession.Callback {
-        override fun onConnect(
-            session: MediaSession,
-            controller: MediaSession.ControllerInfo
-        ): MediaSession.ConnectionResult {
-            // إزالة أزرار التالي، السابق، وشريط التقدم، وإبقاء التشغيل/الإيقاف وزر الإغلاق (Stop) فقط
-            val playerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
-                .remove(Player.COMMAND_SEEK_TO_NEXT)
-                .remove(Player.COMMAND_SEEK_TO_PREVIOUS)
-                .remove(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
-                .remove(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
-                .remove(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
-                .remove(Player.COMMAND_SEEK_TO_DEFAULT_POSITION)
-                .add(Player.COMMAND_STOP) // إضافة زر الإغلاق (X)
-                .build()
+    // ✅ دالة إضافية للتحكم من الواجهة الرئيسية
+    fun pausePlayback() {
+        if (::player.isInitialized) player.pause()
+    }
 
-            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
-                .setAvailablePlayerCommands(playerCommands)
-                .build()
-        }
-
-        // ✅ عند الضغط على زر (X) في شاشة القفل أو الإشعار
-        override fun onPlayerCommandRequest(
-            session: MediaSession,
-            controller: MediaSession.ControllerInfo,
-            playerCommand: Int
-        ): Int {
-            if (playerCommand == Player.COMMAND_STOP) {
-                stopAndExitApp()
-                return SessionResult.RESULT_SUCCESS
-            }
-            return super.onPlayerCommandRequest(session, controller, playerCommand)
-        }
+    fun resumePlayback() {
+        if (::player.isInitialized) player.play()
     }
 
     override fun onCreate() {
@@ -171,14 +139,12 @@ class RadioService : MediaSessionService() {
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
         }
 
-        // ✅ حظر الفيديو الإجباري
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters()
                 .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
                 .build()
         }
 
-        // ✅ تقليل حجم الذاكرة المؤقتة إلى 1 ميجابايت لتوفير البيانات
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(10000, 20000, 1500, 3000)
             .setTargetBufferBytes(1024 * 1024)
@@ -211,20 +177,25 @@ class RadioService : MediaSessionService() {
 
         player.setWakeMode(C.WAKE_MODE_NETWORK)
 
-        // ✅ تخصيص شكل الإشعار
         val notificationProvider = DefaultMediaNotificationProvider.Builder(this)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(android.R.drawable.ic_media_play)
             .build()
         setMediaNotificationProvider(notificationProvider)
 
-        // ✅ إنشاء MediaSession وربطه بالمشغل
         val sessionActivity = PendingIntent.getActivity(
             this, 0,
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        mediaSession = MediaSession.Builder(this, player)
+        // ✅ استخدام ForwardingPlayer لاعتراض زر الإغلاق (Stop) من شاشة القفل
+        val forwardingPlayer = object : ForwardingPlayer(player) {
+            override fun stop() {
+                stopAndExitApp()
+            }
+        }
+
+        mediaSession = MediaSession.Builder(this, forwardingPlayer)
             .setSessionActivity(sessionActivity)
             .setCallback(mediaSessionCallback)
             .build()
@@ -241,6 +212,28 @@ class RadioService : MediaSessionService() {
         })
 
         statsHandler.post(statsRunnable)
+    }
+
+    // ✅ إعداد الأزرار المتاحة لشاشة القفل
+    private val mediaSessionCallback = object : MediaSession.Callback {
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo
+        ): MediaSession.ConnectionResult {
+            val playerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
+                .remove(Player.COMMAND_SEEK_TO_NEXT)
+                .remove(Player.COMMAND_SEEK_TO_PREVIOUS)
+                .remove(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                .remove(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                .remove(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
+                .remove(Player.COMMAND_SEEK_TO_DEFAULT_POSITION)
+                .add(Player.COMMAND_STOP) // إضافة زر الخروج (X)
+                .build()
+
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailablePlayerCommands(playerCommands)
+                .build()
+        }
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -378,7 +371,12 @@ class RadioService : MediaSessionService() {
     private fun stopAndExitApp() {
         sleepTimer?.cancel()
         stopRecording()
-        try { player.stop(); player.release() } catch (e: Exception) { e.printStackTrace() }
+        try {
+            if (::player.isInitialized) {
+                player.stop()
+                player.release()
+            }
+        } catch (e: Exception) { e.printStackTrace() }
         releaseLocks()
         stopSelf()
         android.os.Process.killProcess(android.os.Process.myPid())
