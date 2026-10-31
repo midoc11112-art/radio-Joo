@@ -28,7 +28,6 @@ object StationNormalizer {
         }
     }
 
-    // ✅ خوارزمية الفلترة الجديدة: تعتمد على اللغة أولاً، وليس على اسم العلامة التجارية
     fun isArabicStation(name: String, language: String, countryCode: String): Boolean {
         val n = name.lowercase(Locale.ROOT)
         val l = language.lowercase(Locale.ROOT)
@@ -43,14 +42,14 @@ object StationNormalizer {
         // 3. إذا كان الاسم يحتوي على كلمة "arabic" أو "عربي" أو "عربية"، اقبل فوراً
         if (n.contains("arabic") || n.contains("عربي") || n.contains("عربية")) return true
 
-        // 4. أسماء النسخ العربية المعروفة (يجب أن تكون صريحة)
+        // 4. أسماء النسخ العربية المعروفة
         val arabicBrands = listOf(
             "aljazeera", "alarabiya", "alhadath", "sky news arabia",
             "rt arabic", "france 24 arabic", "dw arabic", "monte carlo", "mcd"
         )
         if (arabicBrands.any { n.contains(it) }) return true
 
-        // 5. إذا كانت اللغة أجنبية صريحة، ارفض (ما لم تستوفِ الشروط أعلاه)
+        // 5. إذا كانت اللغة أجنبية صريحة، ارفض
         val foreignLangs = listOf(
             "english", "french", "german", "spanish", "italian",
             "russian", "chinese", "japanese", "korean", "portuguese",
@@ -58,7 +57,7 @@ object StationNormalizer {
         )
         if (foreignLangs.any { l.contains(it) }) return false
 
-        // 6. إذا كانت الدولة عربية، اقبل (حتى لو كانت اللغة غير معروفة)
+        // 6. إذا كانت الدولة عربية، اقبل
         val arabCountries = listOf(
             "EG", "SA", "AE", "QA", "KW", "BH", "OM", "JO", "LB",
             "SY", "IQ", "PS", "YE", "SD", "LY", "TN", "DZ", "MA",
@@ -66,7 +65,6 @@ object StationNormalizer {
         )
         if (c in arabCountries) return true
 
-        // 7. القبول الافتراضي (لتجنب الحجب الخاطئ لمحطة عربية غير معروفة)
         return true
     }
 }
