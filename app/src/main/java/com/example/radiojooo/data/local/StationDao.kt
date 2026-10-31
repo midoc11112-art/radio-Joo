@@ -43,7 +43,10 @@ interface StationDao {
     @Query("DELETE FROM stations")
     suspend fun clearAll()
 
-    // ✅ ربطها بالعمود primaryUrl الصحيح
     @Query("UPDATE stations SET primaryUrl = :newUrl WHERE uuid = :uuid")
     suspend fun updateStreamUrl(uuid: String, newUrl: String)
+
+    // ✅ دالة جديدة: تحديث البتريت الفعلي للمحطة بعد قياسه
+    @Query("UPDATE stations SET actualBitrate = :actualBitrate WHERE uuid = :uuid")
+    suspend fun updateActualBitrate(uuid: String, actualBitrate: Int)
 }
