@@ -17,6 +17,7 @@ import android.os.Looper
 import android.os.PowerManager
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
@@ -30,6 +31,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.FilteringMediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.session.CommandButton
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
@@ -187,7 +189,17 @@ class RadioService : MediaSessionService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        mediaSession = MediaSession.Builder(this, player)
+        // ✅ استخدام ForwardingPlayer لاعتراض زر الإيقاف القياسي
+        val forwardingPlayer = object : ForwardingPlayer(player) {
+            override fun stop() {
+                stopAndExitApp()
+            }
+        }
+
+        val notificationProvider = DefaultMediaNotificationProvider.Builder(this).build()
+        setMediaNotificationProvider(notificationProvider)
+
+        mediaSession = MediaSession.Builder(this, forwardingPlayer)
             .setSessionActivity(sessionActivity)
             .setCallback(mediaSessionCallback)
             .build()
@@ -213,23 +225,21 @@ class RadioService : MediaSessionService() {
             session: MediaSession,
             controller: MediaSession.ControllerInfo
         ): MediaSession.ConnectionResult {
+            // ✅ إضافة الأوامر القياسية التي يفهمها النظام (تشغيل/إيقاف/إغلاق)
             val playerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
                 .add(Player.COMMAND_PLAY_PAUSE)
                 .add(Player.COMMAND_STOP)
                 .remove(Player.COMMAND_SEEK_TO_NEXT)
                 .remove(Player.COMMAND_SEEK_TO_PREVIOUS)
-                .remove(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
-                .remove(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
                 .remove(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
-                .remove(Player.COMMAND_SEEK_TO_DEFAULT_POSITION)
                 .build()
 
+            // إضافة زر مخصص كـ Fallback
             val customButtons = ImmutableList.of(
                 CommandButton.Builder()
-                    .setDisplayName("إنهاء")
+                    .setDisplayName("إغلاق")
                     .setIconResId(android.R.drawable.ic_menu_close_clear_cancel)
-                    // ✅ إصلاح: استخدام Bundle() الفارغ
-                    .setSessionCommand(SessionCommand("ACTION_STOP", Bundle())) 
+                    .setSessionCommand(SessionCommand("ACTION_STOP", Bundle()))
                     .build()
             )
 
@@ -247,7 +257,6 @@ class RadioService : MediaSessionService() {
         ): ListenableFuture<SessionResult> {
             if (customCommand.customAction == "ACTION_STOP") {
                 stopAndExitApp()
-                // ✅ إصلاح: إرجاع SessionResult بشكل صحيح
                 return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
             }
             return super.onCustomCommand(session, controller, customCommand, args)
@@ -311,6 +320,7 @@ class RadioService : MediaSessionService() {
                 else -> MimeTypes.AUDIO_MPEG
             }
 
+            // ✅ إعداد بيانات المحطة لتظهر في شاشة القفل والإشعار
             val metadata = MediaMetadata.Builder()
                 .setTitle(currentTitle)
                 .setArtist(currentLiveProgram)
