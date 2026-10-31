@@ -201,7 +201,6 @@ class MainActivity : AppCompatActivity() {
             startActivity(intent)
         }
 
-        // ✅ التعديل: استخدام دوال الخدمة المباشرة بدلاً من startService
         binding.btnMiniPlayPause.setOnClickListener {
             radioService?.let { service ->
                 if (service.isPlaying()) {
