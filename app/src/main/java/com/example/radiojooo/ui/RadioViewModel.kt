@@ -47,7 +47,8 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         val stationDao = AppDatabase.getDatabase(application).stationDao()
-        repository = RadioRepository(stationDao)
+        // ✅ تمرير cacheDir لدعم كاش OkHttp
+        repository = RadioRepository(stationDao, application.cacheDir)
 
         val rawFlow = MutableStateFlow<List<StationEntity>>(emptyList())
         allRawStations = rawFlow.asStateFlow()
