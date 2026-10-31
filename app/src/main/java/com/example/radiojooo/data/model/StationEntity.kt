@@ -15,5 +15,7 @@ data class StationEntity(
     val countryCode: String = "EG",
     val bitrate: Int = 32,
     val isFavorite: Boolean = false,
-    val popularityScore: Int = 0
+    val popularityScore: Int = 0,
+    // ✅ الحقل الجديد: البتريت الفعلي المقاس (0 يعني لم يتم قياسه بعد)
+    val actualBitrate: Int = 0 
 )
