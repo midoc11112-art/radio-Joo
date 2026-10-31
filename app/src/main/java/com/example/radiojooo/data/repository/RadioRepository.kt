@@ -34,18 +34,14 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                 response
             } else if (response.code in listOf(502, 503, 504)) {
                 response.close()
-                val retryRequest = originalRequest.newBuilder()
-                    .header("X-Retry-Attempt", "1")
-                    .build()
+                val retryRequest = originalRequest.newBuilder().header("X-Retry-Attempt", "1").build()
                 chain.proceed(retryRequest)
             } else {
                 response
             }
         } catch (e: IOException) {
             if (originalRequest.header("X-Retry-Attempt") == null) {
-                val retryRequest = originalRequest.newBuilder()
-                    .header("X-Retry-Attempt", "1")
-                    .build()
+                val retryRequest = originalRequest.newBuilder().header("X-Retry-Attempt", "1").build()
                 chain.proceed(retryRequest)
             } else {
                 throw e
@@ -74,15 +70,11 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
         }
     }
 
-    // ✅ التعديل هنا: شيلنا refreshStations() خلاص. دلوقتي بترجع فوراً.
+    // ✅ تم فصل التحميل عن الدالة دي عشان التطبيق ميهنجش
     suspend fun ensureInitialDataLoaded() {
         withContext(Dispatchers.IO) {
-            try {
-                if (stationDao.getStationsCount() == 0) {
-                    stationDao.insertStations(getSeedStations())
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
+            if (stationDao.getStationsCount() == 0) {
+                stationDao.insertStations(getSeedStations())
             }
         }
     }
