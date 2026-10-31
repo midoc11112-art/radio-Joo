@@ -19,7 +19,6 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
-import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -36,7 +35,6 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.FilteringMediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import com.example.radiojooo.R
-import com.example.radiojooo.data.local.AppDatabase
 import com.example.radiojooo.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -75,7 +73,7 @@ class RadioService : Service() {
     private var currentUrlIndex = 0
     var currentTitle: String = "راديو جو PRO"
     var currentLiveProgram: String = "بث مباشر"
-    var currentStationUuid: String = "" // لحفظ معرف المحطة الحالية لربطها بالقياس
+    var currentStationUuid: String = ""
 
     var isRecording = false; private set
     private var recordingJob: Job? = null
@@ -87,11 +85,6 @@ class RadioService : Service() {
     var totalDataMb = 0.0
     private var stationStartTimeMs = 0L
 
-    // ✅ متغيرات القياس الفعلي للبتريت
-    private var playbackStartTime = 0L
-    private var hasMeasuredBitrate = false
-    private val MAX_ALLOWED_KBPS = 80 // الحد الأقصى المسموح به (80 كيلوبت يعني ~36 ميجا/ساعة كحد أقصى)
-
     private var sleepTimer: CountDownTimer? = null
     var sleepTimeRemainingMs = 0L; private set
 
@@ -100,7 +93,6 @@ class RadioService : Service() {
         override fun run() {
             if (isAppInForeground) {
                 calculateDataUsage()
-                measureActualBitrate() // ✅ استدعاء دالة القياس
                 statsHandler.postDelayed(this, 1000)
             }
         }
@@ -134,10 +126,11 @@ class RadioService : Service() {
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
         }
 
+        // ✅ التعديل هنا: إزالة setMaxAudioBitrate التي كانت تمنع المحطات
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters()
                 .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
-                .setMaxAudioBitrate(64000) // سقف مبدئي 64k
+                // .setMaxAudioBitrate(32000) تم إزالتها
                 .build()
         }
 
@@ -281,7 +274,7 @@ class RadioService : Service() {
     fun playStation(title: String, uuid: String, pUrl: String, fUrl: String) {
         stopRecording()
         currentTitle = title
-        currentStationUuid = uuid // ✅ حفظ uuid لربطه بالقياس
+        currentStationUuid = uuid
         currentLiveProgram = "بث مباشر"
         availableUrls.clear()
         if (pUrl.isNotBlank()) availableUrls.add(pUrl.trim())
@@ -290,10 +283,6 @@ class RadioService : Service() {
         totalSessionBytes = 0L
         lastRxBytes = TrafficStats.getUidRxBytes(android.os.Process.myUid())
         stationStartTimeMs = System.currentTimeMillis()
-        
-        // ✅ تصفير متغيرات القياس عند تغيير المحطة
-        playbackStartTime = 0L
-        hasMeasuredBitrate = false
 
         if (availableUrls.isNotEmpty()) {
             startStream(availableUrls[0], useProxy = true)
@@ -334,6 +323,7 @@ class RadioService : Service() {
                 .build()
 
             val mediaSource = mediaSourceFactory.createMediaSource(mediaItem)
+            // ✅ إجبار ExoPlayer على استخدام مسار الصوت فقط
             val filteredSource = FilteringMediaSource(mediaSource, C.TRACK_TYPE_AUDIO)
 
             player.setMediaSource(filteredSource)
@@ -341,53 +331,6 @@ class RadioService : Service() {
             player.playWhenReady = true
         } catch (e: Exception) {
             e.printStackTrace()
-        }
-    }
-
-    // ✅ دالة القياس الفعلي للبتريت
-    private fun measureActualBitrate() {
-        if (!::player.isInitialized || !player.isPlaying) return
-        
-        if (playbackStartTime == 0L) {
-            playbackStartTime = System.currentTimeMillis()
-            return
-        }
-
-        val elapsedSeconds = (System.currentTimeMillis() - playbackStartTime) / 1000
-
-        // نقيس بعد 15 ثانية من التشغيل الفعلي (بعد ما البافر يستقر)
-        if (elapsedSeconds in 15..20 && !hasMeasuredBitrate) {
-            hasMeasuredBitrate = true
-            
-            // حساب متوسط البتريت الفعلي بالكيلوبت/ثانية
-            val actualKbps = if (elapsedSeconds > 0) {
-                (totalSessionBytes * 8) / (elapsedSeconds * 1000)
-            } else {
-                0
-            }
-
-            if (actualKbps > MAX_ALLOWED_KBPS) {
-                // المحطة تسحب أكثر من الحد المسموح
-                Handler(Looper.getMainLooper()).post {
-                    Toast.makeText(
-                        this,
-                        "⚠️ تم إيقاف المحطة: استهلاك البيانات مرتفع جداً (${actualKbps.toInt()} kbps)",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-                player.pause()
-                updateNotification()
-            } else {
-                // المحطة جيدة، نقوم بحفظ البتريت الفعلي في قاعدة البيانات
-                serviceScope.launch {
-                    try {
-                        val dao = AppDatabase.getDatabase(applicationContext).stationDao()
-                        dao.updateActualBitrate(currentStationUuid, actualKbps.toInt())
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                }
-            }
         }
     }
 
