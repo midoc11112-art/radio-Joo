@@ -26,20 +26,13 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.util.UnstableApi
 import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.work.Constraints
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.NetworkType
-import androidx.work.PeriodicWorkRequestBuilder
-import androidx.work.WorkManager
 import com.example.radiojooo.R
 import com.example.radiojooo.data.model.StationEntity
-import com.example.radiojooo.data.worker.StationSyncWorker
 import com.example.radiojooo.databinding.ActivityMainBinding
 import com.example.radiojooo.player.RadioService
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.util.Locale
-import java.util.concurrent.TimeUnit
 
 @UnstableApi
 class MainActivity : AppCompatActivity() {
@@ -83,7 +76,6 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestAllPermissions()
-        scheduleStationSync() 
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -95,22 +87,6 @@ class MainActivity : AppCompatActivity() {
         setupHeaderButtons()
         setupMiniPlayer()
         observeViewModel()
-    }
-
-    private fun scheduleStationSync() {
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
-
-        val syncRequest = PeriodicWorkRequestBuilder<StationSyncWorker>(6, TimeUnit.HOURS)
-            .setConstraints(constraints)
-            .build()
-
-        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-            "station_sync_work",
-            ExistingPeriodicWorkPolicy.KEEP,
-            syncRequest
-        )
     }
 
     private fun requestAllPermissions() {
@@ -203,7 +179,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupSwipeRefresh() {
         binding.swipeRefreshLayout.setOnRefreshListener {
-            // ✅ التعديل: إخفاء الكورة فوراً والاعتماد على التحديث في الخلفية
             binding.swipeRefreshLayout.isRefreshing = false
             viewModel.refreshData()
         }
@@ -211,7 +186,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupHeaderButtons() {
         binding.btnRefreshHeader.setOnClickListener {
-            // ✅ التعديل: نفس فكرة السحب
             viewModel.refreshData()
             Toast.makeText(this, "جاري التحديث في الخلفية...", Toast.LENGTH_SHORT).show()
         }
@@ -329,7 +303,6 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             viewModel.refreshResult.collectLatest { count ->
-                // ✅ إخفاء الكورة البيضاء (إن وجدت) وإظهار رسالة نجاح
                 binding.swipeRefreshLayout.isRefreshing = false
                 Toast.makeText(this@MainActivity, "تم تحديث $count محطة بنجاح", Toast.LENGTH_SHORT).show()
             }
