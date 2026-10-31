@@ -47,18 +47,15 @@ dependencies {
     
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
 
-    // Lifecycle & ViewModel
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.2")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.2")
     implementation("androidx.activity:activity-ktx:1.9.0")
 
-    // Room Database
     val roomVersion = "2.6.1"
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
     ksp("androidx.room:room-compiler:$roomVersion")
 
-    // Media3 ExoPlayer 1.6.1
     val media3Version = "1.6.1"
     implementation("androidx.media3:media3-exoplayer:$media3Version")
     implementation("androidx.media3:media3-exoplayer-hls:$media3Version")
@@ -66,8 +63,6 @@ dependencies {
     implementation("androidx.media3:media3-ui:$media3Version")
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-
     implementation("androidx.work:work-runtime-ktx:2.9.1")
 }
