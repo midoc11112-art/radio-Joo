@@ -24,7 +24,7 @@ jobs:
       run: chmod +x gradlew || true
 
     - name: Build with Gradle
-      run: ./gradlew assembleDebug --no-daemon
+      run: ./gradlew :app:assembleDebug --no-daemon
 
     # ✅ الإضافة الجديدة: رفع ملف الـ APK بعد انتهاء التجميع
     - name: Upload APK
