@@ -32,16 +32,15 @@ class RadioRepository(private val stationDao: StationDao) {
 
     suspend fun ensureInitialDataLoaded() {
         withContext(Dispatchers.IO) {
+            // 1. إضافة المحطات المضمونة فوراً إذا كانت قاعدة البيانات فارغة
             if (stationDao.getStationsCount() == 0) {
-                refreshStations()
-                if (stationDao.getStationsCount() == 0) {
-                    insertEmergencyStations()
-                }
+                stationDao.insertStations(getSeedStations())
             }
+            // 2. محاولة التحديث من المصادر في الخلفية (لا تمسح المحطات المضمونة إذا فشلت)
+            refreshStations()
         }
     }
 
-    // ✅ الحل الثوري: التركيز على مصدرين فقط، مهلة 20 ثانية لكل مصدر، بدون فلتر bitrate صارم
     suspend fun refreshStations(): Int = withContext(Dispatchers.IO) {
         val fetchedList = mutableListOf<StationEntity>()
 
@@ -60,10 +59,11 @@ class RadioRepository(private val stationDao: StationDao) {
             val distinctList = fetchedList.distinctBy { it.uuid }
             val currentFavs = stationDao.getStationsListDirect().filter { it.isFavorite }.map { it.uuid }.toSet()
             val updated = distinctList.map { it.copy(isFavorite = currentFavs.contains(it.uuid)) }
+            // دمج المحطات الجديدة مع المحطات المضمنة (لا نمسح المضمنة)
             stationDao.insertStations(updated)
-            updated.size
+            stationDao.getStationsCount()
         } else {
-            insertEmergencyStations()
+            // إذا فشل التحديث، نعيد عدد المحطات الموجودة (بما فيها المضمنة)
             stationDao.getStationsCount()
         }
     }
@@ -80,7 +80,7 @@ class RadioRepository(private val stationDao: StationDao) {
                 val connection = URL(urlStr).openConnection() as HttpURLConnection
                 connection.connectTimeout = 15000
                 connection.readTimeout = 15000
-                connection.setRequestProperty("User-Agent", "RadioJooApp/12.0")
+                connection.setRequestProperty("User-Agent", "RadioJooApp/13.0")
                 if (connection.responseCode == 200) {
                     val lines = connection.inputStream.bufferedReader().use { it.readLines() }
                     var currentName = ""
@@ -90,7 +90,6 @@ class RadioRepository(private val stationDao: StationDao) {
                         } else if (line.startsWith("http") && currentName.isNotEmpty()) {
                             val lowerUrl = line.lowercase()
                             val lowerName = currentName.lowercase()
-                            // نأخذ المحطات المصرية المعروفة أو التي تحتوي على 64/32/low في الاسم أو الرابط
                             val isEgyptian = lowerName.contains("masr") || lowerName.contains("nogoum") ||
                                     lowerName.contains("nile") || lowerName.contains("9090") ||
                                     lowerName.contains("mega") || lowerName.contains("sha3by") ||
@@ -112,7 +111,7 @@ class RadioRepository(private val stationDao: StationDao) {
                                         country = "EG",
                                         category = category,
                                         countryCode = "EG",
-                                        bitrate = 64, // قيمة افتراضية للعرض
+                                        bitrate = 64,
                                         isFavorite = false,
                                         popularityScore = 80
                                     )
@@ -121,7 +120,7 @@ class RadioRepository(private val stationDao: StationDao) {
                             currentName = ""
                         }
                     }
-                    break // نجح الجلب من هذا الرابط
+                    break
                 }
             } catch (e: Exception) { e.printStackTrace() }
         }
@@ -136,7 +135,7 @@ class RadioRepository(private val stationDao: StationDao) {
             val connection = URL(url).openConnection() as HttpURLConnection
             connection.connectTimeout = 15000
             connection.readTimeout = 15000
-            connection.setRequestProperty("User-Agent", "RadioJooApp/12.0")
+            connection.setRequestProperty("User-Agent", "RadioJooApp/13.0")
             if (connection.responseCode == 200) {
                 val lines = connection.inputStream.bufferedReader().use { it.readLines() }
                 var currentName = ""
@@ -144,10 +143,8 @@ class RadioRepository(private val stationDao: StationDao) {
                     if (line.startsWith("#EXTINF:")) {
                         currentName = line.substringAfterLast(",").trim()
                     } else if (line.startsWith("http") && currentName.isNotEmpty()) {
-                        // استخراج bitrate من الاسم (مثل "48 kbit/s")
                         val bitrateMatch = Regex("(\\d+)\\s*kbit/s").find(currentName)
                         val bitrate = bitrateMatch?.groupValues?.get(1)?.toIntOrNull() ?: 128
-                        // نأخذ المحطات التي يقل bitrate فيها عن 128 (أو غير معروف)
                         if (bitrate <= 128) {
                             val uuid = "arabic_${currentName.hashCode()}_${line.hashCode()}"
                             val category = StationNormalizer.classify(uuid, currentName, "arabic")
@@ -175,12 +172,32 @@ class RadioRepository(private val stationDao: StationDao) {
         return list
     }
 
-    private suspend fun insertEmergencyStations() {
-        val emergencyList = listOf(
-            StationEntity(uuid = "emergency_quran", name = "إذاعة القرآن الكريم", primaryUrl = wrapProxy("https://stream.zeno.fm/f3wvbb1ch3quv"), fallbackUrl = "", tags = "quran", country = "EG", category = "QURAN", countryCode = "EG", bitrate = 32, isFavorite = true, popularityScore = 1000),
-            StationEntity(uuid = "emergency_radio_masr", name = "راديو مصر", primaryUrl = wrapProxy("https://audio.nrpstream.com/listen/radio_masr/radio.mp3"), fallbackUrl = "", tags = "news", country = "EG", category = "NEWS", countryCode = "EG", bitrate = 64, isFavorite = false, popularityScore = 990)
+    // ==================== 3. قائمة المحطات المضمونة (Seed Stations) ====================
+    private fun getSeedStations(): List<StationEntity> {
+        return listOf(
+            // --- محطات مصرية ---
+            StationEntity("eg_quran_cairo", "إذاعة القرآن الكريم - القاهرة", wrapProxy("https://stream.zeno.fm/f3wvbb1ch3quv"), "", "quran", "EG", "QURAN", 32, true, 10000),
+            StationEntity("eg_radio_masr", "راديو مصر 88.7", wrapProxy("https://audio.nrpstream.com/listen/radio_masr/radio.mp3"), "", "news", "EG", "NEWS", 64, true, 9900),
+            StationEntity("eg_nogoum_fm", "نجوم إف إم 100.6", wrapProxy("https://audio.nrpstream.com/listen/nogoumfm/radio.mp3"), "", "music", "EG", "MUSIC", 128, true, 9950),
+            StationEntity("eg_nile_fm", "نايل إف إم 104.2", wrapProxy("https://audio.nrpstream.com/listen/nile_fm/radio.mp3"), "", "music", "EG", "MUSIC", 128, true, 9940),
+            StationEntity("eg_9090_fm", "راديو 9090", wrapProxy("https://9090streaming.mobtada.com/9090FMEGYPT"), "", "news", "EG", "NEWS", 64, true, 9850),
+            StationEntity("eg_mega_fm", "ميجا إف إم 92.7", wrapProxy("http://nebula.shoutca.st:8211/mp3"), "", "music", "EG", "MUSIC", 128, true, 9850),
+            StationEntity("eg_sha3by_fm", "شعبي إف إم 95.0", wrapProxy("https://radio95.radioca.st/"), "", "music", "EG", "MUSIC", 128, true, 9750),
+            StationEntity("eg_nagham_fm", "نغم إف إم 105.3", wrapProxy("https://ahmsamir.radioca.st/stream"), "", "music", "EG", "MUSIC", 128, true, 9800),
+            StationEntity("eg_banha_city", "بنها سيتي", wrapProxy("https://stream.zeno.fm/6d00vhq972ztv"), "", "general", "EG", "GENERAL", 64, false, 60),
+            StationEntity("eg_diab_fm", "دياب إف إم", wrapProxy("https://stream.zeno.fm/3b88vhq972ztv"), "", "general", "EG", "GENERAL", 64, false, 60),
+            // --- محطات عربية ---
+            StationEntity("ar_jazeera_voice", "الجزيرة - صوت", wrapProxy("https://live-hls-audio-web-aja.getaj.net/VOICE-AJA/01.m3u8"), "", "news", "QA", "NEWS", 64, true, 9900),
+            StationEntity("ar_alarabiya", "العربية - صوت", wrapProxy("https://live.alarabiya.net/alarabiya/live.m3u8"), "", "news", "SA", "NEWS", 64, true, 9850),
+            StationEntity("ar_bbc_arabic", "بي بي سي عربي", wrapProxy("https://stream.live.vc.bbcmedia.co.uk/bbc_arabic_radio"), "", "news", "GB", "NEWS", 64, true, 9700),
+            StationEntity("ar_monte_carlo", "مونت كارلو الدولية", wrapProxy("https://montecarlodoualiya.ice.infomaniak.ch/mc-doualiya-mid.mp3"), "", "news", "FR", "NEWS", 64, true, 890),
+            StationEntity("ar_sky_news", "سكاي نيوز عربية", wrapProxy("https://stream.skynewsarabia.com/hls/sna.m3u8"), "", "news", "AE", "NEWS", 64, false, 880),
+            StationEntity("ar_alhadath", "الحدث - صوت", wrapProxy("https://live-hls-audio-web-ala.getaj.net/VOICE-ALA/01.m3u8"), "", "news", "AE", "NEWS", 64, false, 870),
+            StationEntity("ar_sputnik", "سبوتنيك عربي", wrapProxy("https://stream.zeno.fm/z988y8k9h8quv"), "", "news", "RU", "NEWS", 64, false, 860),
+            StationEntity("ar_mbc_fm", "MBC FM", wrapProxy("https://stream.zeno.fm/4v85y8k9h8quv"), "", "music", "SA", "MUSIC", 64, false, 850),
+            StationEntity("ar_rotana", "روتانا FM", wrapProxy("https://stream.zeno.fm/7x3b77bh3quv"), "", "music", "SA", "MUSIC", 64, false, 840),
+            StationEntity("ar_quran_makkah", "إذاعة القرآن الكريم - مكة", wrapProxy("https://qurango.net/radio/makkah"), "", "quran", "SA", "QURAN", 64, false, 830)
         )
-        stationDao.insertStations(emergencyList)
     }
 
     suspend fun toggleFavorite(uuid: String, currentStatus: Boolean) {
