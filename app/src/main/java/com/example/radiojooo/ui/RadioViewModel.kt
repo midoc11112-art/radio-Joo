@@ -47,14 +47,16 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         val stationDao = AppDatabase.getDatabase(application).stationDao()
-        // ✅ تمرير cacheDir للمستودع
         repository = RadioRepository(stationDao, application.cacheDir)
 
         val rawFlow = MutableStateFlow<List<StationEntity>>(emptyList())
         allRawStations = rawFlow.asStateFlow()
 
         viewModelScope.launch {
+            _isLoading.value = true // ✅ إظهار التحميل
             repository.ensureInitialDataLoaded()
+            _isLoading.value = false // ✅ إخفاء التحميل بعد الانتهاء
+            
             repository.allStations.collect { list ->
                 rawFlow.value = list
                 updateCategoryCounts(list)
@@ -83,7 +85,6 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                // ✅ الترتيب حسب الشهرة تنازلياً
                 filtered.sortedByDescending { it.popularityScore }
             }.collect {
                 filteredFlow.value = it
