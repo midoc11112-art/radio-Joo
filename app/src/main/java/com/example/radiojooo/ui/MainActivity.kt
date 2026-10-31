@@ -119,9 +119,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
-        val intent = Intent(this, RadioService::class.java).apply {
-            action = "ACTION_LOCAL_BIND"
-        }
+        val intent = Intent(this, RadioService::class.java)
         bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
         radioService?.setAppForegroundState(true)
         updateHandler.post(updateRunnable)
@@ -216,8 +214,7 @@ class MainActivity : AppCompatActivity() {
         viewModel.setCurrentStation(station)
 
         val serviceIntent = Intent(this, RadioService::class.java)
-        // ✅ تم التعديل هنا: استخدام startService بدلاً من startForegroundService لمنع الانهيار
-        startService(serviceIntent)
+        ContextCompat.startForegroundService(this, serviceIntent)
 
         radioService?.playStation(
             title = station.name,
