@@ -93,7 +93,12 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
                 if (query.isNotBlank()) {
                     val q = query.trim().lowercase()
                     filtered = filtered.filter { 
-                        it.name.lowercase().contains(q) || it.category.lowercase().contains(q) || it.countryCode.lowercase().contains(q)
+                        // ✅ إضافة البحث بالبيت ريت (Bitrate)
+                        it.name.lowercase().contains(q) || 
+                        it.category.lowercase().contains(q) || 
+                        it.countryCode.lowercase().contains(q) ||
+                        it.bitrate.toString().contains(q) ||
+                        it.actualBitrate.toString().contains(q)
                     }
                 }
 
