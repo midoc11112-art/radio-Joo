@@ -24,8 +24,8 @@ import java.util.concurrent.TimeUnit
 
 class RadioRepository(private val stationDao: StationDao, private val cacheDir: File) {
 
-    // ✅ تم إرجاع رابط البروكسي الأصلي الخاص بك الذي يعمل
-    private val PROXY_BASE_URL = "https://radio-joo-proxy.midoc11112.workers.dev/?stream_url="
+    // ✅ الرابط الصحيح المتوافق مع السيرفر الجديد
+    private val PROXY_BASE_URL = "https://radio-joo-proxy.midoc11112.workers.dev/?url="
 
     private val failoverInterceptor = Interceptor { chain ->
         val originalRequest = chain.request()
@@ -82,6 +82,7 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
     suspend fun refreshStations(): Int = withContext(Dispatchers.IO) {
         try {
             supervisorScope {
+                // جلب جميع المحطات بدون أي حظر
                 val jobs = listOf(
                     async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowser("bycountrycodeexact/EG", "EG", null) } },
                     async { withTimeoutOrNull(15_000L) { fetchFromRadioBrowser("bylanguage/arabic", null, null) } },
@@ -132,6 +133,7 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                     val bitrate = obj.optInt("bitrate", 64)
                     val uuid = obj.optString("stationuuid", java.util.UUID.randomUUID().toString())
 
+                    // جلب المحطة طالما لغتها عربية أو دولتها عربية (بدون فلترة بتريت)
                     if (rawUrl.isNotBlank() && StationNormalizer.isArabicStation(name, lang, country)) {
                         val category = forcedCategory ?: StationNormalizer.classify(uuid, name, "")
                         list.add(StationEntity(uuid, name, wrapProxy(rawUrl), "", "", country, category, country, bitrate, false, obj.optInt("clickcount", 100)))
