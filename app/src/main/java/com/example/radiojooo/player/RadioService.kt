@@ -133,10 +133,12 @@ class RadioService : Service() {
                 .build()
         }
 
+        // ✅ تعديل حاسم لتقليل استهلاك الإنترنت: تقليل حجم الذاكرة المؤقتة إلى 1 ميجابايت
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(10000, 20000, 1500, 3000)
+            .setTargetBufferBytes(1024 * 1024) // تحديد المخزن المؤقت بـ 1MB فقط لتوفير البيانات
             .setPrioritizeTimeOverSizeThresholds(true)
-            .setBackBuffer(0, false)
+            .setBackBuffer(0, false) // عدم الاحتفاظ ببيانات سابقة
             .build()
 
         val dataSourceFactory = DefaultHttpDataSource.Factory()
