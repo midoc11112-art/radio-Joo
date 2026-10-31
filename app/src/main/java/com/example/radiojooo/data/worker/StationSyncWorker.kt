@@ -13,12 +13,14 @@ class StationSyncWorker(
 
     override suspend fun doWork(): Result {
         return try {
-            val db = AppDatabase.getDatabase(applicationContext)
-            // ✅ تمرير applicationContext.cacheDir
-            val repository = RadioRepository(db.stationDao(), applicationContext.cacheDir)
+            val dao = AppDatabase.getDatabase(applicationContext).stationDao()
+            val repo = RadioRepository(dao, applicationContext.cacheDir)
             
-            // ✅ تحديث المحطات من المصادر في الخلفية
-            repository.refreshStations()
+            // تحديث وجلب محطات جديدة
+            repo.refreshStations()
+            
+            // فحص الروابط الميتة وإصلاحها
+            repo.validateAndHealStations()
             
             Result.success()
         } catch (e: Exception) {
