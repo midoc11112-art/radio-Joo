@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.radiojooo.data.local.AppDatabase
 import com.example.radiojooo.data.model.StationEntity
 import com.example.radiojooo.data.repository.RadioRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -52,7 +53,7 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
         val rawFlow = MutableStateFlow<List<StationEntity>>(emptyList())
         allRawStations = rawFlow.asStateFlow()
 
-        // ✅ 1. عرض المحطات من الذاكرة فوراً (عشان مفيش تهنيج)
+        // ✅ 1. عرض المحطات المحفوظة فوراً (بدون ما نستنى أي حاجة)
         viewModelScope.launch {
             repository.allStations.collect { list ->
                 rawFlow.value = list
@@ -60,11 +61,18 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // ✅ 2. تحميل البيانات في الخلفية
-        viewModelScope.launch {
-            _isLoading.value = true
+        // ✅ 2. تحميل المحطات الافتراضية (سريع جداً - جزء من الثانية)
+        viewModelScope.launch(Dispatchers.IO) {
             repository.ensureInitialDataLoaded()
-            _isLoading.value = false
+        }
+
+        // ✅ 3. تحديث المحطات من النت في الخلفية (مش بيعطل الـ UI خالص)
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                repository.refreshStations()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
 
         val filteredFlow = MutableStateFlow<List<StationEntity>>(emptyList())
