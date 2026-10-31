@@ -42,17 +42,13 @@ class RadioRepository(private val stationDao: StationDao, cacheDir: File) {
 
     suspend fun ensureInitialDataLoaded() {
         withContext(Dispatchers.IO) {
-            // 1. عرض المحطات المخزنة فوراً (Offline-First) إذا كانت قاعدة البيانات فارغة
             if (stationDao.getStationsCount() == 0) {
                 stationDao.insertStations(getSeedStations())
             }
-            
-            // 2. بدء التحديث الصامت في الخلفية
             refreshStations()
         }
     }
 
-    // ✅ دالة التحديث مع الحفظ التدريجي (Progressive Saving)
     suspend fun refreshStations(): Int = withContext(Dispatchers.IO) {
         supervisorScope {
             val jobs = listOf(
@@ -63,20 +59,16 @@ class RadioRepository(private val stationDao: StationDao, cacheDir: File) {
                 async { withTimeoutOrNull(15_000L) { fetchFromEgyptM3U() } }
             )
             
-            // نمر على المهام واحدة تلو الأخرى. بمجرد أن ينتهي أي مصدر، نحفظ نتائجه فوراً
             jobs.forEach { job ->
                 val list = job.await()
                 if (list != null && list.isNotEmpty()) {
                     val distinctList = list.distinctBy { it.uuid }
                     val currentFavs = stationDao.getStationsListDirect().filter { it.isFavorite }.map { it.uuid }.toSet()
                     val updated = distinctList.map { it.copy(isFavorite = currentFavs.contains(it.uuid)) }
-                    
-                    // حفظ فوري في Room -> سيؤدي إلى تحديث الـ RecyclerView تدريجياً بفضل Flow
                     stationDao.insertStations(updated)
                 }
             }
         }
-        // إرجاع العدد الإجمالي النهائي للمحطات
         stationDao.getStationsCount()
     }
 
@@ -291,17 +283,149 @@ class RadioRepository(private val stationDao: StationDao, cacheDir: File) {
     // ==================== 6. محطات مضمونة (Seed) ====================
     private fun getSeedStations(): List<StationEntity> {
         return listOf(
-            StationEntity("eg_quran_cairo", "إذاعة القرآن الكريم - القاهرة", wrapProxy("https://stream.zeno.fm/f3wvbb1ch3quv"), "", "quran", "EG", "QURAN", 32, true, 10000),
-            StationEntity("eg_radio_masr", "راديو مصر 88.7", wrapProxy("https://audio.nrpstream.com/listen/radio_masr/radio.mp3"), "", "news", "EG", "NEWS", 64, true, 9900),
-            StationEntity("eg_nogoum_fm", "نجوم إف إم 100.6", wrapProxy("https://audio.nrpstream.com/listen/nogoumfm/radio.mp3"), "", "music", "EG", "MUSIC", 128, true, 9950),
-            StationEntity("eg_nile_fm", "نايل إف إم 104.2", wrapProxy("https://audio.nrpstream.com/listen/nile_fm/radio.mp3"), "", "music", "EG", "MUSIC", 128, true, 9940),
-            StationEntity("eg_9090_fm", "راديو 9090", wrapProxy("https://9090streaming.mobtada.com/9090FMEGYPT"), "", "news", "EG", "NEWS", 64, true, 9850),
-            StationEntity("eg_mega_fm", "ميجا إف إم 92.7", wrapProxy("http://nebula.shoutca.st:8211/mp3"), "", "music", "EG", "MUSIC", 128, true, 9850),
-            StationEntity("eg_sha3by_fm", "شعبي إف إم 95.0", wrapProxy("https://radio95.radioca.st/"), "", "music", "EG", "MUSIC", 128, true, 9750),
-            StationEntity("eg_nagham_fm", "نغم إف إم 105.3", wrapProxy("https://ahmsamir.radioca.st/stream"), "", "music", "EG", "MUSIC", 128, true, 9800),
-            StationEntity("ar_jazeera_voice", "الجزيرة - صوت", wrapProxy("https://live-hls-audio-web-aja.getaj.net/VOICE-AJA/01.m3u8"), "", "news", "QA", "NEWS", 64, true, 9900),
-            StationEntity("ar_alarabiya", "العربية - صوت", wrapProxy("https://live.alarabiya.net/alarabiya/live.m3u8"), "", "news", "SA", "NEWS", 64, true, 9850),
-            StationEntity("ar_bbc_arabic", "بي بي سي عربي", wrapProxy("https://stream.live.vc.bbcmedia.co.uk/bbc_arabic_radio"), "", "news", "GB", "NEWS", 64, true, 9700)
+            StationEntity(
+                uuid = "eg_quran_cairo",
+                name = "إذاعة القرآن الكريم - القاهرة",
+                primaryUrl = wrapProxy("https://stream.zeno.fm/f3wvbb1ch3quv"),
+                fallbackUrl = "",
+                tags = "quran",
+                country = "EG",
+                category = "QURAN",
+                countryCode = "EG",
+                bitrate = 32,
+                isFavorite = true,
+                popularityScore = 10000
+            ),
+            StationEntity(
+                uuid = "eg_radio_masr",
+                name = "راديو مصر 88.7",
+                primaryUrl = wrapProxy("https://audio.nrpstream.com/listen/radio_masr/radio.mp3"),
+                fallbackUrl = "",
+                tags = "news",
+                country = "EG",
+                category = "NEWS",
+                countryCode = "EG",
+                bitrate = 64,
+                isFavorite = true,
+                popularityScore = 9900
+            ),
+            StationEntity(
+                uuid = "eg_nogoum_fm",
+                name = "نجوم إف إم 100.6",
+                primaryUrl = wrapProxy("https://audio.nrpstream.com/listen/nogoumfm/radio.mp3"),
+                fallbackUrl = "",
+                tags = "music",
+                country = "EG",
+                category = "MUSIC",
+                countryCode = "EG",
+                bitrate = 128,
+                isFavorite = true,
+                popularityScore = 9950
+            ),
+            StationEntity(
+                uuid = "eg_nile_fm",
+                name = "نايل إف إم 104.2",
+                primaryUrl = wrapProxy("https://audio.nrpstream.com/listen/nile_fm/radio.mp3"),
+                fallbackUrl = "",
+                tags = "music",
+                country = "EG",
+                category = "MUSIC",
+                countryCode = "EG",
+                bitrate = 128,
+                isFavorite = true,
+                popularityScore = 9940
+            ),
+            StationEntity(
+                uuid = "eg_9090_fm",
+                name = "راديو 9090",
+                primaryUrl = wrapProxy("https://9090streaming.mobtada.com/9090FMEGYPT"),
+                fallbackUrl = "",
+                tags = "news",
+                country = "EG",
+                category = "NEWS",
+                countryCode = "EG",
+                bitrate = 64,
+                isFavorite = true,
+                popularityScore = 9850
+            ),
+            StationEntity(
+                uuid = "eg_mega_fm",
+                name = "ميجا إف إم 92.7",
+                primaryUrl = wrapProxy("http://nebula.shoutca.st:8211/mp3"),
+                fallbackUrl = "",
+                tags = "music",
+                country = "EG",
+                category = "MUSIC",
+                countryCode = "EG",
+                bitrate = 128,
+                isFavorite = true,
+                popularityScore = 9850
+            ),
+            StationEntity(
+                uuid = "eg_sha3by_fm",
+                name = "شعبي إف إم 95.0",
+                primaryUrl = wrapProxy("https://radio95.radioca.st/"),
+                fallbackUrl = "",
+                tags = "music",
+                country = "EG",
+                category = "MUSIC",
+                countryCode = "EG",
+                bitrate = 128,
+                isFavorite = true,
+                popularityScore = 9750
+            ),
+            StationEntity(
+                uuid = "eg_nagham_fm",
+                name = "نغم إف إم 105.3",
+                primaryUrl = wrapProxy("https://ahmsamir.radioca.st/stream"),
+                fallbackUrl = "",
+                tags = "music",
+                country = "EG",
+                category = "MUSIC",
+                countryCode = "EG",
+                bitrate = 128,
+                isFavorite = true,
+                popularityScore = 9800
+            ),
+            StationEntity(
+                uuid = "ar_jazeera_voice",
+                name = "الجزيرة - صوت",
+                primaryUrl = wrapProxy("https://live-hls-audio-web-aja.getaj.net/VOICE-AJA/01.m3u8"),
+                fallbackUrl = "",
+                tags = "news",
+                country = "QA",
+                category = "NEWS",
+                countryCode = "QA",
+                bitrate = 64,
+                isFavorite = true,
+                popularityScore = 9900
+            ),
+            StationEntity(
+                uuid = "ar_alarabiya",
+                name = "العربية - صوت",
+                primaryUrl = wrapProxy("https://live.alarabiya.net/alarabiya/live.m3u8"),
+                fallbackUrl = "",
+                tags = "news",
+                country = "SA",
+                category = "NEWS",
+                countryCode = "SA",
+                bitrate = 64,
+                isFavorite = true,
+                popularityScore = 9850
+            ),
+            StationEntity(
+                uuid = "ar_bbc_arabic",
+                name = "بي بي سي عربي",
+                primaryUrl = wrapProxy("https://stream.live.vc.bbcmedia.co.uk/bbc_arabic_radio"),
+                fallbackUrl = "",
+                tags = "news",
+                country = "GB",
+                category = "NEWS",
+                countryCode = "GB",
+                bitrate = 64,
+                isFavorite = true,
+                popularityScore = 9700
+            )
         )
     }
 
