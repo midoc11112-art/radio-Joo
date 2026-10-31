@@ -74,12 +74,12 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
         }
     }
 
+    // ✅ التعديل هنا: شيلنا refreshStations() خلاص. دلوقتي بترجع فوراً.
     suspend fun ensureInitialDataLoaded() {
         withContext(Dispatchers.IO) {
             try {
                 if (stationDao.getStationsCount() == 0) {
                     stationDao.insertStations(getSeedStations())
-                    refreshStations() 
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
