@@ -14,9 +14,10 @@ class StationSyncWorker(
     override suspend fun doWork(): Result {
         return try {
             val db = AppDatabase.getDatabase(applicationContext)
-            val repository = RadioRepository(db.stationDao())
+            // ✅ تمرير applicationContext.cacheDir
+            val repository = RadioRepository(db.stationDao(), applicationContext.cacheDir)
             
-            // ✅ تحديث المحطات من Radio Browser في الخلفية
+            // ✅ تحديث المحطات من المصادر في الخلفية
             repository.refreshStations()
             
             Result.success()
