@@ -76,10 +76,11 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
     suspend fun ensureInitialDataLoaded() {
         withContext(Dispatchers.IO) {
+            // ✅ التعديل هنا: تحديث المحطات من النت يحدث فقط لو الداتا بيز فاضية
             if (stationDao.getStationsCount() == 0) {
                 stationDao.insertStations(getSeedStations())
+                refreshStations() 
             }
-            refreshStations()
         }
     }
 
