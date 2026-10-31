@@ -43,7 +43,7 @@ interface StationDao {
     @Query("DELETE FROM stations")
     suspend fun clearAll()
 
-    // ✅ التعديل هنا: تغيير streamUrl إلى url
-    @Query("UPDATE stations SET url = :newUrl WHERE uuid = :uuid")
+    // ✅ التعديل الحاسم: استخدام primaryUrl بدلاً من url أو streamUrl
+    @Query("UPDATE stations SET primaryUrl = :newUrl WHERE uuid = :uuid")
     suspend fun updateStreamUrl(uuid: String, newUrl: String)
 }
