@@ -15,6 +15,6 @@ class PlayerActivity : AppCompatActivity() {
         binding = ActivityPlayerBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // TODO: قم بإضافة كود واجهة المشغل الخاص بك هنا
+        // TODO: كود واجهة المشغل
     }
 }
