@@ -53,7 +53,7 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
         val rawFlow = MutableStateFlow<List<StationEntity>>(emptyList())
         allRawStations = rawFlow.asStateFlow()
 
-        // 1. عرض المحطات من الداتا بيز فوراً (بدون تهنيج)
+        // 1. عرض المحطات من الداتا بيز فوراً
         viewModelScope.launch {
             repository.allStations.collect { list ->
                 rawFlow.value = list
@@ -61,12 +61,12 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // 2. إضافة المحطات الافتراضية إذا كانت الداتا فارغة (سريع جداً)
+        // 2. تحميل المحطات الافتراضية إذا كانت الداتا فارغة
         viewModelScope.launch(Dispatchers.IO) {
             repository.ensureInitialDataLoaded()
         }
 
-        // 3. جلب المحطات من الإنترنت في الخلفية (بدون التأثير على الواجهة)
+        // 3. جلب المحطات من الإنترنت في الخلفية
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.refreshStations()
@@ -129,12 +129,15 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // ✅ التعديل هنا: التحديث يعمل في الخلفية بدون إظهار تحميل يهنج الشاشة
     fun refreshData() {
-        viewModelScope.launch {
-            _isLoading.value = true
-            val count = repository.refreshStations()
-            _isLoading.value = false
-            _refreshResult.emit(count)
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val count = repository.refreshStations()
+                _refreshResult.emit(count)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 }
