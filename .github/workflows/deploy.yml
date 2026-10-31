@@ -14,13 +14,14 @@ jobs:
         with:
           node-version: '20'
           
-      - name: Install Dependencies and Wrangler
-        run: |
-          npm install
-          npm install -g wrangler@4
+      - name: Install Dependencies
+        run: npm install
           
+      - name: Clear Wrangler Cache
+        run: rm -rf node_modules/.cache
+        
       - name: Deploy to Cloudflare
-        run: wrangler deploy
+        run: npx wrangler deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
