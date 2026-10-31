@@ -10,3 +10,7 @@ max_instances = 3
 [[durable_objects.bindings]]
 name = "FFMPEG_CONTAINER"
 class_name = "FFmpegContainer"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["FFmpegContainer"]
