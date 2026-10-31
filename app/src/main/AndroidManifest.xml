@@ -35,16 +35,12 @@
             android:name=".ui.PlayerActivity"
             android:exported="false" />
 
+        <!-- ✅ تعريف الخدمة كـ Service عادي وليس MediaSessionService -->
         <service
             android:name=".player.RadioService"
             android:foregroundServiceType="mediaPlayback"
             android:stopWithTask="false"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="androidx.media3.session.MediaSessionService" />
-                <action android:name="android.media.browse.MediaBrowserService" />
-            </intent-filter>
-        </service>
+            android:exported="false" />
 
     </application>
 </manifest>
