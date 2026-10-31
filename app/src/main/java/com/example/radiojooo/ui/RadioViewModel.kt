@@ -53,7 +53,7 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
         val rawFlow = MutableStateFlow<List<StationEntity>>(emptyList())
         allRawStations = rawFlow.asStateFlow()
 
-        // ✅ 1. عرض المحطات المحفوظة فوراً (بدون ما نستنى أي حاجة)
+        // 1. عرض المحطات من الداتا بيز فوراً (بدون تهنيج)
         viewModelScope.launch {
             repository.allStations.collect { list ->
                 rawFlow.value = list
@@ -61,12 +61,12 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // ✅ 2. تحميل المحطات الافتراضية (سريع جداً - جزء من الثانية)
+        // 2. إضافة المحطات الافتراضية إذا كانت الداتا فارغة (سريع جداً)
         viewModelScope.launch(Dispatchers.IO) {
             repository.ensureInitialDataLoaded()
         }
 
-        // ✅ 3. تحديث المحطات من النت في الخلفية (مش بيعطل الـ UI خالص)
+        // 3. جلب المحطات من الإنترنت في الخلفية (بدون التأثير على الواجهة)
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.refreshStations()
