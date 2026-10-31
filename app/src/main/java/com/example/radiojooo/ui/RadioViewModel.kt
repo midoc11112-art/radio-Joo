@@ -52,15 +52,19 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
         val rawFlow = MutableStateFlow<List<StationEntity>>(emptyList())
         allRawStations = rawFlow.asStateFlow()
 
+        // ✅ 1. عرض المحطات من الذاكرة فوراً (عشان مفيش تهنيج)
         viewModelScope.launch {
-            _isLoading.value = true // ✅ إظهار التحميل
-            repository.ensureInitialDataLoaded()
-            _isLoading.value = false // ✅ إخفاء التحميل بعد الانتهاء
-            
             repository.allStations.collect { list ->
                 rawFlow.value = list
                 updateCategoryCounts(list)
             }
+        }
+
+        // ✅ 2. تحميل البيانات في الخلفية
+        viewModelScope.launch {
+            _isLoading.value = true
+            repository.ensureInitialDataLoaded()
+            _isLoading.value = false
         }
 
         val filteredFlow = MutableStateFlow<List<StationEntity>>(emptyList())
