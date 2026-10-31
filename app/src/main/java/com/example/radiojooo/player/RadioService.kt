@@ -112,7 +112,6 @@ class RadioService : Service() {
         return binder
     }
 
-    // ✅ استقبال أوامر الإشعار (تشغيل/إيقاف/خروج)
     private val notificationActionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
@@ -154,7 +153,6 @@ class RadioService : Service() {
         acquireLocks()
         createNotificationChannel()
 
-        // تسجيل مستقبل الأوامر
         val filter = IntentFilter().apply {
             addAction("ACTION_PLAY_PAUSE")
             addAction("ACTION_CLOSE")
@@ -207,7 +205,6 @@ class RadioService : Service() {
 
         player.setWakeMode(C.WAKE_MODE_NETWORK)
 
-        // إنشاء MediaSession لشاشة القفل (لكن الإشعار سيكون مخصصاً)
         val sessionActivity = PendingIntent.getActivity(
             this, 0,
             Intent(this, MainActivity::class.java),
@@ -249,7 +246,6 @@ class RadioService : Service() {
         }
     }
 
-    // ✅ تصميم الإشعار المخصص (اسم المحطة، زر تشغيل/إيقاف، زر خروج X)
     private fun buildNotification(): Notification {
         val intent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
@@ -271,10 +267,14 @@ class RadioService : Service() {
             this, 2, closeIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        // ربط MediaSession بالإشعار ليعمل على شاشة القفل
+        // ✅ تصحيح استدعاء MediaStyle باستخدام Token الصحيح
         val mediaStyle = androidx.media.app.NotificationCompat.MediaStyle()
-            .setMediaSession(mediaSession?.sessionCompatToken)
             .setShowActionsInCompactView(0, 1)
+
+        mediaSession?.platformToken?.let { token ->
+            val compatToken = android.support.v4.media.session.MediaSessionCompat.Token.fromToken(token)
+            mediaStyle.setMediaSession(compatToken)
+        }
 
         return NotificationCompat.Builder(this, "radio_joo_service_channel")
             .setContentTitle(currentTitle)
@@ -341,7 +341,6 @@ class RadioService : Service() {
             startStream(availableUrls[0], useProxy = true)
         }
 
-        // ✅ بدء الخدمة في المقدمة مع الإشعار المخصص
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(1001, buildNotification(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
