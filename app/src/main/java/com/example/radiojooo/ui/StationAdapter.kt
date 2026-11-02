@@ -57,7 +57,7 @@ class StationAdapter(
             return oldItem.uuid == newItem.uuid
         }
 
-        override fun areContentTheSame(oldItem: StationEntity, newItem: StationEntity): Boolean {
+        override fun areContentsTheSame(oldItem: StationEntity, newItem: StationEntity): Boolean {
             return oldItem == newItem
         }
     }
