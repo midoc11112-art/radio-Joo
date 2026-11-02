@@ -137,8 +137,6 @@ class RadioService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // ✅ مهم جداً: startForeground() فوراً قبل أي حاجة تانية
-        // ده بيمنع النظام من قتل التطبيق في أول 5 ثواني
         startForegroundWithNotification()
 
         intent?.let {
@@ -168,9 +166,8 @@ class RadioService : Service() {
         super.onDestroy()
     }
 
-    // ✅ الخدمة تفضل شغالة لما المستخدم يسحب التطبيق من الخلفية
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // ما نعملش حاجة
+        // الخدمة تفضل شغالة
     }
 
     private fun initializePlayer() {
@@ -273,18 +270,7 @@ class RadioService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        // ✅ الزر الأول: Play/Pause
-        val playPauseIntent = Intent(this, RadioActionReceiver::class.java).apply {
-            action = RadioActionReceiver.ACTION_PLAY_PAUSE
-        }
-        val playPausePendingIntent = PendingIntent.getBroadcast(
-            this,
-            0,
-            playPauseIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
-        // ✅ الزر الثاني: X (خروج)
+        // ✅ الزر الأول: X (خروج) - بره
         val stopIntent = Intent(this, RadioActionReceiver::class.java).apply {
             action = RadioActionReceiver.ACTION_STOP
         }
@@ -292,6 +278,17 @@ class RadioService : Service() {
             this,
             1,
             stopIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        // ✅ الزر الثاني: Play/Pause - جوه
+        val playPauseIntent = Intent(this, RadioActionReceiver::class.java).apply {
+            action = RadioActionReceiver.ACTION_PLAY_PAUSE
+        }
+        val playPausePendingIntent = PendingIntent.getBroadcast(
+            this,
+            0,
+            playPauseIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
@@ -319,8 +316,9 @@ class RadioService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
             .setColor(ContextCompat.getColor(this, android.R.color.holo_blue_dark))
-            .addAction(playPauseIcon, playPauseText, playPausePendingIntent)
+            // ✅ الترتيب: X بره، Play/Pause جوه
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "خروج", stopPendingIntent)
+            .addAction(playPauseIcon, playPauseText, playPausePendingIntent)
             .setStyle(
                 MediaStyle()
                     .setShowActionsInCompactView(0, 1)
@@ -360,7 +358,6 @@ class RadioService : Service() {
             startStream(availableUrls[0], useProxy = true)
         }
 
-        // ✅ تحديث الإشعار بعد ما اللاعب يبدأ
         updateNotification()
     }
 
