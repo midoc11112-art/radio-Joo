@@ -35,15 +35,12 @@
             android:name=".ui.PlayerActivity"
             android:exported="false" />
 
-        <!-- ✅ MediaSessionService لدعم شاشة القفل -->
+        <!-- ✅ Service عادي مع إعدادات صحيحة -->
         <service
             android:name=".player.RadioService"
             android:foregroundServiceType="mediaPlayback"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.media.browse.MediaBrowserService" />
-            </intent-filter>
-        </service>
+            android:stopWithTask="false"
+            android:exported="false" />
 
         <receiver
             android:name=".player.RadioActionReceiver"
