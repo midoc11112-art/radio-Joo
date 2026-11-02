@@ -7,6 +7,7 @@ import com.example.radiojooo.data.local.AppDatabase
 import com.example.radiojooo.data.model.StationEntity
 import com.example.radiojooo.data.repository.RadioRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -67,9 +68,8 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
             repository.checkForUpdates()
         }
 
-        // ✅ جلب كل المحطات في الخلفية (بعد ما يجيب الأول 50)
         viewModelScope.launch(Dispatchers.IO) {
-            kotlinx.coroutines.delay(5000) // نستهني 5 ثواني
+            delay(5000)
             repository.fetchAllStationsInBackground()
         }
 
