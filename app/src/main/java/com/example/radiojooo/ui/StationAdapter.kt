@@ -27,33 +27,13 @@ class StationAdapter(
         holder.bind(getItem(position))
     }
 
-    inner class StationViewHolder(private val binding: ItemStationBinding) :
-        RecyclerView.ViewHolder(binding.root) {
+    inner class StationViewHolder(
+        private val binding: ItemStationBinding
+    ) : RecyclerView.ViewHolder(binding.root) {
 
         fun bind(station: StationEntity) {
             binding.tvStationName.text = station.name
-            binding.tvCountryBadge.text = if (station.countryCode.isBlank()) "EG" else station.countryCode.uppercase()
-            binding.tvBitrateBadge.text = "${if (station.bitrate <= 0) 32 else station.bitrate} Kbps"
-
-            val categoryText = when (station.category) {
-                "QURAN" -> "القرآن الكريم"
-                "NEWS" -> "الأخبار"
-                "MUSIC" -> "موسيقى"
-                "SPORTS" -> "الرياضة"
-                else -> "عام"
-            }
-            binding.tvCategoryBadge.text = categoryText
-
-            val serverCount = if (station.fallbackUrl.isNotBlank()) {
-                station.fallbackUrl.split(",").filter { it.isNotBlank() }.size + 1
-            } else 1
-            binding.tvServersBadge.text = "$serverCount خوادم"
-
-            if (station.isFavorite) {
-                binding.btnFavorite.setImageResource(R.drawable.ic_star_filled)
-            } else {
-                binding.btnFavorite.setImageResource(R.drawable.ic_star_outline)
-            }
+            binding.tvCategory.text = station.category
 
             binding.root.setOnClickListener {
                 onItemClick(station)
@@ -62,6 +42,13 @@ class StationAdapter(
             binding.btnFavorite.setOnClickListener {
                 onFavoriteClick(station)
             }
+
+            val favIcon = if (station.isFavorite) {
+                R.drawable.ic_favorite_filled
+            } else {
+                R.drawable.ic_favorite_border
+            }
+            binding.btnFavorite.setImageResource(favIcon)
         }
     }
 
@@ -70,7 +57,7 @@ class StationAdapter(
             return oldItem.uuid == newItem.uuid
         }
 
-        override fun areContentsTheSame(oldItem: StationEntity, newItem: StationEntity): Boolean {
+        override fun areContentTheSame(oldItem: StationEntity, newItem: StationEntity): Boolean {
             return oldItem == newItem
         }
     }
