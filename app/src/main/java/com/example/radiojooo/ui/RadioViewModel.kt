@@ -29,27 +29,26 @@ data class CategoryCounts(
 class RadioViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository: RadioRepository
-
     val allRawStations: StateFlow<List<StationEntity>>
     val searchQuery = MutableStateFlow("")
     val selectedCategory = MutableStateFlow("ALL")
-
+    
     private val _currentPlayingStation = MutableStateFlow<StationEntity?>(null)
     val currentPlayingStation: StateFlow<StationEntity?> = _currentPlayingStation.asStateFlow()
-
+    
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
-
+    
     private val _refreshResult = MutableSharedFlow<Int>()
     val refreshResult: SharedFlow<Int> = _refreshResult.asSharedFlow()
-
+    
     val categoryCounts = MutableStateFlow(CategoryCounts())
     val stations: StateFlow<List<StationEntity>>
 
     init {
         val stationDao = AppDatabase.getDatabase(application).stationDao()
         repository = RadioRepository(stationDao, application.cacheDir)
-
+        
         val rawFlow = MutableStateFlow<List<StationEntity>>(emptyList())
         allRawStations = rawFlow.asStateFlow()
 
@@ -66,13 +65,9 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
             repository.ensureInitialDataLoaded()
         }
 
-        // 3. جلب المحطات من الإنترنت في الخلفية
+        // 3. التحقق من التحديثات
         viewModelScope.launch(Dispatchers.IO) {
-            try {
-                repository.refreshStations()
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+            repository.checkForUpdates()
         }
 
         val filteredFlow = MutableStateFlow<List<StationEntity>>(emptyList())
@@ -92,17 +87,15 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
 
                 if (query.isNotBlank()) {
                     val q = query.trim().lowercase()
+                    
                     val isGreater = q.contains("اكبر") || q.contains("أكبر") || q.contains(">")
                     val isLess = q.contains("اصغر") || q.contains("أصغر") || q.contains("<")
-
+                    
                     if (isGreater) {
                         val numStr = q.replace("اكبر", "").replace("أكبر", "").replace(">", "").trim()
                         val bitrateNum = numStr.toIntOrNull()
                         if (bitrateNum != null) {
-                            filtered = filtered.filter { 
-                                (it.bitrate > bitrateNum && it.bitrate > 0) || 
-                                (it.actualBitrate > bitrateNum && it.actualBitrate > 0) 
-                            }
+                            filtered = filtered.filter { it.bitrate > bitrateNum && it.bitrate > 0 }
                         } else {
                             filtered = emptyList()
                         }
@@ -110,30 +103,23 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
                         val numStr = q.replace("اصغر", "").replace("أصغر", "").replace("<", "").trim()
                         val bitrateNum = numStr.toIntOrNull()
                         if (bitrateNum != null) {
-                            filtered = filtered.filter { 
-                                (it.bitrate in 1 until bitrateNum) || 
-                                (it.actualBitrate in 1 until bitrateNum) 
-                            }
+                            filtered = filtered.filter { it.bitrate in 1 until bitrateNum }
                         } else {
                             filtered = emptyList()
                         }
                     } else if (q.toIntOrNull() != null) {
-                        // بحث دقيق بالرقم فقط (مثال: 32 لا يطابق 320)
                         val bitrateNum = q.toInt()
-                        filtered = filtered.filter { 
-                            it.bitrate == bitrateNum || it.actualBitrate == bitrateNum 
-                        }
+                        filtered = filtered.filter { it.bitrate == bitrateNum }
                     } else {
-                        // بحث نصي عادي
-                        filtered = filtered.filter { 
-                            it.name.lowercase().contains(q) || 
-                            it.category.lowercase().contains(q) || 
+                        filtered = filtered.filter {
+                            it.name.lowercase().contains(q) ||
+                            it.category.lowercase().contains(q) ||
                             it.countryCode.lowercase().contains(q)
                         }
                     }
                 }
 
-                filtered.sortedByDescending { it.popularityScore }
+                filtered.sortedByDescending { it.popularity }
             }.collect {
                 filteredFlow.value = it
             }
@@ -148,7 +134,7 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
         val news = list.count { it.category.equals("NEWS", ignoreCase = true) }
         val music = list.count { it.category.equals("MUSIC", ignoreCase = true) }
         val sports = list.count { it.category.equals("SPORTS", ignoreCase = true) }
-
+        
         categoryCounts.value = CategoryCounts(all, fav, eg, quran, news, music, sports)
     }
 
@@ -168,10 +154,13 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshData() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val count = repository.refreshStations()
+                _isLoading.value = true
+                val count = repository.fetchStationsFromServer()
                 _refreshResult.emit(count)
+                _isLoading.value = false
             } catch (e: Exception) {
                 e.printStackTrace()
+                _isLoading.value = false
             }
         }
     }
