@@ -6,22 +6,8 @@ import android.content.Intent
 
 class RadioActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        when (intent.action) {
-            ACTION_PLAY_PAUSE -> {
-                RadioService.getInstance()?.let { service ->
-                    if (service.isPlaying()) {
-                        service.pausePlayback()
-                    } else {
-                        service.resumePlayback()
-                    }
-                    // ✅ MediaSessionService بتحدث الإشعار تلقائياً
-                    // مش محتاجين نستدعي updateNotification()
-                }
-            }
-            ACTION_STOP -> {
-                RadioService.getInstance()?.closeApp()
-            }
-        }
+        // ✅ MediaSessionService بتتعامل مع الأزرار تلقائياً
+        // الـ Receiver ده موجود بس عشان ما يحصلش crash
     }
 
     companion object {
