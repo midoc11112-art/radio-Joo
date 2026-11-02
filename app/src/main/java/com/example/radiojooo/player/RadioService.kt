@@ -23,9 +23,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
-import android.provider.Settings
 import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 import androidx.media3.common.AudioAttributes
@@ -267,7 +265,7 @@ class RadioService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        // الزر الأول: Play/Pause (مع أيقونة مخصصة)
+        // الزر الأول: Play/Pause
         val playPauseIntent = Intent(this, RadioActionReceiver::class.java).apply {
             action = RadioActionReceiver.ACTION_PLAY_PAUSE
         }
@@ -278,7 +276,7 @@ class RadioService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        // الزر الثاني: X (خروج) (مع أيقونة مخصصة)
+        // الزر الثاني: X (خروج)
         val stopIntent = Intent(this, RadioActionReceiver::class.java).apply {
             action = RadioActionReceiver.ACTION_STOP
         }
@@ -290,9 +288,9 @@ class RadioService : Service() {
         )
 
         val playPauseIcon = if (player.isPlaying) {
-            R.drawable.ic_notification_pause
+            android.R.drawable.ic_media_pause
         } else {
-            R.drawable.ic_notification_play
+            android.R.drawable.ic_media_play
         }
 
         val playPauseText = if (player.isPlaying) "إيقاف" else "تشغيل"
@@ -306,7 +304,7 @@ class RadioService : Service() {
             .setContentTitle(currentTitle)
             .setContentText(currentLiveProgram)
             .setSubText("🎵 بث مباشر")
-            .setSmallIcon(R.drawable.ic_notification_play)
+            .setSmallIcon(android.R.drawable.ic_media_play)
             .setLargeIcon(largeIcon)
             .setContentIntent(contentIntent)
             .setOngoing(true)
@@ -318,7 +316,7 @@ class RadioService : Service() {
             .setColor(notificationColor)
             .setColorized(false)
             .addAction(playPauseIcon, playPauseText, playPausePendingIntent)
-            .addAction(R.drawable.ic_notification_close, "خروج", stopPendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "خروج", stopPendingIntent)
             .setStyle(
                 MediaStyle()
                     .setShowActionsInCompactView(0, 1)
