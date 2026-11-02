@@ -2,16 +2,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- أذونات اتصال الشبكة -->
+    <!-- أذونات اتصالات الشبكة والراديو -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
-    <!-- أذونات الطاقة والوايفاي لمنع توقف الصوت عند إطفاء الشاشة -->
+    <!-- أذونات معالج الطاقة للحد من قتل سامسونج للخدمة عند إطفاء الشاشة -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
-    <!-- أذونات الإشعارات وخدمات الخلفية لأندرويد 13 و 14 و 15+ -->
+    <!-- أذونات الإشعارات والخدمات الأمامية الخاصة بـ Android 13 و 14 و 15+ -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
@@ -44,7 +44,7 @@
             android:exported="false"
             android:parentActivityName=".ui.MainActivity" />
 
-        <!-- تسجيل خدمة MediaSessionService المتوافقة مع Media3 وشاشة القفل في سامسونج -->
+        <!-- تعريف خدمة MediaSessionService بشكل متوافق مع Media3 ونظام One UI -->
         <service
             android:name=".player.RadioService"
             android:enabled="true"
