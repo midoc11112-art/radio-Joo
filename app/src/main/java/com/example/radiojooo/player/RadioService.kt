@@ -264,31 +264,26 @@ class RadioService : Service() {
 
     private fun buildNotification(): Notification {
         val contentIntent = PendingIntent.getActivity(
-            this,
-            0,
+            this, 0,
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
         // ✅ الزر الأول: X (خروج) - بره
-        val stopIntent = Intent(this, RadioActionReceiver::class.java).apply {
-            action = RadioActionReceiver.ACTION_STOP
+        val stopIntent = Intent(RadioActionReceiver.ACTION_STOP).apply {
+            setPackage(packageName)
         }
         val stopPendingIntent = PendingIntent.getBroadcast(
-            this,
-            1,
-            stopIntent,
+            this, 1, stopIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
         // ✅ الزر الثاني: Play/Pause - جوه
-        val playPauseIntent = Intent(this, RadioActionReceiver::class.java).apply {
-            action = RadioActionReceiver.ACTION_PLAY_PAUSE
+        val playPauseIntent = Intent(RadioActionReceiver.ACTION_PLAY_PAUSE).apply {
+            setPackage(packageName)
         }
         val playPausePendingIntent = PendingIntent.getBroadcast(
-            this,
-            0,
-            playPauseIntent,
+            this, 0, playPauseIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
@@ -299,10 +294,9 @@ class RadioService : Service() {
         }
 
         val playPauseText = if (player.isPlaying) "إيقاف" else "تشغيل"
-
         val largeIcon = getLargeIcon()
 
-        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+        return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(currentTitle)
             .setContentText(currentLiveProgram)
             .setSubText("بث مباشر")
@@ -316,7 +310,7 @@ class RadioService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
             .setColor(ContextCompat.getColor(this, android.R.color.holo_blue_dark))
-            // ✅ الترتيب: X بره، Play/Pause جوه
+            // ✅ X بره، Play/Pause جوه
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "خروج", stopPendingIntent)
             .addAction(playPauseIcon, playPauseText, playPausePendingIntent)
             .setStyle(
@@ -325,8 +319,7 @@ class RadioService : Service() {
                     .setShowCancelButton(true)
                     .setCancelButtonIntent(stopPendingIntent)
             )
-
-        return builder.build()
+            .build()
     }
 
     private fun startForegroundWithNotification() {
