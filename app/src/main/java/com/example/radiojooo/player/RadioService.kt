@@ -1,10 +1,12 @@
 package com.example.radiojooo.player
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.media.MediaScannerConnection
 import android.net.TrafficStats
 import android.net.Uri
@@ -16,6 +18,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import androidx.annotation.OptIn
+import androidx.core.app.NotificationCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.ForwardingPlayer
@@ -55,8 +58,8 @@ class RadioService : MediaSessionService() {
         @Volatile
         private var pendingAction: ((RadioService) -> Unit)? = null
 
+        // يجب أن يتطابق هذا الرقم مع رقم الإشعار الخاص بـ Media3
         private const val CHANNEL_ID = "radio_joo_service_channel"
-        // تأكد من أن هذا الرقم يطابق الرقم الافتراضي الذي تستخدمه مكتبة Media3
         private const val NOTIFICATION_ID = 1001
 
         fun getInstance(): RadioService? = instance
@@ -135,9 +138,14 @@ class RadioService : MediaSessionService() {
         instance = this
 
         createNotificationChannel()
+
+        // 1) إجبار الخدمة على العمل في المقدمة فوراً (يمنع سامسونج من قتلها عند إطفاء الشاشة)
+        startForegroundSafely()
+
+        // 2) الحفاظ على استيقاظ المعالج والشبكة (يمنع انقطاع الصوت عند إطفاء الشاشة)
         acquireLocks()
 
-        // 1) إعداد ExoPlayer
+        // 3) إعداد ExoPlayer
         val renderersFactory = DefaultRenderersFactory(this).apply {
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
         }
@@ -181,7 +189,7 @@ class RadioService : MediaSessionService() {
         actualPlayer.setWakeMode(C.WAKE_MODE_NETWORK)
         player = actualPlayer
 
-        // 2) اعتراض زر الإغلاق
+        // 4) اعتراض زر الإغلاق في الإشعار
         forwardingPlayer = object : ForwardingPlayer(actualPlayer) {
             override fun getAvailableCommands(): Player.Commands {
                 return super.getAvailableCommands()
@@ -197,12 +205,11 @@ class RadioService : MediaSessionService() {
             }
 
             override fun stop() {
-                // عند ضغط زر الإغلاق في الإشعار أو شاشة القفل
                 stopAndExitApp()
             }
         }
 
-        // 3) إعداد MediaSession
+        // 5) ربط MediaSession
         val contentPendingIntent = PendingIntent.getActivity(
             this,
             0,
@@ -214,15 +221,17 @@ class RadioService : MediaSessionService() {
             .setSessionActivity(contentPendingIntent)
             .build()
 
-        // 4) إعداد مزود الإشعارات (سنستخدم ID 1001 ليتطابق مع النظام)
+        // 6) إعداد مزود الإشعارات (سر نجاح الودجت)
         val provider = DefaultMediaNotificationProvider.Builder(this)
             .setChannelId(CHANNEL_ID)
+            // إجبار Media3 على استخدام نفس رقم الإشعار المؤقت لكي يستبدله بنجاح
+            .setNotificationId(NOTIFICATION_ID)
             .build()
 
         provider.setSmallIcon(android.R.drawable.ic_media_play)
         setMediaNotificationProvider(provider)
 
-        // 5) مستمع اللاعب (للتعامل مع الأخطاء والشبكات)
+        // 7) مستمع الأخطاء
         actualPlayer.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 val currentUrl = availableUrls.getOrNull(currentUrlIndex) ?: ""
@@ -236,7 +245,7 @@ class RadioService : MediaSessionService() {
 
         statsHandler.post(statsRunnable)
 
-        // 6) تنفيذ طلب التشغيل المعلق إن وجد
+        // 8) تنفيذ الطلب المعلق
         val pending = pendingAction
         pendingAction = null
         pending?.invoke(this)
@@ -247,8 +256,7 @@ class RadioService : MediaSessionService() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // 🛑 السر هنا: عدم استدعاء super.onTaskRemoved يمنع النظام من إغلاق الخدمة عند سحب التطبيق
-        // نتحقق فقط إذا كان المشغل متوقفاً تماماً لكي نغلق الخدمة
+        // عدم استدعاء super يمنع النظام من إيقاف الخدمة عند سحب التطبيق من الخلفية
         if (!player.isPlaying && !player.playWhenReady) {
             stopSelf()
         }
@@ -284,6 +292,34 @@ class RadioService : MediaSessionService() {
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)
+        }
+    }
+
+    // إنشاء إشعار مبدئي بسيط لمنع انهيار النظام في أول 5 ثوانٍ
+    private fun startForegroundSafely() {
+        try {
+            val pendingIntent = PendingIntent.getActivity(
+                this,
+                0,
+                Intent(this, MainActivity::class.java),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("راديو جو")
+                .setContentText("جاري التحميل...")
+                .setSmallIcon(android.R.drawable.ic_media_play)
+                .setContentIntent(pendingIntent)
+                .setOngoing(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .build()
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
