@@ -85,7 +85,6 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                 return@withContext 0
             }
 
-            // حفظ المفضلة القديمة
             val currentFavs = stationDao.getStationsListDirect()
                 .filter { it.isFavorite }
                 .map { it.uuid }
@@ -99,7 +98,6 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                 }
             }
 
-            // حذف القديم وإضافة الجديد
             stationDao.deleteAllStations()
             stationDao.insertStations(updatedStations)
 
