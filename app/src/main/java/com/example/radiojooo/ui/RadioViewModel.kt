@@ -52,7 +52,6 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
         val rawFlow = MutableStateFlow<List<StationEntity>>(emptyList())
         allRawStations = rawFlow.asStateFlow()
 
-        // 1. عرض المحطات من الداتا بيز فوراً
         viewModelScope.launch {
             repository.allStations.collect { list ->
                 rawFlow.value = list
@@ -60,12 +59,10 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // 2. تحميل المحطات الافتراضية إذا كانت الداتا فارغة
         viewModelScope.launch(Dispatchers.IO) {
             repository.ensureInitialDataLoaded()
         }
 
-        // 3. التحقق من التحديثات
         viewModelScope.launch(Dispatchers.IO) {
             repository.checkForUpdates()
         }
