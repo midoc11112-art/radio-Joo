@@ -5,26 +5,18 @@ import android.content.Context
 import android.content.Intent
 
 class RadioActionReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent) {
-        when (intent.action) {
-            ACTION_PLAY_PAUSE -> {
-                RadioService.getInstance()?.let { service ->
-                    if (service.isPlaying()) {
-                        service.pausePlayback()
-                    } else {
-                        service.resumePlayback()
-                    }
-                    service.updateNotification()
-                }
+    override fun onReceive(context: Context?, intent: Intent?) {
+        val service = RadioService.getInstance() ?: return
+        when (intent?.action) {
+            "ACTION_PAUSE", "com.example.radiojooo.ACTION_PAUSE" -> {
+                service.pause()
             }
-            ACTION_STOP -> {
-                RadioService.getInstance()?.closeApp()
+            "ACTION_PLAY", "com.example.radiojooo.ACTION_PLAY" -> {
+                service.resume()
+            }
+            "ACTION_STOP", "ACTION_CLOSE", "com.example.radiojooo.ACTION_STOP" -> {
+                service.stop()
             }
         }
-    }
-
-    companion object {
-        const val ACTION_PLAY_PAUSE = "com.example.radiojooo.ACTION_PLAY_PAUSE"
-        const val ACTION_STOP = "com.example.radiojooo.ACTION_STOP"
     }
 }
