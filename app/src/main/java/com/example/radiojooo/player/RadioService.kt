@@ -63,13 +63,16 @@ class RadioService : MediaSessionService() {
     }
 
     private fun initPlayer() {
+        // 1. تحديد خصائص الصوت ليعرف النظام أنه تشغيل موسيقى/راديو
         val audioAttributes = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .build()
 
         exoPlayer = ExoPlayer.Builder(this)
+            // 2. إعطاء الخيار true لـ setAudioAttributes يُمكّن إدارة Audio Focus آلياً من Media3
             .setAudioAttributes(audioAttributes, true)
+            // 3. معالجة فصل السماعات تلقائياً (Audio Becoming Noisy)
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build().apply {
@@ -94,7 +97,6 @@ class RadioService : MediaSessionService() {
     private fun initMediaSession() {
         val player = exoPlayer ?: return
 
-        // ForwardingPlayer لاقتطاع أمر الإيقاف النهائيات والتكامل مع أزرار سامسونج
         val forwardingPlayer = object : ForwardingPlayer(player) {
             override fun stop() {
                 super.stop()
@@ -188,7 +190,6 @@ class RadioService : MediaSessionService() {
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
         val player = exoPlayer
-        // إذا كان الصوت يعمل، لا تقم بإنهاء الخدمة ودعها تستمر في الخلفية
         if (player == null || !player.isPlaying) {
             releaseLocks()
             stopForeground(STOP_FOREGROUND_REMOVE)
