@@ -16,6 +16,7 @@ import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Observer
 import com.example.radiojooo.data.model.StationEntity
 import com.example.radiojooo.databinding.ActivityMainBinding
 import com.example.radiojooo.player.RadioService
@@ -60,16 +61,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupRecyclerView() {
-        stationAdapter = StationAdapter { station ->
-            onStationClicked(station)
-        }
+        stationAdapter = StationAdapter(
+            onItemClick = { station ->
+                onStationClicked(station)
+            },
+            onFavoriteClick = { station ->
+                viewModel.toggleFavorite(station)
+            }
+        )
         binding.rvStations.adapter = stationAdapter
     }
 
     private fun observeViewModel() {
-        viewModel.stations.observe(this) { stations ->
+        viewModel.stations.observe(this, Observer { stations ->
             stationAdapter.submitList(stations)
-        }
+        })
     }
 
     private fun onStationClicked(station: StationEntity) {
@@ -81,11 +87,15 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.root.postDelayed({
-            RadioService.getInstance()?.playStation(station.url, station.name, station.category)
+            RadioService.getInstance()?.playStation(
+                url = station.streamUrl,
+                title = station.name,
+                stationSubtitle = station.category
+            )
         }, 200)
 
         val playerIntent = Intent(this, PlayerActivity::class.java).apply {
-            putExtra("EXTRA_STREAM_URL", station.url)
+            putExtra("EXTRA_STREAM_URL", station.streamUrl)
             putExtra("EXTRA_STATION_TITLE", station.name)
             putExtra("EXTRA_STATION_SUBTITLE", station.category)
         }
