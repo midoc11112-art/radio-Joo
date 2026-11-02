@@ -32,23 +32,23 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
     val allRawStations: StateFlow<List<StationEntity>>
     val searchQuery = MutableStateFlow("")
     val selectedCategory = MutableStateFlow("ALL")
-    
+
     private val _currentPlayingStation = MutableStateFlow<StationEntity?>(null)
     val currentPlayingStation: StateFlow<StationEntity?> = _currentPlayingStation.asStateFlow()
-    
+
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
-    
+
     private val _refreshResult = MutableSharedFlow<Int>()
     val refreshResult: SharedFlow<Int> = _refreshResult.asSharedFlow()
-    
+
     val categoryCounts = MutableStateFlow(CategoryCounts())
     val stations: StateFlow<List<StationEntity>>
 
     init {
         val stationDao = AppDatabase.getDatabase(application).stationDao()
         repository = RadioRepository(stationDao, application.cacheDir)
-        
+
         val rawFlow = MutableStateFlow<List<StationEntity>>(emptyList())
         allRawStations = rawFlow.asStateFlow()
 
@@ -84,10 +84,10 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
 
                 if (query.isNotBlank()) {
                     val q = query.trim().lowercase()
-                    
+
                     val isGreater = q.contains("اكبر") || q.contains("أكبر") || q.contains(">")
                     val isLess = q.contains("اصغر") || q.contains("أصغر") || q.contains("<")
-                    
+
                     if (isGreater) {
                         val numStr = q.replace("اكبر", "").replace("أكبر", "").replace(">", "").trim()
                         val bitrateNum = numStr.toIntOrNull()
@@ -131,7 +131,7 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
         val news = list.count { it.category.equals("NEWS", ignoreCase = true) }
         val music = list.count { it.category.equals("MUSIC", ignoreCase = true) }
         val sports = list.count { it.category.equals("SPORTS", ignoreCase = true) }
-        
+
         categoryCounts.value = CategoryCounts(all, fav, eg, quran, news, music, sports)
     }
 
