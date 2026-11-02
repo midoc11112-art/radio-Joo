@@ -4,25 +4,15 @@
     android:viewportWidth="48"
     android:viewportHeight="48">
     
-    <!-- دائرة خلفية زرقاء متدرجة -->
+    <!-- مستطيل بحدود زرقاء -->
     <path
-        android:fillColor="#1976D2"
-        android:pathData="M24,24m-20,0a20,20 0,1 1,40 0a20,20 0,1 1,-40 0"/>
+        android:fillColor="#00000000"
+        android:strokeColor="#1976D2"
+        android:strokeWidth="2"
+        android:pathData="M4,4h40v40h-40z"/>
     
-    <!-- ظل داخلي -->
+    <!-- أيقونة Play (مثلث أزرق غامق) -->
     <path
-        android:fillColor="#1565C0"
-        android:pathData="M24,24m-18,0a18,18 0,1 1,36 0a18,18 0,1 1,-36 0"
-        android:fillAlpha="0.3"/>
-    
-    <!-- أيقونة Play (مثلث أبيض) -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M18,14L18,34L34,24Z"/>
-    
-    <!-- لمعان علوي -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M24,4C12.95,4 4,12.95 4,24C4,25.03 4.08,26.04 4.22,27.03C5.36,17.12 13.78,9.5 24,9.5C34.22,9.5 42.64,17.12 43.78,27.03C43.92,26.04 44,25.03 44,24C44,12.95 35.05,4 24,4Z"
-        android:fillAlpha="0.2"/>
+        android:fillColor="#0D47A1"
+        android:pathData="M16,12L16,36L36,24Z"/>
 </vector>
