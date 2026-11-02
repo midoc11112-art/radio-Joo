@@ -16,10 +16,13 @@ import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.Observer
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.example.radiojooo.data.model.StationEntity
 import com.example.radiojooo.databinding.ActivityMainBinding
 import com.example.radiojooo.player.RadioService
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
@@ -73,12 +76,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun observeViewModel() {
-        viewModel.stations.observe(this, Observer { stations ->
-            stationAdapter.submitList(stations)
-        })
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.stations.collect { stations ->
+                    stationAdapter.submitList(stations)
+                }
+            }
+        }
     }
 
     private fun onStationClicked(station: StationEntity) {
+        val streamUrl = getStationUrl(station)
+
         val intent = Intent(this, RadioService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
@@ -88,18 +97,42 @@ class MainActivity : AppCompatActivity() {
 
         binding.root.postDelayed({
             RadioService.getInstance()?.playStation(
-                url = station.streamUrl,
+                url = streamUrl,
                 title = station.name,
                 stationSubtitle = station.category
             )
         }, 200)
 
         val playerIntent = Intent(this, PlayerActivity::class.java).apply {
-            putExtra("EXTRA_STREAM_URL", station.streamUrl)
+            putExtra("EXTRA_STREAM_URL", streamUrl)
             putExtra("EXTRA_STATION_TITLE", station.name)
             putExtra("EXTRA_STATION_SUBTITLE", station.category)
         }
         startActivity(playerIntent)
+    }
+
+    private fun getStationUrl(station: StationEntity): String {
+        return try {
+            val fields = station::class.java.declaredFields
+            for (field in fields) {
+                field.isAccessible = true
+                val value = field.get(station)
+                if (value is String && (value.startsWith("http://") || value.startsWith("https://"))) {
+                    return value
+                }
+            }
+            for (field in fields) {
+                val name = field.name.lowercase()
+                if (name.contains("url") || name.contains("uri") || name.contains("stream") || name.contains("link")) {
+                    field.isAccessible = true
+                    val value = field.get(station)
+                    if (value != null) return value.toString()
+                }
+            }
+            ""
+        } catch (e: Exception) {
+            ""
+        }
     }
 
     private fun checkAndRequestNotificationPermission() {
