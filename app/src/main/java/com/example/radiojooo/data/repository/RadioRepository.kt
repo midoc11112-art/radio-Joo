@@ -16,7 +16,7 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
     private val PROXY_BASE_URL = "https://radio-joo-proxy.midoc11112.workers.dev"
     private val STATIONS_ENDPOINT = "$PROXY_BASE_URL/stations"
-    
+
     private val okHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
@@ -26,7 +26,6 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
     val allStations: Flow<List<StationEntity>> = stationDao.getAllStations()
 
-    // ✅ جلب المحطات من السيرفر
     suspend fun fetchStationsFromServer(): Int = withContext(Dispatchers.IO) {
         try {
             val request = Request.Builder()
@@ -34,17 +33,17 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                 .build()
 
             val response = okHttpClient.newCall(request).execute()
-            
+
             if (response.isSuccessful) {
                 val jsonStr = response.body?.string() ?: return@withContext 0
                 val jsonObject = JSONObject(jsonStr)
                 val stationsArray = jsonObject.getJSONArray("stations")
-                
+
                 val stations = mutableListOf<StationEntity>()
-                
+
                 for (i in 0 until stationsArray.length()) {
                     val stationObj = stationsArray.getJSONObject(i)
-                    
+
                     val station = StationEntity(
                         uuid = stationObj.getString("uuid"),
                         name = stationObj.getString("name"),
@@ -57,16 +56,15 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                         popularity = stationObj.optInt("popularity", 0),
                         lastUpdated = System.currentTimeMillis()
                     )
-                    
+
                     stations.add(station)
                 }
-                
-                // ✅ حذف القديم وإضافة الجديد
+
                 val currentFavs = stationDao.getStationsListDirect()
                     .filter { it.isFavorite }
                     .map { it.uuid }
                     .toSet()
-                
+
                 val updatedStations = stations.map { station ->
                     if (station.uuid in currentFavs) {
                         station.copy(isFavorite = true)
@@ -74,27 +72,26 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                         station
                     }
                 }
-                
+
                 stationDao.deleteAllStations()
                 stationDao.insertStations(updatedStations)
-                
-                Log.d("RadioRepository", "تم تحديث ${stations.size} محطة")
+
+                Log.d("RadioRepository", "تم تحديث " + stations.size + " محطة")
                 return@withContext stations.size
             }
         } catch (e: Exception) {
-            Log.e("RadioRepository", "خطأ في جلب المحطات: ${e.message}")
+            Log.e("RadioRepository", "خطأ في جلب المحطات: " + e.message)
             e.printStackTrace()
         }
         return@withContext 0
     }
 
-    // ✅ التحقق من الحاجة للتحديث (كل 24 ساعة)
     suspend fun checkForUpdates(): Boolean = withContext(Dispatchers.IO) {
         try {
             val lastUpdate = stationDao.getLastUpdateTime()
             val currentTime = System.currentTimeMillis()
             val twentyFourHours = 24 * 60 * 60 * 1000L
-            
+
             if (lastUpdate == null || (currentTime - lastUpdate) > twentyFourHours) {
                 fetchStationsFromServer()
                 return@withContext true
@@ -105,7 +102,6 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
         return@withContext false
     }
 
-    // ✅ تهيئة البيانات الأولية
     suspend fun ensureInitialDataLoaded() {
         withContext(Dispatchers.IO) {
             if (stationDao.getStationsCount() == 0) {
@@ -122,7 +118,7 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
         if (rawUrl.isBlank()) return ""
         if (rawUrl.contains("radio-joo-proxy")) return rawUrl
         return try {
-            "$PROXY_BASE_URL/?url=${java.net.URLEncoder.encode(rawUrl, "UTF-8")}"
+            "$PROXY_BASE_URL/?url=" + java.net.URLEncoder.encode(rawUrl, "UTF-8")
         } catch (e: Exception) {
             "$PROXY_BASE_URL/?url=$rawUrl"
         }
