@@ -18,9 +18,9 @@ class StationSyncWorker(
             val database = AppDatabase.getDatabase(applicationContext)
             val stationDao = database.stationDao()
             val repository = RadioRepository(stationDao, applicationContext.cacheDir)
-            
+
             val updatedCount = repository.fetchStationsFromServer()
-            
+
             if (updatedCount > 0) {
                 Result.success()
             } else {
