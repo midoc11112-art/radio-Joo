@@ -22,7 +22,6 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
-import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.media.app.NotificationCompat.MediaStyle
@@ -67,7 +66,10 @@ class RadioService : Service() {
             title: String,
             uuid: String,
             pUrl: String,
-            fUrl: String
+            fUrl: String,
+            bitrate: Int = 0,
+            category: String = "",
+            country: String = ""
         ) {
             val intent = Intent(context, RadioService::class.java).apply {
                 putExtra("ACTION", "PLAY_STATION")
@@ -75,6 +77,9 @@ class RadioService : Service() {
                 putExtra("UUID", uuid)
                 putExtra("PRIMARY_URL", pUrl)
                 putExtra("FALLBACK_URL", fUrl)
+                putExtra("BITRATE", bitrate)
+                putExtra("CATEGORY", category)
+                putExtra("COUNTRY", country)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
@@ -96,7 +101,9 @@ class RadioService : Service() {
     private var availableUrls = mutableListOf<String>()
     private var currentUrlIndex = 0
     var currentTitle: String = "راديو جو PRO"
-    var currentLiveProgram: String = "بث مباشر"
+    var currentBitrate: Int = 0
+    var currentCategory: String = ""
+    var currentCountry: String = ""
     var currentStationUuid: String = ""
     var isRecording = false
         private set
@@ -147,7 +154,10 @@ class RadioService : Service() {
                     val uuid = it.getStringExtra("UUID") ?: ""
                     val pUrl = it.getStringExtra("PRIMARY_URL") ?: ""
                     val fUrl = it.getStringExtra("FALLBACK_URL") ?: ""
-                    playStationInternal(title, uuid, pUrl, fUrl)
+                    val bitrate = it.getIntExtra("BITRATE", 0)
+                    val category = it.getStringExtra("CATEGORY") ?: ""
+                    val country = it.getStringExtra("COUNTRY") ?: ""
+                    playStationInternal(title, uuid, pUrl, fUrl, bitrate, category, country)
                 }
             }
         }
@@ -263,6 +273,18 @@ class RadioService : Service() {
         }
     }
 
+    // ✅ دالة مساعدة للحصول على اسم القسم بالعربي
+    private fun getCategoryArabicName(category: String): String {
+        return when (category.uppercase()) {
+            "QURAN" -> "القرآن الكريم"
+            "NEWS" -> "الأخبار"
+            "MUSIC" -> "الموسيقى"
+            "SPORTS" -> "الرياضة"
+            "EGYPT" -> "مصر"
+            else -> "عام"
+        }
+    }
+
     private fun buildNotification(): Notification {
         val contentIntent = PendingIntent.getActivity(
             this, 0,
@@ -270,7 +292,7 @@ class RadioService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        // ✅ الزر الأول: X (خروج) - بره
+        // ✅ الزر الأول: X (خروج) - بره - بأيقونة مخصصة بيضاء
         val stopIntent = Intent(RadioActionReceiver.ACTION_STOP).apply {
             setPackage(packageName)
         }
@@ -279,7 +301,7 @@ class RadioService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        // ✅ الزر الثاني: Play/Pause - جوه
+        // ✅ الزر الثاني: Play/Pause - جوه - بأيقونة مخصصة بيضاء
         val playPauseIntent = Intent(RadioActionReceiver.ACTION_PLAY_PAUSE).apply {
             setPackage(packageName)
         }
@@ -288,22 +310,43 @@ class RadioService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        // ✅ استخدام الأيقونات المخصصة (بيضاء على خلفية زرقاء)
         val playPauseIcon = if (player.isPlaying) {
-            android.R.drawable.ic_media_pause
+            R.drawable.ic_notification_pause
         } else {
-            android.R.drawable.ic_media_play
+            R.drawable.ic_notification_play
         }
 
-        val playPauseText = if (player.isPlaying) "⏸️" else "▶️"
+        val playPauseText = if (player.isPlaying) "إيقاف" else "تشغيل"
         val largeIcon = getLargeIcon()
 
-        // ✅ تصميم عصري زي Spotify/Anghami
+        // ✅ بناء النص الفرعي من المعلومات الفعلية
+        val subTextParts = mutableListOf<String>()
+        
+        if (currentBitrate > 0) {
+            subTextParts.add("${currentBitrate} Kbps")
+        }
+        
+        if (currentCategory.isNotBlank()) {
+            subTextParts.add(getCategoryArabicName(currentCategory))
+        }
+        
+        if (currentCountry.isNotBlank()) {
+            subTextParts.add(currentCountry)
+        }
+        
+        val subText = if (subTextParts.isNotEmpty()) {
+            subTextParts.joinToString(" • ")
+        } else {
+            "راديو جو"
+        }
+
+        // ✅ تصميم عصري ومتناسق
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(currentTitle)
-            .setContentText(currentLiveProgram)
-            .setSubText("🎵 بث مباشر")
-            .setSmallIcon(android.R.drawable.ic_media_play)
-            .setLargeIcon(largeIcon)
+            .setContentTitle(currentTitle) // ✅ اسم المحطة بخط عريض (النظام بيتحكم في الحجم)
+            .setContentText(subText) // ✅ المعلومات الفعلية
+            .setSmallIcon(R.drawable.ic_notification_play) // ✅ أيقونة صغيرة مخصصة
+            .setLargeIcon(largeIcon) // ✅ أيقونة كبيرة
             .setContentIntent(contentIntent)
             .setOngoing(true)
             .setShowWhen(false)
@@ -311,15 +354,15 @@ class RadioService : Service() {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
-            .setColor(0xFF1976D2.toInt()) // لون أزرق عصري
+            .setColor(0xFF1976D2.toInt()) // ✅ لون أزرق موحد
             .setColorized(true) // ✅ تفعيل اللون المميز
-            // ✅ X بره، Play/Pause جوه
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "❌", stopPendingIntent)
+            // ✅ X بره بأيقونة مخصصة بيضاء
+            .addAction(R.drawable.ic_notification_close, "خروج", stopPendingIntent)
+            // ✅ Play/Pause جوه بأيقونة مخصصة بيضاء
             .addAction(playPauseIcon, playPauseText, playPausePendingIntent)
             .setStyle(
                 MediaStyle()
-                    // ✅ الأزرار تظهر ثابتة بدون expand/collapse
-                    .setShowActionsInCompactView(0, 1)
+                    .setShowActionsInCompactView(0, 1) // ✅ الأزرار ثابتة
                     .setShowCancelButton(true)
                     .setCancelButtonIntent(stopPendingIntent)
             )
@@ -336,11 +379,21 @@ class RadioService : Service() {
         }
     }
 
-    private fun playStationInternal(title: String, uuid: String, pUrl: String, fUrl: String) {
+    private fun playStationInternal(
+        title: String, 
+        uuid: String, 
+        pUrl: String, 
+        fUrl: String,
+        bitrate: Int = 0,
+        category: String = "",
+        country: String = ""
+    ) {
         stopRecording()
         currentTitle = title
         currentStationUuid = uuid
-        currentLiveProgram = "بث مباشر"
+        currentBitrate = bitrate
+        currentCategory = category
+        currentCountry = country
 
         availableUrls.clear()
         if (pUrl.isNotBlank()) availableUrls.add(pUrl.trim())
@@ -376,7 +429,7 @@ class RadioService : Service() {
 
             val metadata = MediaMetadata.Builder()
                 .setTitle(currentTitle)
-                .setArtist(currentLiveProgram)
+                .setArtist(currentCountry)
                 .build()
 
             val mediaItem = MediaItem.Builder()
