@@ -307,8 +307,14 @@ class RadioService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val playPauseIcon = R.drawable.ic_notification_play_pause
-        val playPauseText = if (player.isPlaying) "⏸️ إيقاف" else "▶️ تشغيل"
+        // ✅ الزر يتغير شكله حسب حالة التشغيل
+        val playPauseIcon = if (player.isPlaying) {
+            R.drawable.ic_notification_pause
+        } else {
+            R.drawable.ic_notification_play
+        }
+
+        val playPauseText = if (player.isPlaying) "إيقاف" else "تشغيل"
         val largeIcon = getLargeIcon()
 
         val subTextParts = mutableListOf<String>()
@@ -334,7 +340,7 @@ class RadioService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(currentTitle)
             .setContentText(subText)
-            .setSmallIcon(R.drawable.ic_notification_play_pause)
+            .setSmallIcon(R.drawable.ic_notification_play)
             .setLargeIcon(largeIcon)
             .setContentIntent(contentIntent)
             .setOngoing(true)
@@ -345,13 +351,12 @@ class RadioService : Service() {
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
             .setColor(0xFF1976D2.toInt())
             .setColorized(true)
-            .addAction(R.drawable.ic_notification_close, "❌ خروج", stopPendingIntent)
+            .addAction(R.drawable.ic_notification_close, "خروج", stopPendingIntent)
             .addAction(playPauseIcon, playPauseText, playPausePendingIntent)
             .setStyle(
                 MediaStyle()
+                    // ✅ إزالة السهم - الودجت ثابتة الحجم
                     .setShowActionsInCompactView(0, 1)
-                    .setShowCancelButton(true)
-                    .setCancelButtonIntent(stopPendingIntent)
             )
             .build()
     }
