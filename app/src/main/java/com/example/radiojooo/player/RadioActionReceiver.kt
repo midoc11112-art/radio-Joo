@@ -14,7 +14,8 @@ class RadioActionReceiver : BroadcastReceiver() {
                     } else {
                         service.resumePlayback()
                     }
-                    service.updateNotification()
+                    // ✅ MediaSessionService بتحدث الإشعار تلقائياً
+                    // مش محتاجين نستدعي updateNotification()
                 }
             }
             ACTION_STOP -> {
