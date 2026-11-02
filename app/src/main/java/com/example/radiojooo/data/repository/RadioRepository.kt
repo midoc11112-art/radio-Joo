@@ -5,6 +5,7 @@ import com.example.radiojooo.data.local.StationDao
 import com.example.radiojooo.data.model.StationEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -17,6 +18,7 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
     private val PROXY_BASE_URL = "https://radio-joo-proxy.midoc11112.workers.dev"
     private val STATIONS_ENDPOINT = "$PROXY_BASE_URL/stations"
+    private val ALL_STATIONS_ENDPOINT = "$PROXY_BASE_URL/stations/all"
 
     private val okHttpClient by lazy {
         OkHttpClient.Builder()
@@ -27,9 +29,10 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
     val allStations: Flow<List<StationEntity>> = stationDao.getAllStations()
 
+    // ✅ جلب المحطات السريعة (أول 50 محطة)
     suspend fun fetchStationsFromServer(): Int = withContext(Dispatchers.IO) {
         try {
-            Log.d("RadioRepository", "جاري جلب المحطات من السيرفر...")
+            Log.d("RadioRepository", "جاري جلب المحطات السريعة...")
 
             val request = Request.Builder()
                 .url(STATIONS_ENDPOINT)
@@ -49,66 +52,112 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
             Log.d("RadioRepository", "عدد المحطات المستلمة: " + stationsArray.length())
 
-            val stations = mutableListOf<StationEntity>()
-
-            for (i in 0 until stationsArray.length()) {
-                try {
-                    val obj = stationsArray.getJSONObject(i)
-
-                    val uuid = obj.optString("uuid", "")
-                    val name = obj.optString("name", "محطة")
-                    val primaryUrl = obj.optString("primaryUrl", "")
-
-                    if (uuid.isBlank() || primaryUrl.isBlank()) continue
-
-                    val station = StationEntity(
-                        uuid = uuid,
-                        name = name,
-                        primaryUrl = primaryUrl,
-                        fallbackUrl = obj.optString("fallbackUrl", ""),
-                        category = obj.optString("category", "MUSIC"),
-                        countryCode = obj.optString("countryCode", ""),
-                        bitrate = obj.optInt("bitrate", 64),
-                        isFavorite = false,
-                        popularity = obj.optInt("popularity", 0),
-                        lastUpdated = System.currentTimeMillis()
-                    )
-
-                    stations.add(station)
-                } catch (e: Exception) {
-                    Log.e("RadioRepository", "خطأ في قراءة محطة: " + e.message)
-                }
-            }
+            val stations = parseStations(stationsArray)
 
             if (stations.isEmpty()) {
                 Log.e("RadioRepository", "لم يتم العثور على محطات صالحة")
                 return@withContext 0
             }
 
-            val currentFavs = stationDao.getStationsListDirect()
-                .filter { it.isFavorite }
-                .map { it.uuid }
-                .toSet()
+            saveStations(stations)
 
-            val updatedStations = stations.map { station ->
-                if (station.uuid in currentFavs) {
-                    station.copy(isFavorite = true)
-                } else {
-                    station
-                }
-            }
-
-            stationDao.deleteAllStations()
-            stationDao.insertStations(updatedStations)
-
-            Log.d("RadioRepository", "تم حفظ " + updatedStations.size + " محطة بنجاح")
-            return@withContext updatedStations.size
+            Log.d("RadioRepository", "تم حفظ " + stations.size + " محطة بنجاح")
+            return@withContext stations.size
 
         } catch (e: Exception) {
             Log.e("RadioRepository", "خطأ في جلب المحطات: " + e.message)
             e.printStackTrace()
         }
         return@withContext 0
+    }
+
+    // ✅ جلب كل المحطات في الخلفية
+    suspend fun fetchAllStationsInBackground() = withContext(Dispatchers.IO) {
+        try {
+            Log.d("RadioRepository", "جاري جلب كل المحطات في الخلفية...")
+
+            val request = Request.Builder()
+                .url(ALL_STATIONS_ENDPOINT)
+                .addHeader("Accept", "application/json")
+                .build()
+
+            val response = okHttpClient.newCall(request).execute()
+
+            if (!response.isSuccessful) {
+                Log.e("RadioRepository", "فشل الاتصال: " + response.code)
+                return@withContext
+            }
+
+            val jsonStr = response.body?.string() ?: return@withContext
+            val jsonObject = JSONObject(jsonStr)
+            val stationsArray = jsonObject.getJSONArray("stations")
+
+            Log.d("RadioRepository", "عدد المحطات الكلية: " + stationsArray.length())
+
+            val stations = parseStations(stationsArray)
+
+            if (stations.isNotEmpty()) {
+                saveStations(stations)
+                Log.d("RadioRepository", "تم حفظ " + stations.size + " محطة في الخلفية")
+            }
+
+        } catch (e: Exception) {
+            Log.e("RadioRepository", "خطأ في جلب المحطات في الخلفية: " + e.message)
+            e.printStackTrace()
+        }
+    }
+
+    private fun parseStations(stationsArray: org.json.JSONArray): List<StationEntity> {
+        val stations = mutableListOf<StationEntity>()
+
+        for (i in 0 until stationsArray.length()) {
+            try {
+                val obj = stationsArray.getJSONObject(i)
+
+                val uuid = obj.optString("uuid", "")
+                val name = obj.optString("name", "محطة")
+                val primaryUrl = obj.optString("primaryUrl", "")
+
+                if (uuid.isBlank() || primaryUrl.isBlank()) continue
+
+                val station = StationEntity(
+                    uuid = uuid,
+                    name = name,
+                    primaryUrl = primaryUrl,
+                    fallbackUrl = obj.optString("fallbackUrl", ""),
+                    category = obj.optString("category", "MUSIC"),
+                    countryCode = obj.optString("countryCode", ""),
+                    bitrate = obj.optInt("bitrate", 64),
+                    isFavorite = false,
+                    popularity = obj.optInt("popularity", 0),
+                    lastUpdated = System.currentTimeMillis()
+                )
+
+                stations.add(station)
+            } catch (e: Exception) {
+                Log.e("RadioRepository", "خطأ في قراءة محطة: " + e.message)
+            }
+        }
+
+        return stations
+    }
+
+    private suspend fun saveStations(stations: List<StationEntity>) {
+        val currentFavs = stationDao.getStationsListDirect()
+            .filter { it.isFavorite }
+            .map { it.uuid }
+            .toSet()
+
+        val updatedStations = stations.map { station ->
+            if (station.uuid in currentFavs) {
+                station.copy(isFavorite = true)
+            } else {
+                station
+            }
+        }
+
+        stationDao.deleteAllStations()
+        stationDao.insertStations(updatedStations)
     }
 
     suspend fun checkForUpdates(): Boolean = withContext(Dispatchers.IO) {
