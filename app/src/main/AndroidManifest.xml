@@ -35,7 +35,7 @@
             android:name=".ui.PlayerActivity"
             android:exported="false" />
 
-        <!-- ✅ تعريف الخدمة كـ Service عادي وليس MediaSessionService -->
+        <!-- ✅ التغيير: إزالة التعليق الخاطئ، الخدمة هي MediaSessionService -->
         <service
             android:name=".player.RadioService"
             android:foregroundServiceType="mediaPlayback"
@@ -43,4 +43,5 @@
             android:exported="false" />
 
     </application>
+
 </manifest>
