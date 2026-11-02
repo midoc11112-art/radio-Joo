@@ -23,6 +23,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -231,6 +232,9 @@ class RadioService : Service() {
             ).apply {
                 description = "التحكم في بث الراديو المباشر"
                 setShowBadge(false)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                enableLights(false)
+                enableVibration(false)
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)
@@ -244,7 +248,6 @@ class RadioService : Service() {
     }
 
     private fun buildNotification(): Notification {
-        // Intent لفتح التطبيق عند النقر على الإشعار
         val contentIntent = PendingIntent.getActivity(
             this,
             0,
@@ -252,18 +255,7 @@ class RadioService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        // Intent لزر Play/Pause
-        val playPauseIntent = Intent(this, RadioActionReceiver::class.java).apply {
-            action = RadioActionReceiver.ACTION_PLAY_PAUSE
-        }
-        val playPausePendingIntent = PendingIntent.getBroadcast(
-            this,
-            0,
-            playPauseIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
-        // Intent لزر Stop (X)
+        // الزر الأول: X (خروج)
         val stopIntent = Intent(this, RadioActionReceiver::class.java).apply {
             action = RadioActionReceiver.ACTION_STOP
         }
@@ -274,16 +266,25 @@ class RadioService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        // أيقونة Play/Pause
+        // الزر الثاني: Play/Pause
+        val playPauseIntent = Intent(this, RadioActionReceiver::class.java).apply {
+            action = RadioActionReceiver.ACTION_PLAY_PAUSE
+        }
+        val playPausePendingIntent = PendingIntent.getBroadcast(
+            this,
+            0,
+            playPauseIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
         val playPauseIcon = if (player.isPlaying) {
             android.R.drawable.ic_media_pause
         } else {
             android.R.drawable.ic_media_play
         }
 
-        val playPauseText = if (player.isPlaying) "إيقاف" else "تشغيل"
+        val playPauseText = if (player.isPlaying) "⏸️ إيقاف" else "▶️ تشغيل"
 
-        // بناء الإشعار
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(currentTitle)
             .setContentText(currentLiveProgram)
@@ -293,11 +294,16 @@ class RadioService : Service() {
             .setShowWhen(false)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
+            .setColor(ContextCompat.getColor(this, android.R.color.holo_blue_dark))
+            .setColorized(true)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "❌ خروج", stopPendingIntent)
             .addAction(playPauseIcon, playPauseText, playPausePendingIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "خروج", stopPendingIntent)
             .setStyle(
                 MediaStyle()
-                    .setShowActionsInCompactView(0, 1) // عرض الزرين في الوضع المضغوط
+                    .setShowActionsInCompactView(0, 1)
+                    .setShowCancelButton(true)
+                    .setCancelButtonIntent(stopPendingIntent)
             )
 
         return builder.build()
@@ -323,7 +329,6 @@ class RadioService : Service() {
             startStream(availableUrls[0], useProxy = true)
         }
 
-        // بدء Foreground بعد تشغيل الصوت
         startForegroundWithNotification()
     }
 
