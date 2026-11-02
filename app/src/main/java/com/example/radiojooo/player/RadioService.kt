@@ -22,6 +22,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.media.app.NotificationCompat.MediaStyle
@@ -293,13 +294,14 @@ class RadioService : Service() {
             android.R.drawable.ic_media_play
         }
 
-        val playPauseText = if (player.isPlaying) "إيقاف" else "تشغيل"
+        val playPauseText = if (player.isPlaying) "⏸️" else "▶️"
         val largeIcon = getLargeIcon()
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        // ✅ تصميم عصري زي Spotify/Anghami
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(currentTitle)
             .setContentText(currentLiveProgram)
-            .setSubText("بث مباشر")
+            .setSubText("🎵 بث مباشر")
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setLargeIcon(largeIcon)
             .setContentIntent(contentIntent)
@@ -309,17 +311,20 @@ class RadioService : Service() {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
-            .setColor(ContextCompat.getColor(this, android.R.color.holo_blue_dark))
+            .setColor(0xFF1976D2.toInt()) // لون أزرق عصري
+            .setColorized(true) // ✅ تفعيل اللون المميز
             // ✅ X بره، Play/Pause جوه
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "خروج", stopPendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "❌", stopPendingIntent)
             .addAction(playPauseIcon, playPauseText, playPausePendingIntent)
             .setStyle(
                 MediaStyle()
+                    // ✅ الأزرار تظهر ثابتة بدون expand/collapse
                     .setShowActionsInCompactView(0, 1)
                     .setShowCancelButton(true)
                     .setCancelButtonIntent(stopPendingIntent)
             )
-            .build()
+
+        return builder.build()
     }
 
     private fun startForegroundWithNotification() {
