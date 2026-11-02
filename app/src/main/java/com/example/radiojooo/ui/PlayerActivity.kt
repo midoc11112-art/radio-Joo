@@ -1,20 +1,30 @@
 package com.example.radiojooo.ui
 
 import android.content.Intent
-import android.os.Build
+import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.view.View
+import android.widget.Toast
+import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
-import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import com.example.radiojooo.databinding.ActivityPlayerBinding
 import com.example.radiojooo.player.RadioService
+import java.util.Locale
 
+@UnstableApi
 class PlayerActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityPlayerBinding
+    private val viewModel: RadioViewModel by viewModels()
 
-    private val playerListener = object : Player.Listener {
-        override fun onIsPlayingChanged(isPlaying: Boolean) {
-            updatePlayPauseButtonUI(isPlaying)
+    private val updateHandler = Handler(Looper.getMainLooper())
+    private val updateRunnable = object : Runnable {
+        override fun run() {
+            updatePlayerUI()
+            updateHandler.postDelayed(this, 1000)
         }
     }
 
@@ -23,103 +33,67 @@ class PlayerActivity : AppCompatActivity() {
         binding = ActivityPlayerBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        setupToolbar()
-        setupUIControls()
-        extractIntentDataAndPlay()
+        setupListeners()
     }
 
     override fun onStart() {
         super.onStart()
-        attachPlayerListener()
+        RadioService.getInstance()?.setAppForegroundState(true)
+        updateHandler.post(updateRunnable)
     }
 
     override fun onStop() {
         super.onStop()
-        detachPlayerListener()
+        RadioService.getInstance()?.setAppForegroundState(false)
+        updateHandler.removeCallbacks(updateRunnable)
     }
 
-    private fun setupToolbar() {
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.title = "شاشة المشغل"
-    }
+    private fun setupListeners() {
+        binding.btnBack.setOnClickListener {
+            finish()
+        }
 
-    override fun onSupportNavigateUp(): Boolean {
-        onBackPressedDispatcher.onBackPressed()
-        return true
-    }
-
-    private fun setupUIControls() {
         binding.btnPlayPause.setOnClickListener {
-            val service = RadioService.getInstance()
-            if (service != null) {
-                if (service.isPlaying()) {
-                    service.pause()
-                } else {
-                    service.resume()
-                }
+            val service = RadioService.getInstance() ?: return@setOnClickListener
+            if (service.isPlaying()) {
+                service.pausePlayback()
             } else {
-                val streamUrl = intent.getStringExtra("EXTRA_STREAM_URL") ?: ""
-                val title = intent.getStringExtra("EXTRA_STATION_TITLE") ?: "إذاعة راديو جو"
-                val subtitle = intent.getStringExtra("EXTRA_STATION_SUBTITLE") ?: "بث مباشر"
-                if (streamUrl.isNotEmpty()) {
-                    startRadioStream(streamUrl, title, subtitle)
+                service.resumePlayback()
+            }
+        }
+
+        binding.btnRecord.setOnClickListener {
+            val service = RadioService.getInstance() ?: return@setOnClickListener
+            val isRec = service.toggleRecording()
+            binding.tvRecordingStatus.visibility = if (isRec) View.VISIBLE else View.GONE
+        }
+
+        binding.btnOpenFolder.setOnClickListener {
+            val service = RadioService.getInstance() ?: return@setOnClickListener
+            val folder = service.getRecordingsFolder()
+            try {
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(Uri.fromFile(folder), "*/*")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
+                startActivity(intent)
+            } catch (e: Exception) {
+                Toast.makeText(this, "مجلد التسجيلات: ${folder.absolutePath}", Toast.LENGTH_LONG).show()
             }
         }
     }
 
-    private fun extractIntentDataAndPlay() {
-        val streamUrl = intent.getStringExtra("EXTRA_STREAM_URL")
-        val title = intent.getStringExtra("EXTRA_STATION_TITLE") ?: "إذاعة راديو جو"
-        val subtitle = intent.getStringExtra("EXTRA_STATION_SUBTITLE") ?: ""
+    private fun updatePlayerUI() {
+        val service = RadioService.getInstance() ?: return
+        val currentStation = viewModel.currentPlayingStation.value
 
-        val displayTitle = if (subtitle.isNotEmpty()) "$title ($subtitle)" else title
-        binding.tvStationTitle.text = displayTitle
+        binding.tvStationTitle.text = currentStation?.name ?: service.currentTitle
+        binding.btnPlayPause.text = if (service.isPlaying()) "إيقاف مؤقت ⏸️" else "تشغيل 🔴"
 
-        if (!streamUrl.isNullOrEmpty()) {
-            val service = RadioService.getInstance()
-            if (service == null || !service.isPlaying()) {
-                startRadioStream(streamUrl, title, subtitle)
-            }
-        }
-    }
+        binding.tvDataUsage.text = String.format(Locale.US, "%.2f MB", service.totalDataMb)
+        binding.tvListeningTime.text = service.getListeningDurationFormatted()
+        binding.tvConnectionSpeed.text = String.format(Locale.US, "%.1f KB/s", service.currentSpeedKbps)
 
-    private fun startRadioStream(url: String, title: String, subtitle: String) {
-        val serviceIntent = Intent(this, RadioService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent)
-        } else {
-            startService(serviceIntent)
-        }
-
-        binding.root.postDelayed({
-            RadioService.getInstance()?.playStation(url, title, subtitle)
-            attachPlayerListener()
-        }, 200)
-    }
-
-    private fun attachPlayerListener() {
-        val service = RadioService.getInstance()
-        if (service != null) {
-            val player = service.getPlayer()
-            player?.addListener(playerListener)
-            updatePlayPauseButtonUI(service.isPlaying())
-        } else {
-            updatePlayPauseButtonUI(false)
-        }
-    }
-
-    private fun detachPlayerListener() {
-        RadioService.getInstance()?.getPlayer()?.removeListener(playerListener)
-    }
-
-    private fun updatePlayPauseButtonUI(isPlaying: Boolean) {
-        val iconRes = if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
-        val view: Any = binding.btnPlayPause
-        if (view is com.google.android.material.button.MaterialButton) {
-            view.setIconResource(iconRes)
-        } else if (view is android.widget.ImageView) {
-            view.setImageResource(iconRes)
-        }
+        binding.tvRecordingStatus.visibility = if (service.isRecording) View.VISIBLE else View.GONE
     }
 }

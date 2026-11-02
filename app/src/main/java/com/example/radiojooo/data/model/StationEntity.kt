@@ -5,18 +5,17 @@ import androidx.room.PrimaryKey
 
 @Entity(tableName = "stations")
 data class StationEntity(
-    @PrimaryKey
-    val uuid: String,
+    @PrimaryKey val uuid: String,
     val name: String,
     val primaryUrl: String,
-    val fallbackUrls: String = "",
     val fallbackUrl: String = "",
-    val category: String = "عام",
-    val favicon: String = "",
+    val tags: String = "",
+    val country: String = "",
+    val category: String = "GENERAL",
+    val countryCode: String = "EG",
+    val bitrate: Int = 32,
     val isFavorite: Boolean = false,
     val popularityScore: Int = 0,
-    val actualBitrate: Int = 0,
-    val bitrate: Int = 128,
-    val countryCode: String = "EG",
-    val isOnline: Boolean = true
+    // ✅ الحقل الجديد: البتريت الفعلي المقاس (0 يعني لم يتم قياسه بعد)
+    val actualBitrate: Int = 0 
 )

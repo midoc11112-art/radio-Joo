@@ -38,6 +38,7 @@
         <service
             android:name=".player.RadioService"
             android:foregroundServiceType="mediaPlayback"
+            android:showOnLockScreen="true"
             android:stopWithTask="false"
             android:exported="false" />
 
