@@ -5,10 +5,7 @@ private fun playStation(station: StationEntity) {
         title = station.name,
         uuid = station.uuid,
         pUrl = station.primaryUrl,
-        fUrl = station.fallbackUrl,
-        bitrate = station.bitrate,
-        category = station.category,
-        country = station.countryCode
+        fUrl = station.fallbackUrl
     )
     updateMiniPlayer()
 }
