@@ -10,7 +10,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.Observer
 import com.example.radiojooo.data.model.StationEntity
 import com.example.radiojooo.databinding.ActivityMainBinding
 import com.example.radiojooo.player.RadioService
@@ -56,9 +55,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun observeViewModel() {
-        viewModel.stations.observe(this, Observer { stations ->
+        viewModel.stations.observe(this) { stations ->
             stationAdapter.submitList(stations)
-        })
+        }
     }
 
     private fun onStationClicked(station: StationEntity) {
@@ -71,14 +70,14 @@ class MainActivity : AppCompatActivity() {
 
         binding.root.postDelayed({
             RadioService.getInstance()?.playStation(
-                url = station.url,
+                url = station.primaryUrl,
                 title = station.name,
                 stationSubtitle = station.category
             )
         }, 200)
 
         val playerIntent = Intent(this, PlayerActivity::class.java).apply {
-            putExtra("EXTRA_STREAM_URL", station.url)
+            putExtra("EXTRA_STREAM_URL", station.primaryUrl)
             putExtra("EXTRA_STATION_TITLE", station.name)
             putExtra("EXTRA_STATION_SUBTITLE", station.category)
         }
