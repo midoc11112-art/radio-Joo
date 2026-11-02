@@ -4,28 +4,18 @@
     android:viewportWidth="48"
     android:viewportHeight="48">
     
-    <!-- دائرة خلفية حمراء متدرجة -->
+    <!-- مستطيل بحدود حمراء -->
     <path
-        android:fillColor="#D32F2F"
-        android:pathData="M24,24m-20,0a20,20 0,1 1,40 0a20,20 0,1 1,-40 0"/>
+        android:fillColor="#00000000"
+        android:strokeColor="#D32F2F"
+        android:strokeWidth="2"
+        android:pathData="M4,4h40v40h-40z"/>
     
-    <!-- ظل داخلي -->
+    <!-- أيقونة X (خطوط حمراء غامقة) -->
     <path
         android:fillColor="#B71C1C"
-        android:pathData="M24,24m-18,0a18,18 0,1 1,36 0a18,18 0,1 1,-36 0"
-        android:fillAlpha="0.3"/>
-    
-    <!-- أيقونة X (خطوط بيضاء متقاطعة) -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M16,16L32,32M32,16L16,32"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="3"
+        android:pathData="M14,14L34,34M34,14L14,34"
+        android:strokeColor="#B71C1C"
+        android:strokeWidth="4"
         android:strokeLineCap="round"/>
-    
-    <!-- لمعان علوي -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M24,4C12.95,4 4,12.95 4,24C4,25.03 4.08,26.04 4.22,27.03C5.36,17.12 13.78,9.5 24,9.5C34.22,9.5 42.64,17.12 43.78,27.03C43.92,26.04 44,25.03 44,24C44,12.95 35.05,4 24,4Z"
-        android:fillAlpha="0.2"/>
 </vector>
