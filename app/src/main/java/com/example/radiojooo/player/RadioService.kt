@@ -63,10 +63,6 @@ class RadioService : MediaSessionService() {
 
         fun getInstance(): RadioService? = instance
 
-        /**
-         * نقطة الدخول الوحيدة من MainActivity لتشغيل محطة.
-         * تتعامل مع حالة الخدمة غير الجاهزة بعد عبر تخزين pendingAction.
-         */
         fun requestPlayStation(
             context: Context,
             title: String,
@@ -136,22 +132,14 @@ class RadioService : MediaSessionService() {
         }
     }
 
-    // ==========================================================
-    // دورة الحياة
-    // ==========================================================
-
     override fun onCreate() {
         super.onCreate()
         instance = this
 
-        // 1) القناة + الإشعار المؤقت (يمنع انهيار 5 ثوانٍ بعد startForegroundService)
         createNotificationChannel()
         startForegroundSafely()
-
-        // 2) الأقفال
         acquireLocks()
 
-        // 3) إعداد ExoPlayer
         val renderersFactory = DefaultRenderersFactory(this).apply {
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
         }
@@ -195,7 +183,6 @@ class RadioService : MediaSessionService() {
         actualPlayer.setWakeMode(C.WAKE_MODE_NETWORK)
         player = actualPlayer
 
-        // 4) ForwardingPlayer لاعتراض COMMAND_STOP → إغلاق التطبيق
         forwardingPlayer = object : ForwardingPlayer(actualPlayer) {
             override fun getAvailableCommands(): Player.Commands {
                 return super.getAvailableCommands()
@@ -211,12 +198,10 @@ class RadioService : MediaSessionService() {
             }
 
             override fun stop() {
-                // لا نستدعي super.stop() هنا — stopAndExitApp يتولى كل شيء
                 stopAndExitApp()
             }
         }
 
-        // 5) MediaSession
         val contentPendingIntent = PendingIntent.getActivity(
             this,
             0,
@@ -228,7 +213,6 @@ class RadioService : MediaSessionService() {
             .setSessionActivity(contentPendingIntent)
             .build()
 
-        // 6) مزود الإشعارات (Media3 1.6.1)
         val provider = DefaultMediaNotificationProvider.Builder(this)
             .setChannelId(CHANNEL_ID)
             .build()
@@ -236,7 +220,6 @@ class RadioService : MediaSessionService() {
         provider.setSmallIcon(android.R.drawable.ic_media_play)
         setMediaNotificationProvider(provider)
 
-        // 7) مستمع اللاعب
         actualPlayer.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 val currentUrl = availableUrls.getOrNull(currentUrlIndex) ?: ""
@@ -248,10 +231,8 @@ class RadioService : MediaSessionService() {
             }
         })
 
-        // 8) عدّاد البيانات
         statsHandler.post(statsRunnable)
 
-        // 9) تنفيذ طلب معلّق إن وجد
         val pending = pendingAction
         pendingAction = null
         pending?.invoke(this)
@@ -262,8 +243,6 @@ class RadioService : MediaSessionService() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // السلوك الافتراضي لـ MediaSessionService: يوقف الخدمة إن لم يكن اللاعب نشطاً.
-        // إن كان نشطاً يبقى البث مستمراً (مطلوب لتطبيق راديو).
         super.onTaskRemoved(rootIntent)
     }
 
@@ -285,10 +264,6 @@ class RadioService : MediaSessionService() {
         instance = null
         super.onDestroy()
     }
-
-    // ==========================================================
-    // الإشعار والحالة الأمامية
-    // ==========================================================
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -338,10 +313,6 @@ class RadioService : MediaSessionService() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
-
-    // ==========================================================
-    // التشغيل
-    // ==========================================================
 
     private fun playStationInternal(title: String, uuid: String, pUrl: String, fUrl: String) {
         stopRecording()
@@ -423,10 +394,6 @@ class RadioService : MediaSessionService() {
         }, 1500)
     }
 
-    // ==========================================================
-    // التحكم العام (متاح عبر Singleton من MainActivity)
-    // ==========================================================
-
     fun setAppForegroundState(inForeground: Boolean) {
         isAppInForeground = inForeground
         if (inForeground) {
@@ -450,10 +417,6 @@ class RadioService : MediaSessionService() {
         stopAndExitApp()
     }
 
-    // ==========================================================
-    // الأقفال
-    // ==========================================================
-
     private fun acquireLocks() {
         try {
             val pm = getSystemService(POWER_SERVICE) as PowerManager
@@ -476,10 +439,6 @@ class RadioService : MediaSessionService() {
             e.printStackTrace()
         }
     }
-
-    // ==========================================================
-    // التسجيل
-    // ==========================================================
 
     fun getRecordingsFolder(): File {
         val folder = File(
@@ -516,7 +475,7 @@ class RadioService : MediaSessionService() {
                 connection.getInputStream().use { input ->
                     FileOutputStream(file).use { output ->
                         val buffer = ByteArray(4096)
-                        var bytesRead: Int
+                        var bytesRead = 0
                         while (isRecording && input.read(buffer).also { bytesRead = it } != -1) {
                             output.write(buffer, 0, bytesRead)
                         }
@@ -541,10 +500,6 @@ class RadioService : MediaSessionService() {
         recordingJob = null
     }
 
-    // ==========================================================
-    // مؤقت النوم
-    // ==========================================================
-
     fun startSleepTimer(minutes: Int) {
         sleepTimer?.cancel()
         if (minutes <= 0) {
@@ -564,10 +519,6 @@ class RadioService : MediaSessionService() {
         }.start()
     }
 
-    // ==========================================================
-    // الإغلاق الكامل
-    // ==========================================================
-
     private fun stopAndExitApp() {
         sleepTimer?.cancel()
         sleepTimer = null
@@ -584,15 +535,10 @@ class RadioService : MediaSessionService() {
         } catch (e: Exception) {
             e.printStackTrace()
         }
-        // ننتظر قليلاً حتى يكتمل stopSelf ثم نقتل العملية
         Handler(Looper.getMainLooper()).postDelayed({
             android.os.Process.killProcess(android.os.Process.myPid())
         }, 400)
     }
-
-    // ==========================================================
-    // إحصاءات البيانات والمدة
-    // ==========================================================
 
     fun getListeningDurationFormatted(): String {
         if (!::player.isInitialized || !player.isPlaying || stationStartTimeMs == 0L) return "00:00:00"
