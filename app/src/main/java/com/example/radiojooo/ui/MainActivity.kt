@@ -1,28 +1,19 @@
 package com.example.radiojooo.ui
 
 import android.Manifest
-import android.annotation.SuppressLint
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.PowerManager
-import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.Observer
 import com.example.radiojooo.data.model.StationEntity
 import com.example.radiojooo.databinding.ActivityMainBinding
 import com.example.radiojooo.player.RadioService
-import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
@@ -33,23 +24,12 @@ class MainActivity : AppCompatActivity() {
     private val requestNotificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted: Boolean ->
-        if (isGranted) {
-            checkAndRequestBatteryOptimization()
-        } else {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                if (!shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)) {
-                    showNotificationSettingsDialog()
-                } else {
-                    Toast.makeText(
-                        this,
-                        "إذن الإشعارات مطلوب للتحكم بالراديو من شريط الإشعارات وشاشة القفل",
-                        Toast.LENGTH_LONG
-                    ).show()
-                    checkAndRequestBatteryOptimization()
-                }
-            } else {
-                checkAndRequestBatteryOptimization()
-            }
+        if (!isGranted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Toast.makeText(
+                this,
+                "إذن الإشعارات مطلوب للتحكم بالراديو من شريط الإشعارات",
+                Toast.LENGTH_SHORT
+            ).show()
         }
     }
 
@@ -60,7 +40,7 @@ class MainActivity : AppCompatActivity() {
 
         setupRecyclerView()
         observeViewModel()
-        checkAndRequestNotificationPermission()
+        checkNotificationPermission()
     }
 
     private fun setupRecyclerView() {
@@ -76,18 +56,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun observeViewModel() {
-        lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                viewModel.stations.collect { stations ->
-                    stationAdapter.submitList(stations)
-                }
-            }
-        }
+        viewModel.stations.observe(this, Observer { stations ->
+            stationAdapter.submitList(stations)
+        })
     }
 
     private fun onStationClicked(station: StationEntity) {
-        val streamUrl = getStationUrl(station)
-
         val intent = Intent(this, RadioService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
@@ -97,113 +71,29 @@ class MainActivity : AppCompatActivity() {
 
         binding.root.postDelayed({
             RadioService.getInstance()?.playStation(
-                url = streamUrl,
+                url = station.url,
                 title = station.name,
                 stationSubtitle = station.category
             )
         }, 200)
 
         val playerIntent = Intent(this, PlayerActivity::class.java).apply {
-            putExtra("EXTRA_STREAM_URL", streamUrl)
+            putExtra("EXTRA_STREAM_URL", station.url)
             putExtra("EXTRA_STATION_TITLE", station.name)
             putExtra("EXTRA_STATION_SUBTITLE", station.category)
         }
         startActivity(playerIntent)
     }
 
-    private fun getStationUrl(station: StationEntity): String {
-        return try {
-            val fields = station::class.java.declaredFields
-            for (field in fields) {
-                field.isAccessible = true
-                val value = field.get(station)
-                if (value is String && (value.startsWith("http://") || value.startsWith("https://"))) {
-                    return value
-                }
-            }
-            for (field in fields) {
-                val name = field.name.lowercase()
-                if (name.contains("url") || name.contains("uri") || name.contains("stream") || name.contains("link")) {
-                    field.isAccessible = true
-                    val value = field.get(station)
-                    if (value != null) return value.toString()
-                }
-            }
-            ""
-        } catch (e: Exception) {
-            ""
-        }
-    }
-
-    private fun checkAndRequestNotificationPermission() {
+    private fun checkNotificationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            when {
-                ContextCompat.checkSelfPermission(
+            if (ContextCompat.checkSelfPermission(
                     this,
                     Manifest.permission.POST_NOTIFICATIONS
-                ) == PackageManager.PERMISSION_GRANTED -> {
-                    checkAndRequestBatteryOptimization()
-                }
-                else -> {
-                    requestNotificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                }
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                requestNotificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
-        } else {
-            checkAndRequestBatteryOptimization()
         }
-    }
-
-    private fun checkAndRequestBatteryOptimization() {
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
-            showBatteryOptimizationDialog()
-        }
-    }
-
-    private fun showBatteryOptimizationDialog() {
-        AlertDialog.Builder(this)
-            .setTitle("تعطيل تحسين البطارية")
-            .setMessage("لضمان استمرار تشغيل الراديو في الخلفية وعند إطفاء الشاشة دون انقطاع على هواتف سامسونج، يلزم استثناء التطبيق من قيود تحسين البطارية.")
-            .setPositiveButton("استثناء التطبيق") { _, _ ->
-                requestIgnoreBatteryOptimization()
-            }
-            .setNegativeButton("إلغاء", null)
-            .setCancelable(false)
-            .show()
-    }
-
-    @SuppressLint("BatteryLife")
-    private fun requestIgnoreBatteryOptimization() {
-        try {
-            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                data = Uri.parse("package:$packageName")
-            }
-            startActivity(intent)
-        } catch (e: Exception) {
-            val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-            startActivity(intent)
-        }
-    }
-
-    private fun showNotificationSettingsDialog() {
-        AlertDialog.Builder(this)
-            .setTitle("إذن الإشعارات مطلوب")
-            .setMessage("لقد قمت برفض إذن الإشعارات بشكل دائم. يلزم تفعيل الإذن يدوياً من إعدادات التطبيق لتتمكن من التحكم بالراديو عبر شريط الإشعارات وشاشة القفل.")
-            .setPositiveButton("الانتقال للإعدادات") { _, _ ->
-                openAppSettings()
-            }
-            .setNegativeButton("إلغاء") { dialog, _ ->
-                dialog.dismiss()
-                checkAndRequestBatteryOptimization()
-            }
-            .setCancelable(false)
-            .show()
-    }
-
-    private fun openAppSettings() {
-        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-            data = Uri.fromParts("package", packageName, null)
-        }
-        startActivity(intent)
     }
 }
