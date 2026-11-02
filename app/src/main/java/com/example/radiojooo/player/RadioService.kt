@@ -235,6 +235,7 @@ class RadioService : Service() {
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                 enableLights(false)
                 enableVibration(false)
+                setSound(null, null)
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)
@@ -245,6 +246,14 @@ class RadioService : Service() {
         val notification = buildNotification()
         val manager = getSystemService(NotificationManager::class.java)
         manager?.notify(NOTIFICATION_ID, notification)
+    }
+
+    private fun getLargeIcon(): Bitmap? {
+        return try {
+            BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher)
+        } catch (e: Exception) {
+            null
+        }
     }
 
     private fun buildNotification(): Notification {
@@ -283,21 +292,26 @@ class RadioService : Service() {
             android.R.drawable.ic_media_play
         }
 
-        val playPauseText = if (player.isPlaying) "⏸️ إيقاف" else "▶️ تشغيل"
+        val playPauseText = if (player.isPlaying) "إيقاف" else "تشغيل"
+
+        val largeIcon = getLargeIcon()
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(currentTitle)
             .setContentText(currentLiveProgram)
+            .setSubText("🎵 بث مباشر")
             .setSmallIcon(android.R.drawable.ic_media_play)
+            .setLargeIcon(largeIcon)
             .setContentIntent(contentIntent)
             .setOngoing(true)
             .setShowWhen(false)
+            .setOnlyAlertOnce(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
             .setColor(ContextCompat.getColor(this, android.R.color.holo_blue_dark))
-            .setColorized(true)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "❌ خروج", stopPendingIntent)
+            .setColorized(false)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "خروج", stopPendingIntent)
             .addAction(playPauseIcon, playPauseText, playPausePendingIntent)
             .setStyle(
                 MediaStyle()
