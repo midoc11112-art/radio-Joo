@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.media.MediaScannerConnection
 import android.net.TrafficStats
 import android.net.Uri
@@ -22,7 +23,9 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 import androidx.media3.common.AudioAttributes
@@ -227,7 +230,7 @@ class RadioService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "تشغيل راديو جو",
+                "راديو جو",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "التحكم في بث الراديو المباشر"
@@ -264,18 +267,7 @@ class RadioService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        // الزر الأول: X (خروج)
-        val stopIntent = Intent(this, RadioActionReceiver::class.java).apply {
-            action = RadioActionReceiver.ACTION_STOP
-        }
-        val stopPendingIntent = PendingIntent.getBroadcast(
-            this,
-            1,
-            stopIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
-        // الزر الثاني: Play/Pause
+        // الزر الأول: Play/Pause (مع أيقونة مخصصة)
         val playPauseIntent = Intent(this, RadioActionReceiver::class.java).apply {
             action = RadioActionReceiver.ACTION_PLAY_PAUSE
         }
@@ -286,21 +278,35 @@ class RadioService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        // الزر الثاني: X (خروج) (مع أيقونة مخصصة)
+        val stopIntent = Intent(this, RadioActionReceiver::class.java).apply {
+            action = RadioActionReceiver.ACTION_STOP
+        }
+        val stopPendingIntent = PendingIntent.getBroadcast(
+            this,
+            1,
+            stopIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
         val playPauseIcon = if (player.isPlaying) {
-            android.R.drawable.ic_media_pause
+            R.drawable.ic_notification_pause
         } else {
-            android.R.drawable.ic_media_play
+            R.drawable.ic_notification_play
         }
 
         val playPauseText = if (player.isPlaying) "إيقاف" else "تشغيل"
 
         val largeIcon = getLargeIcon()
 
+        // لون مخصص (أزرق داكن)
+        val notificationColor = Color.parseColor("#1976D2")
+
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(currentTitle)
             .setContentText(currentLiveProgram)
             .setSubText("🎵 بث مباشر")
-            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setSmallIcon(R.drawable.ic_notification_play)
             .setLargeIcon(largeIcon)
             .setContentIntent(contentIntent)
             .setOngoing(true)
@@ -309,10 +315,10 @@ class RadioService : Service() {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
-            .setColor(ContextCompat.getColor(this, android.R.color.holo_blue_dark))
+            .setColor(notificationColor)
             .setColorized(false)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "خروج", stopPendingIntent)
             .addAction(playPauseIcon, playPauseText, playPausePendingIntent)
+            .addAction(R.drawable.ic_notification_close, "خروج", stopPendingIntent)
             .setStyle(
                 MediaStyle()
                     .setShowActionsInCompactView(0, 1)
