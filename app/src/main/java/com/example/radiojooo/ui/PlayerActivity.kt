@@ -12,14 +12,9 @@ class PlayerActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityPlayerBinding
 
-    // مراقب حالة ExoPlayer لتحديث الأزرار والنصوص في الواجهة التفصيلية تلقائياً
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             updatePlayPauseButtonUI(isPlaying)
-        }
-
-        override fun onPlaybackStateChanged(playbackState: Int) {
-            updatePlaybackStatusUI(playbackState)
         }
     }
 
@@ -54,7 +49,6 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun setupUIControls() {
-        // زر التشغيل والإيقاف المؤقت
         binding.btnPlayPause.setOnClickListener {
             val service = RadioService.getInstance()
             if (service != null) {
@@ -72,26 +66,18 @@ class PlayerActivity : AppCompatActivity() {
                 }
             }
         }
-
-        // زر الإيقاف التام وخروج الخدمة
-        binding.btnStop.setOnClickListener {
-            RadioService.getInstance()?.stop()
-            updatePlayPauseButtonUI(false)
-            binding.tvStatus.text = "متوقف"
-        }
     }
 
     private fun extractIntentDataAndPlay() {
         val streamUrl = intent.getStringExtra("EXTRA_STREAM_URL")
         val title = intent.getStringExtra("EXTRA_STATION_TITLE") ?: "إذاعة راديو جو"
-        val subtitle = intent.getStringExtra("EXTRA_STATION_SUBTITLE") ?: "بث مباشر"
+        val subtitle = intent.getStringExtra("EXTRA_STATION_SUBTITLE") ?: ""
 
-        binding.tvStationTitle.text = title
-        binding.tvStationSubtitle.text = subtitle
+        val displayTitle = if (subtitle.isNotEmpty()) "$title ($subtitle)" else title
+        binding.tvStationTitle.text = displayTitle
 
         if (!streamUrl.isNullOrEmpty()) {
             val service = RadioService.getInstance()
-            // تشغيل المحطة إذا لم تكن الخدمة تعمل أو عند تحديد محطة جديدة
             if (service == null || !service.isPlaying()) {
                 startRadioStream(streamUrl, title, subtitle)
             }
@@ -118,10 +104,8 @@ class PlayerActivity : AppCompatActivity() {
             val player = service.getPlayer()
             player?.addListener(playerListener)
             updatePlayPauseButtonUI(service.isPlaying())
-            player?.playbackState?.let { updatePlaybackStatusUI(it) }
         } else {
             updatePlayPauseButtonUI(false)
-            binding.tvStatus.text = "متوقف"
         }
     }
 
@@ -130,28 +114,12 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun updatePlayPauseButtonUI(isPlaying: Boolean) {
-        if (isPlaying) {
-            binding.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause)
-        } else {
-            binding.btnPlayPause.setImageResource(android.R.drawable.ic_media_play)
-        }
-    }
-
-    private fun updatePlaybackStatusUI(playbackState: Int) {
-        val isPlaying = RadioService.getInstance()?.isPlaying() == true
-        when (playbackState) {
-            Player.STATE_BUFFERING -> {
-                binding.tvStatus.text = "جاري التحميل..."
-            }
-            Player.STATE_READY -> {
-                binding.tvStatus.text = if (isPlaying) "جاري التشغيل" else "متوقف مؤقتاً"
-            }
-            Player.STATE_ENDED -> {
-                binding.tvStatus.text = "انتهى البث"
-            }
-            Player.STATE_IDLE -> {
-                binding.tvStatus.text = "متوقف"
-            }
+        val iconRes = if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+        val view: Any = binding.btnPlayPause
+        if (view is com.google.android.material.button.MaterialButton) {
+            view.setIconResource(iconRes)
+        } else if (view is android.widget.ImageView) {
+            view.setImageResource(iconRes)
         }
     }
 }
