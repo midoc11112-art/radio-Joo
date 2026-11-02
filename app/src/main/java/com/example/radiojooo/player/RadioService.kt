@@ -117,6 +117,8 @@ class RadioService : Service() {
     private var sleepTimer: CountDownTimer? = null
     var sleepTimeRemainingMs = 0L
         private set
+    private var retryCount = 0
+    private val maxRetries = 3
     private val statsHandler = Handler(Looper.getMainLooper())
     private val statsRunnable = object : Runnable {
         override fun run() {
@@ -186,34 +188,31 @@ class RadioService : Service() {
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
         }
 
-        // ✅ إعدادات توفير البيانات القصوى
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters()
-                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)  // ✅ منع الفيديو تماماً
-                .setMaxVideoSize(1, 1)  // ✅ أصغر حجم ممكن
-                .setForceHighestSupportedBitrate(false)  // ✅ اختيار أقل bitrate
-                .setMaxAudioBitrate(48000)  // ✅ حد أقصى 48 kbps
+                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
+                .setMaxVideoSize(1, 1)
+                .setForceHighestSupportedBitrate(false)
+                .setMaxAudioBitrate(48000)
                 .setPreferredAudioMimeTypes(MimeTypes.AUDIO_AAC, MimeTypes.AUDIO_MP4, MimeTypes.AUDIO_MPEG)
                 .build()
         }
 
-        // ✅ Buffer صغير جداً لتوفير البيانات
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(3000, 8000, 500, 1000)  // ✅ buffer أصغر
-            .setTargetBufferBytes(128 * 1024)  // ✅ 128 KB فقط
+            .setBufferDurationsMs(3000, 8000, 500, 1000)
+            .setTargetBufferBytes(128 * 1024)
             .setPrioritizeTimeOverSizeThresholds(true)
             .setBackBuffer(0, false)
             .build()
 
-        // ✅ Headers محسنة لتوفير البيانات
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(10000)
-            .setReadTimeoutMs(10000)
+            .setConnectTimeoutMs(15000)
+            .setReadTimeoutMs(15000)
             .setAllowCrossProtocolRedirects(true)
             .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
             .setDefaultRequestProperties(mapOf(
-                "Accept" to "audio/*",  // ✅ نطلب صوت فقط
-                "Icy-MetaData" to "0",  // ✅ بدون metadata
+                "Accept" to "audio/*",
+                "Icy-MetaData" to "0",
             ))
 
         mediaSourceFactory = DefaultMediaSourceFactory(this)
@@ -237,18 +236,66 @@ class RadioService : Service() {
 
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
-                val currentUrl = availableUrls.getOrNull(currentUrlIndex) ?: ""
-                if (!isUsingProxy && currentUrl.isNotBlank()) {
-                    startStream(currentUrl, useProxy = true)
-                } else {
-                    tryNextMirrorServer()
-                }
+                handlePlaybackError(error)
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 updateNotification()
             }
         })
+    }
+
+    // ✅ Smart Error Handling
+    private fun handlePlaybackError(error: PlaybackException) {
+        retryCount++
+        
+        if (retryCount <= maxRetries) {
+            when {
+                // محاولة 1: جرب بالـ proxy
+                !isUsingProxy -> {
+                    statsHandler.postDelayed({
+                        val currentUrl = availableUrls.getOrNull(currentUrlIndex) ?: return@postDelayed
+                        startStream(currentUrl, useProxy = true)
+                    }, 2000)
+                }
+                // محاولة 2: جرب مسار تاني
+                availableUrls.size > 1 -> {
+                    statsHandler.postDelayed({
+                        tryNextMirrorServer()
+                    }, 3000)
+                }
+                // محاولة 3: جرب URL normalized
+                else -> {
+                    statsHandler.postDelayed({
+                        val currentUrl = availableUrls.getOrNull(currentUrlIndex) ?: return@postDelayed
+                        val normalizedUrl = normalizeUrl(currentUrl)
+                        if (normalizedUrl != currentUrl) {
+                            startStream(normalizedUrl, useProxy = true)
+                        }
+                    }, 4000)
+                }
+            }
+        } else {
+            retryCount = 0
+        }
+    }
+
+    // ✅ URL Normalization
+    private fun normalizeUrl(url: String): String {
+        var normalized = url.trim()
+        
+        // إصلاح البروتوكول
+        if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) {
+            normalized = "https://$normalized"
+        }
+        
+        // إزالة المسافات
+        normalized = normalized.replace(" ", "%20")
+        
+        // إصلاح الروابط المكسورة
+        normalized = normalized.replace(":///", "://")
+        
+        return normalized
     }
 
     private fun createNotificationChannel() {
@@ -394,11 +441,12 @@ class RadioService : Service() {
         currentBitrate = bitrate
         currentCategory = category
         currentCountry = country
+        retryCount = 0
 
         availableUrls.clear()
-        if (pUrl.isNotBlank()) availableUrls.add(pUrl.trim())
+        if (pUrl.isNotBlank()) availableUrls.add(normalizeUrl(pUrl))
         if (fUrl.isNotBlank()) {
-            availableUrls.addAll(fUrl.split(",").map { it.trim() }.filter { it.isNotBlank() })
+            availableUrls.addAll(fUrl.split(",").map { normalizeUrl(it.trim()) }.filter { it.isNotBlank() })
         }
         currentUrlIndex = 0
         totalSessionBytes = 0L
@@ -418,9 +466,8 @@ class RadioService : Service() {
             player.clearMediaItems()
             isUsingProxy = useProxy
 
-            // ✅ إضافة parameter للـ bitrate المستهدف
             val finalUrl = if (useProxy) {
-                getProxiedUrl(streamUrl) + "&bitrate=48"  // ✅ نطلب 48 kbps
+                getProxiedUrl(streamUrl) + "&bitrate=48"
             } else {
                 streamUrl
             }
@@ -452,6 +499,7 @@ class RadioService : Service() {
             player.playWhenReady = true
         } catch (e: Exception) {
             e.printStackTrace()
+            handlePlaybackError(PlaybackException("Stream error", e, PlaybackException.ERROR_CODE_UNSPECIFIED))
         }
     }
 
