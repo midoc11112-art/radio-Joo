@@ -1,9 +1,5 @@
 package com.example.radiojooo.player
 
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.media.MediaScannerConnection
@@ -17,10 +13,8 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import androidx.annotation.OptIn
-import androidx.core.app.NotificationCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
-import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
@@ -34,7 +28,6 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.FilteringMediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
-import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.example.radiojooo.ui.MainActivity
@@ -54,9 +47,6 @@ class RadioService : MediaSessionService() {
     companion object {
         private var instance: RadioService? = null
 
-        private const val CHANNEL_ID = "radio_joo_service_channel"
-        private const val NOTIFICATION_ID = 1001
-
         fun getInstance(): RadioService? = instance
 
         fun requestPlayStation(
@@ -66,22 +56,17 @@ class RadioService : MediaSessionService() {
             pUrl: String,
             fUrl: String
         ) {
-            val current = instance
-            if (current != null) {
-                current.playStationInternal(title, uuid, pUrl, fUrl)
+            val intent = Intent(context, RadioService::class.java).apply {
+                putExtra("ACTION", "PLAY_STATION")
+                putExtra("TITLE", title)
+                putExtra("UUID", uuid)
+                putExtra("PRIMARY_URL", pUrl)
+                putExtra("FALLBACK_URL", fUrl)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
             } else {
-                val intent = Intent(context, RadioService::class.java).apply {
-                    putExtra("ACTION", "PLAY_STATION")
-                    putExtra("TITLE", title)
-                    putExtra("UUID", uuid)
-                    putExtra("PRIMARY_URL", pUrl)
-                    putExtra("FALLBACK_URL", fUrl)
-                }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    context.startForegroundService(intent)
-                } else {
-                    context.startService(intent)
-                }
+                context.startService(intent)
             }
         }
     }
@@ -89,7 +74,6 @@ class RadioService : MediaSessionService() {
     private val cloudflareProxyBase = "https://radio-joo-proxy.midoc11112.workers.dev/?url="
     private var isUsingProxy = false
     private lateinit var player: ExoPlayer
-    private lateinit var forwardingPlayer: ForwardingPlayer
     private var mediaSession: MediaSession? = null
     private lateinit var trackSelector: DefaultTrackSelector
     private lateinit var mediaSourceFactory: DefaultMediaSourceFactory
@@ -123,53 +107,16 @@ class RadioService : MediaSessionService() {
         }
     }
 
+    // ✅ MediaSessionService بيعمل الإشعار تلقائياً - مش محتاجين startForeground()
     override fun onCreate() {
         super.onCreate()
         instance = this
 
-        // ✅ الخطوة 1: إشعار مؤقت فوراً (قبل أي حاجة تانية)
-        // ده بيمنع النظام من قتل الخدمة في أول 5 ثواني
-        startForegroundSafely()
-
-        // ✅ الخطوة 2: إنشاء قناة الإشعارات
-        createNotificationChannel()
-
-        // ✅ الخطوة 3: الأقفال
         acquireLocks()
-
-        // ✅ الخطوة 4: تهيئة اللاعب
         initializePlayer()
-
-        // ✅ الخطوة 5: إعداد MediaSession (ده اللي بيخلي النظام يعتبرنا المشغل الافتراضي)
         setupMediaSession()
 
         statsHandler.post(statsRunnable)
-    }
-
-    // ✅ إشعار مؤقت فوراً عشان النظام ما يقتلش الخدمة
-    private fun startForegroundSafely() {
-        try {
-            val pendingIntent = PendingIntent.getActivity(
-                this, 0,
-                Intent(this, MainActivity::class.java),
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-            )
-
-            val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("راديو جو")
-                .setContentText("جاري التحضير...")
-                .setSmallIcon(android.R.drawable.ic_media_play)
-                .setContentIntent(pendingIntent)
-                .setOngoing(true)
-                .setPriority(NotificationCompat.PRIORITY_LOW)
-                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
-                .build()
-
-            startForeground(NOTIFICATION_ID, notification)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -187,15 +134,13 @@ class RadioService : MediaSessionService() {
         return START_STICKY
     }
 
-    // ✅ ده اللي بيخلي النظام يعتبرنا المشغل الافتراضي
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
         return mediaSession
     }
 
     // ✅ الخدمة تفضل شغالة لما المستخدم يسحب التطبيق من الخلفية
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // ما نعملش حاجة - الخدمة تفضل شغالة
-        // المستخدم لازم يضغط زر X في الودجت عشان يقفل
+        // ما نعملش حاجة - MediaSessionService هيتعامل مع ده تلقائياً
     }
 
     override fun onDestroy() {
@@ -204,11 +149,13 @@ class RadioService : MediaSessionService() {
         stopRecording()
         releaseLocks()
         statsHandler.removeCallbacks(statsRunnable)
-        try {
-            if (::player.isInitialized) player.release()
-        } catch (_: Exception) {}
-        mediaSession?.release()
-        mediaSession = null
+        
+        mediaSession?.run {
+            player.release()
+            release()
+            mediaSession = null
+        }
+        
         instance = null
         super.onDestroy()
     }
@@ -268,83 +215,10 @@ class RadioService : MediaSessionService() {
         })
     }
 
-    // ✅ ده الحل الجذري: MediaSession + ForwardingPlayer
-    // النظام هيعتبرنا المشغل الافتراضي للوسائط
-    // والودجت هتظهر في شريط الإشعارات + شاشة القفل
+    // ✅ MediaSession - ده اللي بيخلي النظام يعتبرنا المشغل الافتراضي
     private fun setupMediaSession() {
-        // ForwardingPlayer لاعتراض أوامر النظام
-        forwardingPlayer = object : ForwardingPlayer(player) {
-
-            // ✅ هنا بنتحكم في الأزرار اللي تظهر في الودجت
-            override fun getAvailableCommands(): Player.Commands {
-                return Player.Commands.Builder()
-                    .add(Player.COMMAND_PLAY_PAUSE)    // زر تشغيل/إيقاف
-                    .add(Player.COMMAND_STOP)           // زر X (خروج)
-                    .add(Player.COMMAND_GET_TIMELINE)   // مطلوب للعرض
-                    .add(Player.COMMAND_GET_METADATA)   // مطلوب لعرض اسم المحطة
-                    .build()
-            }
-
-            // ✅ لما المستخدم يضغط زر X في الودجت
-            override fun stop() {
-                stopAndExitApp()
-            }
-
-            // ✅ التأكد إن الأوامر متاحة
-            override fun isCommandAvailable(command: Int): Boolean {
-                return when (command) {
-                    Player.COMMAND_PLAY_PAUSE -> true
-                    Player.COMMAND_STOP -> true
-                    Player.COMMAND_GET_TIMELINE -> true
-                    Player.COMMAND_GET_METADATA -> true
-                    else -> super.isCommandAvailable(command)
-                }
-            }
-        }
-
-        // PendingIntent لفتح التطبيق لما المستخدم يضغط على الودجت
-        val contentPendingIntent = PendingIntent.getActivity(
-            this, 0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
-        // ✅ بناء MediaSession - ده اللي بيخلي النظام يعتبرنا المشغل الافتراضي
-        mediaSession = MediaSession.Builder(this, forwardingPlayer)
-            .setSessionActivity(contentPendingIntent)
+        mediaSession = MediaSession.Builder(this, player)
             .build()
-
-        // ✅ إعداد مزود الإشعارات
-        // ده اللي بيتحكم في شكل الودجت في شريط الإشعارات
-        val provider = DefaultMediaNotificationProvider.Builder(this)
-            .setChannelId(CHANNEL_ID)
-            .setNotificationId(NOTIFICATION_ID)
-            .build()
-
-        provider.setSmallIcon(android.R.drawable.ic_media_play)
-
-        // ✅ مهم: MediaSessionService هيستبدل الإشعار المؤقت بالإشعار الحقيقي
-        setMediaNotificationProvider(provider)
-    }
-
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "راديو جو",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "التحكم في بث الراديو المباشر"
-                setShowBadge(false)
-                // ✅ مهم جداً لشاشة القفل
-                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-                enableLights(false)
-                enableVibration(false)
-                setSound(null, null)
-            }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager?.createNotificationChannel(channel)
-        }
     }
 
     private fun playStationInternal(title: String, uuid: String, pUrl: String, fUrl: String) {
@@ -383,7 +257,7 @@ class RadioService : MediaSessionService() {
                 else -> MimeTypes.AUDIO_MPEG
             }
 
-            // ✅ مهم: MediaMetadata هو اللي بيظهر في الودجت وشاشة القفل
+            // ✅ MediaMetadata - ده اللي بيظهر في الودجت وشاشة القفل
             val metadata = MediaMetadata.Builder()
                 .setTitle(currentTitle)
                 .setArtist(currentLiveProgram)
