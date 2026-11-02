@@ -12,23 +12,19 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import androidx.media3.common.Player
+import com.example.radiojooo.data.model.StationEntity
 import com.example.radiojooo.databinding.ActivityMainBinding
 import com.example.radiojooo.player.RadioService
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
-
-    // مراقب حالة ExoPlayer لتحديث الأزرار في الواجهة فوراً
-    private val playerListener = object : Player.Listener {
-        override fun onIsPlayingChanged(isPlaying: Boolean) {
-            updatePlayPauseButtonUI(isPlaying)
-        }
-    }
+    private val viewModel: RadioViewModel by viewModels()
+    private lateinit var stationAdapter: StationAdapter
 
     private val requestNotificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -58,44 +54,25 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        setupUIControls()
+        setupRecyclerView()
+        observeViewModel()
         checkAndRequestNotificationPermission()
     }
 
-    override fun onStart() {
-        super.onStart()
-        attachPlayerListener()
-    }
-
-    override fun onStop() {
-        super.onStop()
-        detachPlayerListener()
-    }
-
-    private fun setupUIControls() {
-        // ربط زر التشغيل/الإيقاف المؤقت
-        binding.btnPlayPause.setOnClickListener {
-            val service = RadioService.getInstance()
-            if (service != null) {
-                if (service.isPlaying()) {
-                    service.pause()
-                } else {
-                    service.resume()
-                }
-            } else {
-                // تشغيل المحطة لأول مرة وبدء الخدمة كـ Foreground Service
-                startRadioStream("https://stream.radiojoo.com/live", "إذاعة راديو جو", "بث مباشر")
-            }
+    private fun setupRecyclerView() {
+        stationAdapter = StationAdapter { station ->
+            onStationClicked(station)
         }
+        binding.rvStations.adapter = stationAdapter
+    }
 
-        // ربط زر الإيقاف التام
-        binding.btnStop.setOnClickListener {
-            RadioService.getInstance()?.stop()
-            updatePlayPauseButtonUI(false)
+    private fun observeViewModel() {
+        viewModel.stations.observe(this) { stations ->
+            stationAdapter.submitList(stations)
         }
     }
 
-    private fun startRadioStream(url: String, title: String, subtitle: String) {
+    private fun onStationClicked(station: StationEntity) {
         val intent = Intent(this, RadioService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
@@ -103,34 +80,16 @@ class MainActivity : AppCompatActivity() {
             startService(intent)
         }
 
-        // انتظار تهيئة الخدمة ثم بدء البث المباشر
         binding.root.postDelayed({
-            RadioService.getInstance()?.playStation(url, title, subtitle)
-            attachPlayerListener()
+            RadioService.getInstance()?.playStation(station.url, station.name, station.category)
         }, 200)
-    }
 
-    private fun attachPlayerListener() {
-        val service = RadioService.getInstance()
-        if (service != null) {
-            val player = service.getPlayer()
-            player?.addListener(playerListener)
-            updatePlayPauseButtonUI(service.isPlaying())
-        } else {
-            updatePlayPauseButtonUI(false)
+        val playerIntent = Intent(this, PlayerActivity::class.java).apply {
+            putExtra("EXTRA_STREAM_URL", station.url)
+            putExtra("EXTRA_STATION_TITLE", station.name)
+            putExtra("EXTRA_STATION_SUBTITLE", station.category)
         }
-    }
-
-    private fun detachPlayerListener() {
-        RadioService.getInstance()?.getPlayer()?.removeListener(playerListener)
-    }
-
-    private fun updatePlayPauseButtonUI(isPlaying: Boolean) {
-        if (isPlaying) {
-            binding.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause)
-        } else {
-            binding.btnPlayPause.setImageResource(android.R.drawable.ic_media_play)
-        }
+        startActivity(playerIntent)
     }
 
     private fun checkAndRequestNotificationPermission() {
