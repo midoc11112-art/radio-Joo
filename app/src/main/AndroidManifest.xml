@@ -35,10 +35,10 @@
             android:name=".ui.PlayerActivity"
             android:exported="false" />
 
-        <!-- ✅ التغيير: خدمة عادية مع BroadcastReceiver -->
         <service
             android:name=".player.RadioService"
             android:foregroundServiceType="mediaPlayback"
+            android:showOnLockScreen="true"
             android:stopWithTask="false"
             android:exported="false" />
 
