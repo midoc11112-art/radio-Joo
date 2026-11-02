@@ -11,8 +11,6 @@ class RadioApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        
-        // ✅ جدولة التحديث التلقائي كل 24 ساعة
         scheduleStationSync()
     }
 
