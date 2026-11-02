@@ -273,7 +273,6 @@ class RadioService : Service() {
         }
     }
 
-    // ✅ دالة مساعدة للحصول على اسم القسم بالعربي
     private fun getCategoryArabicName(category: String): String {
         return when (category.uppercase()) {
             "QURAN" -> "القرآن الكريم"
@@ -292,7 +291,6 @@ class RadioService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        // ✅ الزر الأول: X (خروج) - بره - بأيقونة مخصصة بيضاء
         val stopIntent = Intent(RadioActionReceiver.ACTION_STOP).apply {
             setPackage(packageName)
         }
@@ -301,7 +299,6 @@ class RadioService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        // ✅ الزر الثاني: Play/Pause - جوه - بأيقونة مخصصة بيضاء
         val playPauseIntent = Intent(RadioActionReceiver.ACTION_PLAY_PAUSE).apply {
             setPackage(packageName)
         }
@@ -310,7 +307,6 @@ class RadioService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        // ✅ استخدام الأيقونات المخصصة (بيضاء على خلفية زرقاء)
         val playPauseIcon = if (player.isPlaying) {
             R.drawable.ic_notification_pause
         } else {
@@ -320,11 +316,10 @@ class RadioService : Service() {
         val playPauseText = if (player.isPlaying) "إيقاف" else "تشغيل"
         val largeIcon = getLargeIcon()
 
-        // ✅ بناء النص الفرعي من المعلومات الفعلية
         val subTextParts = mutableListOf<String>()
         
         if (currentBitrate > 0) {
-            subTextParts.add("${currentBitrate} Kbps")
+            subTextParts.add(currentBitrate.toString() + " Kbps")
         }
         
         if (currentCategory.isNotBlank()) {
@@ -341,12 +336,11 @@ class RadioService : Service() {
             "راديو جو"
         }
 
-        // ✅ تصميم عصري ومتناسق
-        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(currentTitle) // ✅ اسم المحطة بخط عريض (النظام بيتحكم في الحجم)
-            .setContentText(subText) // ✅ المعلومات الفعلية
-            .setSmallIcon(R.drawable.ic_notification_play) // ✅ أيقونة صغيرة مخصصة
-            .setLargeIcon(largeIcon) // ✅ أيقونة كبيرة
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(currentTitle)
+            .setContentText(subText)
+            .setSmallIcon(R.drawable.ic_notification_play)
+            .setLargeIcon(largeIcon)
             .setContentIntent(contentIntent)
             .setOngoing(true)
             .setShowWhen(false)
@@ -354,20 +348,17 @@ class RadioService : Service() {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
-            .setColor(0xFF1976D2.toInt()) // ✅ لون أزرق موحد
-            .setColorized(true) // ✅ تفعيل اللون المميز
-            // ✅ X بره بأيقونة مخصصة بيضاء
+            .setColor(0xFF1976D2.toInt())
+            .setColorized(true)
             .addAction(R.drawable.ic_notification_close, "خروج", stopPendingIntent)
-            // ✅ Play/Pause جوه بأيقونة مخصصة بيضاء
             .addAction(playPauseIcon, playPauseText, playPausePendingIntent)
             .setStyle(
                 MediaStyle()
-                    .setShowActionsInCompactView(0, 1) // ✅ الأزرار ثابتة
+                    .setShowActionsInCompactView(0, 1)
                     .setShowCancelButton(true)
                     .setCancelButtonIntent(stopPendingIntent)
             )
-
-        return builder.build()
+            .build()
     }
 
     private fun startForegroundWithNotification() {
