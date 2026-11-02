@@ -41,16 +41,13 @@
             android:stopWithTask="false"
             android:exported="false" />
 
+        <!-- ✅ Receiver مع intent-filter + exported=true -->
         <receiver
             android:name=".player.RadioActionReceiver"
-            android:exported="false" />
-
-        <!-- ✅ MediaButtonReceiver لدعم شاشة القفل -->
-        <receiver
-            android:name="androidx.media3.session.MediaButtonReceiver"
             android:exported="true">
             <intent-filter>
-                <action android:name="android.intent.action.MEDIA_BUTTON" />
+                <action android:name="com.example.radiojooo.ACTION_PLAY_PAUSE" />
+                <action android:name="com.example.radiojooo.ACTION_STOP" />
             </intent-filter>
         </receiver>
 
