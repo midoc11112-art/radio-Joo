@@ -186,24 +186,35 @@ class RadioService : Service() {
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
         }
 
+        // ✅ إعدادات توفير البيانات القصوى
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters()
-                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
+                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)  // ✅ منع الفيديو تماماً
+                .setMaxVideoSize(1, 1)  // ✅ أصغر حجم ممكن
+                .setForceHighestSupportedBitrate(false)  // ✅ اختيار أقل bitrate
+                .setMaxAudioBitrate(48000)  // ✅ حد أقصى 48 kbps
+                .setPreferredAudioMimeTypes(MimeTypes.AUDIO_AAC, MimeTypes.AUDIO_MP4, MimeTypes.AUDIO_MPEG)
                 .build()
         }
 
+        // ✅ Buffer صغير جداً لتوفير البيانات
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(10000, 20000, 1500, 3000)
-            .setTargetBufferBytes(1024 * 1024)
+            .setBufferDurationsMs(3000, 8000, 500, 1000)  // ✅ buffer أصغر
+            .setTargetBufferBytes(128 * 1024)  // ✅ 128 KB فقط
             .setPrioritizeTimeOverSizeThresholds(true)
             .setBackBuffer(0, false)
             .build()
 
+        // ✅ Headers محسنة لتوفير البيانات
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(15000)
-            .setReadTimeoutMs(15000)
+            .setConnectTimeoutMs(10000)
+            .setReadTimeoutMs(10000)
             .setAllowCrossProtocolRedirects(true)
             .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .setDefaultRequestProperties(mapOf(
+                "Accept" to "audio/*",  // ✅ نطلب صوت فقط
+                "Icy-MetaData" to "0",  // ✅ بدون metadata
+            ))
 
         mediaSourceFactory = DefaultMediaSourceFactory(this)
             .setDataSourceFactory(dataSourceFactory)
@@ -307,7 +318,6 @@ class RadioService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        // ✅ الزر يتغير شكله حسب حالة التشغيل
         val playPauseIcon = if (player.isPlaying) {
             R.drawable.ic_notification_pause
         } else {
@@ -355,7 +365,6 @@ class RadioService : Service() {
             .addAction(playPauseIcon, playPauseText, playPausePendingIntent)
             .setStyle(
                 MediaStyle()
-                    // ✅ إزالة السهم - الودجت ثابتة الحجم
                     .setShowActionsInCompactView(0, 1)
             )
             .build()
@@ -409,7 +418,13 @@ class RadioService : Service() {
             player.clearMediaItems()
             isUsingProxy = useProxy
 
-            val finalUrl = if (useProxy) getProxiedUrl(streamUrl) else streamUrl
+            // ✅ إضافة parameter للـ bitrate المستهدف
+            val finalUrl = if (useProxy) {
+                getProxiedUrl(streamUrl) + "&bitrate=48"  // ✅ نطلب 48 kbps
+            } else {
+                streamUrl
+            }
+            
             val uri = Uri.parse(finalUrl)
 
             val mimeType = when {
