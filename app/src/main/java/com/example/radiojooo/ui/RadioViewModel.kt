@@ -67,6 +67,12 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
             repository.checkForUpdates()
         }
 
+        // ✅ جلب كل المحطات في الخلفية (بعد ما يجيب الأول 50)
+        viewModelScope.launch(Dispatchers.IO) {
+            kotlinx.coroutines.delay(5000) // نستهني 5 ثواني
+            repository.fetchAllStationsInBackground()
+        }
+
         val filteredFlow = MutableStateFlow<List<StationEntity>>(emptyList())
         stations = filteredFlow.asStateFlow()
 
