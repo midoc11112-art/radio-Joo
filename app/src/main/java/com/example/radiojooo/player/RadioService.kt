@@ -4,33 +4,30 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.media.MediaScannerConnection
 import android.net.TrafficStats
 import android.net.Uri
 import android.net.wifi.WifiManager
-import android.os.Binder
 import android.os.Build
 import android.os.CountDownTimer
 import android.os.Environment
 import android.os.Handler
-import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
-import android.support.v4.media.MediaMetadataCompat
-import android.support.v4.media.session.MediaSessionCompat
-import android.support.v4.media.session.PlaybackStateCompat
+import androidx.annotation.OptIn
 import androidx.core.app.NotificationCompat
-import androidx.media.app.NotificationCompat.MediaStyle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -38,6 +35,9 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.FilteringMediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.session.DefaultMediaNotificationProvider
+import androidx.media3.session.MediaSession
+import androidx.media3.session.MediaSessionService
 import com.example.radiojooo.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -49,23 +49,55 @@ import java.net.URL
 import java.net.URLEncoder
 import java.util.Locale
 
-class RadioService : Service() {
+@OptIn(UnstableApi::class)
+class RadioService : MediaSessionService() {
+
+    companion object {
+        private var instance: RadioService? = null
+
+        @Volatile
+        private var pendingAction: ((RadioService) -> Unit)? = null
+
+        private const val CHANNEL_ID = "radio_joo_service_channel"
+        private const val NOTIFICATION_ID = 1001
+
+        fun getInstance(): RadioService? = instance
+
+        /**
+         * نقطة الدخول الوحيدة من MainActivity لتشغيل محطة.
+         * تتعامل مع حالة الخدمة غير الجاهزة بعد عبر تخزين pendingAction.
+         */
+        fun requestPlayStation(
+            context: Context,
+            title: String,
+            uuid: String,
+            pUrl: String,
+            fUrl: String
+        ) {
+            val action: (RadioService) -> Unit = { svc ->
+                svc.playStationInternal(title, uuid, pUrl, fUrl)
+            }
+            val current = instance
+            if (current != null) {
+                action(current)
+            } else {
+                pendingAction = action
+                val intent = Intent(context, RadioService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            }
+        }
+    }
 
     private val cloudflareProxyBase = "https://radio-joo-proxy.midoc11112.workers.dev/?url="
     private var isUsingProxy = false
 
-    private fun getProxiedUrl(rawUrl: String): String {
-        if (rawUrl.isBlank()) return rawUrl
-        if (rawUrl.contains("radio-joo-proxy.midoc11112.workers.dev")) return rawUrl
-        return try {
-            cloudflareProxyBase + URLEncoder.encode(rawUrl, "UTF-8")
-        } catch (e: Exception) {
-            cloudflareProxyBase + Uri.encode(rawUrl)
-        }
-    }
-
     private lateinit var player: ExoPlayer
-    private var mediaSession: MediaSessionCompat? = null
+    private lateinit var forwardingPlayer: ForwardingPlayer
+    private var mediaSession: MediaSession? = null
     private lateinit var trackSelector: DefaultTrackSelector
     private lateinit var mediaSourceFactory: DefaultMediaSourceFactory
 
@@ -79,7 +111,8 @@ class RadioService : Service() {
     var currentLiveProgram: String = "بث مباشر"
     var currentStationUuid: String = ""
 
-    var isRecording = false; private set
+    var isRecording = false
+        private set
     private var recordingJob: Job? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO)
 
@@ -90,7 +123,8 @@ class RadioService : Service() {
     private var stationStartTimeMs = 0L
 
     private var sleepTimer: CountDownTimer? = null
-    var sleepTimeRemainingMs = 0L; private set
+    var sleepTimeRemainingMs = 0L
+        private set
 
     private val statsHandler = Handler(Looper.getMainLooper())
     private val statsRunnable = object : Runnable {
@@ -102,38 +136,22 @@ class RadioService : Service() {
         }
     }
 
-    inner class LocalBinder : Binder() {
-        fun getService(): RadioService = this@RadioService
-    }
-
-    private val binder = LocalBinder()
-
-    override fun onBind(intent: Intent?): IBinder {
-        return binder
-    }
-
-    fun setAppForegroundState(inForeground: Boolean) {
-        isAppInForeground = inForeground
-        if (inForeground) {
-            statsHandler.post(statsRunnable)
-        } else {
-            statsHandler.removeCallbacks(statsRunnable)
-        }
-    }
-
-    fun pausePlayback() {
-        if (::player.isInitialized) player.pause()
-    }
-
-    fun resumePlayback() {
-        if (::player.isInitialized) player.play()
-    }
+    // ==========================================================
+    // دورة الحياة
+    // ==========================================================
 
     override fun onCreate() {
         super.onCreate()
-        acquireLocks()
-        createNotificationChannel()
+        instance = this
 
+        // 1) القناة + الإشعار المؤقت (يمنع انهيار 5 ثوانٍ بعد startForegroundService)
+        createNotificationChannel()
+        startForegroundSafely()
+
+        // 2) الأقفال
+        acquireLocks()
+
+        // 3) إعداد ExoPlayer
         val renderersFactory = DefaultRenderersFactory(this).apply {
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
         }
@@ -160,7 +178,7 @@ class RadioService : Service() {
         mediaSourceFactory = DefaultMediaSourceFactory(this)
             .setDataSourceFactory(dataSourceFactory)
 
-        player = ExoPlayer.Builder(this, renderersFactory)
+        val actualPlayer = ExoPlayer.Builder(this, renderersFactory)
             .setTrackSelector(trackSelector)
             .setLoadControl(loadControl)
             .setMediaSourceFactory(mediaSourceFactory)
@@ -174,25 +192,53 @@ class RadioService : Service() {
             .setHandleAudioBecomingNoisy(true)
             .build()
 
-        player.setWakeMode(C.WAKE_MODE_NETWORK)
+        actualPlayer.setWakeMode(C.WAKE_MODE_NETWORK)
+        player = actualPlayer
 
-        // ✅ إعداد MediaSessionCompat (الذي يفهمه نظام سامسونج)
-        mediaSession = MediaSessionCompat(this, "RadioJooSession").apply {
-            setCallback(object : MediaSessionCompat.Callback() {
-                override fun onPlay() {
-                    resumePlayback()
-                }
-                override fun onPause() {
-                    pausePlayback()
-                }
-                override fun onStop() {
-                    stopAndExitApp()
-                }
-            })
-            isActive = true
+        // 4) ForwardingPlayer لاعتراض COMMAND_STOP → إغلاق التطبيق
+        forwardingPlayer = object : ForwardingPlayer(actualPlayer) {
+            override fun getAvailableCommands(): Player.Commands {
+                return super.getAvailableCommands()
+                    .buildUpon()
+                    .add(Player.COMMAND_STOP)
+                    .add(Player.COMMAND_PLAY_PAUSE)
+                    .build()
+            }
+
+            override fun isCommandAvailable(command: Int): Boolean {
+                if (command == Player.COMMAND_STOP) return true
+                return super.isCommandAvailable(command)
+            }
+
+            override fun stop() {
+                // لا نستدعي super.stop() هنا — stopAndExitApp يتولى كل شيء
+                stopAndExitApp()
+            }
         }
 
-        player.addListener(object : Player.Listener {
+        // 5) MediaSession
+        val contentPendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        mediaSession = MediaSession.Builder(this, forwardingPlayer)
+            .setSessionActivity(contentPendingIntent)
+            .build()
+
+        // 6) مزود الإشعارات (Media3 1.6.1)
+        val provider = DefaultMediaNotificationProvider.Builder(this)
+            .setChannelId(CHANNEL_ID)
+            .build()
+
+        provider.setSmallIcon(android.R.drawable.ic_media_play)
+        provider.setNotificationContentIntent(contentPendingIntent)
+        setMediaNotificationProvider(provider)
+
+        // 7) مستمع اللاعب
+        actualPlayer.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 val currentUrl = availableUrls.getOrNull(currentUrlIndex) ?: ""
                 if (!isUsingProxy && currentUrl.isNotBlank()) {
@@ -201,26 +247,52 @@ class RadioService : Service() {
                     tryNextMirrorServer()
                 }
             }
-
-            override fun onIsPlayingChanged(isPlaying: Boolean) {
-                val state = if (isPlaying) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED
-                mediaSession?.setPlaybackState(
-                    PlaybackStateCompat.Builder()
-                        .setActions(PlaybackStateCompat.ACTION_PLAY or PlaybackStateCompat.ACTION_PAUSE or PlaybackStateCompat.ACTION_STOP)
-                        .setState(state, PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, 1f)
-                        .build()
-                )
-                updateNotification()
-            }
         })
 
+        // 8) عدّاد البيانات
         statsHandler.post(statsRunnable)
+
+        // 9) تنفيذ طلب معلّق إن وجد
+        val pending = pendingAction
+        pendingAction = null
+        pending?.invoke(this)
     }
+
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
+        return mediaSession
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // السلوك الافتراضي لـ MediaSessionService: يوقف الخدمة إن لم يكن اللاعب نشطاً.
+        // إن كان نشطاً يبقى البث مستمراً (مطلوب لتطبيق راديو).
+        super.onTaskRemoved(rootIntent)
+    }
+
+    override fun onDestroy() {
+        sleepTimer?.cancel()
+        stopRecording()
+        releaseLocks()
+        statsHandler.removeCallbacks(statsRunnable)
+        mediaSession?.run {
+            try {
+                if (::player.isInitialized) player.release()
+            } catch (_: Exception) {
+            }
+            release()
+            mediaSession = null
+        }
+        instance = null
+        super.onDestroy()
+    }
+
+    // ==========================================================
+    // الإشعار والحالة الأمامية
+    // ==========================================================
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
-                "radio_joo_service_channel",
+                CHANNEL_ID,
                 "تشغيل راديو جو",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
@@ -232,97 +304,54 @@ class RadioService : Service() {
         }
     }
 
-    // ✅ بناء الإشعار المخصص الذي يحتوي على (اسم المحطة + زر تشغيل/إيقاف + زر إغلاق)
-    private fun buildNotification(): Notification {
-        val intent = Intent(this, MainActivity::class.java)
+    private fun startForegroundSafely() {
+        try {
+            val notification = buildPlaceholderNotification()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun buildPlaceholderNotification(): Notification {
         val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent,
+            this,
+            0,
+            Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-
-        val playPauseIntent = Intent(this, RadioService::class.java).apply {
-            action = "ACTION_PLAY_PAUSE"
-        }
-        val playPausePending = PendingIntent.getService(
-            this, 1, playPauseIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
-        val playPauseIcon = if (isPlaying()) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
-        val playPauseTitle = if (isPlaying()) "إيقاف مؤقت" else "تشغيل"
-
-        val closeIntent = Intent(this, RadioService::class.java).apply { action = "ACTION_CLOSE" }
-        val closePending = PendingIntent.getService(
-            this, 2, closeIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
-        // تحديث بيانات الجلسة لتظهر على شاشة القفل
-        mediaSession?.setMetadata(
-            MediaMetadataCompat.Builder()
-                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentTitle)
-                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, currentLiveProgram)
-                .build()
-        )
-
-        val mediaStyle = MediaStyle()
-            .setMediaSession(mediaSession?.sessionToken)
-            .setShowActionsInCompactView(0, 1) // إظهار الزرين في العرض المصغر
-
-        return NotificationCompat.Builder(this, "radio_joo_service_channel")
-            .setContentTitle(currentTitle)
-            .setContentText(currentLiveProgram)
-            .setSmallIcon(android.R.drawable.ic_media_play) // يمكنك تغييرها لأيقونة تطبيقك
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("راديو جو")
+            .setContentText("اختر محطة للبدء")
+            .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setStyle(mediaStyle)
-            .addAction(playPauseIcon, playPauseTitle, playPausePending)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "إغلاق", closePending)
             .build()
     }
 
-    private fun updateNotification() {
-        try {
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.notify(1001, buildNotification())
-        } catch (e: Exception) { e.printStackTrace() }
-    }
+    // ==========================================================
+    // التشغيل
+    // ==========================================================
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            "ACTION_PLAY_PAUSE" -> { if (isPlaying()) pausePlayback() else resumePlayback() }
-            "ACTION_CLOSE" -> { stopAndExitApp() }
-        }
-        return START_STICKY
-    }
-
-    private fun acquireLocks() {
-        try {
-            val pm = getSystemService(POWER_SERVICE) as PowerManager
-            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "RadioJoo::ServiceWakeLock")
-            wakeLock?.acquire(10 * 60 * 60 * 1000L)
-
-            val wm = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
-            wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "RadioJoo::ServiceWifiLock")
-            wifiLock?.acquire()
-        } catch (e: Exception) { e.printStackTrace() }
-    }
-
-    private fun releaseLocks() {
-        try {
-            if (wakeLock?.isHeld == true) wakeLock?.release()
-            if (wifiLock?.isHeld == true) wifiLock?.release()
-        } catch (e: Exception) { e.printStackTrace() }
-    }
-
-    fun playStation(title: String, uuid: String, pUrl: String, fUrl: String) {
+    private fun playStationInternal(title: String, uuid: String, pUrl: String, fUrl: String) {
         stopRecording()
         currentTitle = title
         currentStationUuid = uuid
         currentLiveProgram = "بث مباشر"
         availableUrls.clear()
         if (pUrl.isNotBlank()) availableUrls.add(pUrl.trim())
-        if (fUrl.isNotBlank()) availableUrls.addAll(fUrl.split(",").map { it.trim() }.filter { it.isNotBlank() })
+        if (fUrl.isNotBlank()) {
+            availableUrls.addAll(fUrl.split(",").map { it.trim() }.filter { it.isNotBlank() })
+        }
         currentUrlIndex = 0
         totalSessionBytes = 0L
         lastRxBytes = TrafficStats.getUidRxBytes(android.os.Process.myUid())
@@ -331,15 +360,6 @@ class RadioService : Service() {
         if (availableUrls.isNotEmpty()) {
             startStream(availableUrls[0], useProxy = true)
         }
-
-        // ✅ بدء الخدمة في المقدمة مع الإشعار المخصص
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(1001, buildNotification(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
-            } else {
-                startForeground(1001, buildNotification())
-            }
-        } catch (e: Exception) { e.printStackTrace() }
     }
 
     private fun startStream(streamUrl: String, useProxy: Boolean = false) {
@@ -373,112 +393,64 @@ class RadioService : Service() {
             player.setMediaSource(filteredSource)
             player.prepare()
             player.playWhenReady = true
-            updateNotification()
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 
-    fun isPlaying(): Boolean = ::player.isInitialized && player.isPlaying
-
-    fun getRecordingsFolder(): File {
-        val folder = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "RadioJoo")
-        if (!folder.exists()) folder.mkdirs()
-        return folder
-    }
-
-    fun toggleRecording(): Boolean {
-        if (isRecording) stopRecording() else startRecording()
-        return isRecording
-    }
-
-    private fun startRecording() {
-        if (availableUrls.isEmpty()) return
-        isRecording = true
-        val currentUrl = availableUrls.getOrNull(currentUrlIndex) ?: return
-        val finalUrl = if (isUsingProxy) getProxiedUrl(currentUrl) else currentUrl
-        recordingJob = serviceScope.launch {
-            try {
-                val dir = getRecordingsFolder()
-                val safeTitle = currentTitle.replace(Regex("[^a-zA-Z0-9_ -]"), "_")
-                val file = File(dir, "Rec_${safeTitle}_${System.currentTimeMillis()}.mp3")
-                val connection = URL(finalUrl).openConnection().apply {
-                    connectTimeout = 10000; readTimeout = 10000
-                    setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                }
-                connection.getInputStream().use { input ->
-                    FileOutputStream(file).use { output ->
-                        val buffer = ByteArray(4096)
-                        var bytesRead = 0
-                        while (isRecording && input.read(buffer).also { bytesRead = it } != -1) {
-                            output.write(buffer, 0, bytesRead)
-                        }
-                    }
-                }
-                MediaScannerConnection.scanFile(applicationContext, arrayOf(file.absolutePath), arrayOf("audio/mpeg"), null)
-            } catch (e: Exception) { e.printStackTrace(); isRecording = false }
+    private fun getProxiedUrl(rawUrl: String): String {
+        if (rawUrl.isBlank()) return rawUrl
+        if (rawUrl.contains("radio-joo-proxy.midoc11112.workers.dev")) return rawUrl
+        return try {
+            cloudflareProxyBase + URLEncoder.encode(rawUrl, "UTF-8")
+        } catch (e: Exception) {
+            cloudflareProxyBase + Uri.encode(rawUrl)
         }
-    }
-
-    private fun stopRecording() { isRecording = false; recordingJob?.cancel(); recordingJob = null }
-
-    fun startSleepTimer(minutes: Int) {
-        sleepTimer?.cancel()
-        if (minutes <= 0) { sleepTimeRemainingMs = 0L; return }
-        val totalMs = minutes * 60 * 1000L
-        sleepTimer = object : CountDownTimer(totalMs, 1000) {
-            override fun onTick(millisUntilFinished: Long) { sleepTimeRemainingMs = millisUntilFinished }
-            override fun onFinish() { sleepTimeRemainingMs = 0L; stopAndExitApp() }
-        }.start()
-    }
-
-    private fun stopAndExitApp() {
-        sleepTimer?.cancel()
-        stopRecording()
-        try { player.stop(); player.release() } catch (e: Exception) { e.printStackTrace() }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE)
-        else { @Suppress("DEPRECATION") stopForeground(true) }
-        releaseLocks()
-        stopSelf()
-        android.os.Process.killProcess(android.os.Process.myPid())
-    }
-
-    fun getListeningDurationFormatted(): String {
-        if (!::player.isInitialized || !player.isPlaying || stationStartTimeMs == 0L) return "00:00:00"
-        val diffSec = (System.currentTimeMillis() - stationStartTimeMs) / 1000
-        return String.format(Locale.US, "%02d:%02d:%02d", diffSec / 3600, (diffSec % 3600) / 60, diffSec % 60)
     }
 
     private fun tryNextMirrorServer() {
         if (availableUrls.isEmpty()) return
         if (availableUrls.size == 1) {
-            statsHandler.postDelayed({ if (availableUrls.isNotEmpty()) startStream(availableUrls[0], useProxy = true) }, 4000)
+            statsHandler.postDelayed({
+                if (availableUrls.isNotEmpty()) startStream(availableUrls[0], useProxy = true)
+            }, 4000)
             return
         }
         currentUrlIndex = (currentUrlIndex + 1) % availableUrls.size
-        statsHandler.postDelayed({ if (availableUrls.isNotEmpty()) startStream(availableUrls[currentUrlIndex], useProxy = true) }, 1500)
+        statsHandler.postDelayed({
+            if (availableUrls.isNotEmpty()) startStream(availableUrls[currentUrlIndex], useProxy = true)
+        }, 1500)
     }
 
-    private fun calculateDataUsage() {
-        if (::player.isInitialized && player.isPlaying) {
-            val currentRx = TrafficStats.getUidRxBytes(android.os.Process.myUid())
-            if (lastRxBytes != 0L && currentRx > lastRxBytes) {
-                val bytesThisSecond = currentRx - lastRxBytes
-                totalSessionBytes += bytesThisSecond
-                currentSpeedKbps = (bytesThisSecond / 1024.0)
-                totalDataMb = (totalSessionBytes / (1024.0 * 1024.0))
-            }
-            lastRxBytes = currentRx
-        } else { currentSpeedKbps = 0.0 }
+    // ==========================================================
+    // التحكم العام (متاح عبر Singleton من MainActivity)
+    // ==========================================================
+
+    fun setAppForegroundState(inForeground: Boolean) {
+        isAppInForeground = inForeground
+        if (inForeground) {
+            statsHandler.post(statsRunnable)
+        } else {
+            statsHandler.removeCallbacks(statsRunnable)
+        }
     }
 
-    override fun onDestroy() {
-        sleepTimer?.cancel()
-        stopRecording()
-        releaseLocks()
-        statsHandler.removeCallbacks(statsRunnable)
-        mediaSession?.release()
-        try { player.release() } catch (e: Exception) { e.printStackTrace() }
-        super.onDestroy()
+    fun pausePlayback() {
+        if (::player.isInitialized) player.pause()
     }
-}
+
+    fun resumePlayback() {
+        if (::player.isInitialized) player.play()
+    }
+
+    fun isPlaying(): Boolean = ::player.isInitialized && player.isPlaying
+
+    fun closeApp() {
+        stopAndExitApp()
+    }
+
+    // ==========================================================
+    // الأقفال
+    // ==========================================================
+
+    private fun acquireL
