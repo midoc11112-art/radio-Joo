@@ -234,7 +234,6 @@ class RadioService : MediaSessionService() {
             .build()
 
         provider.setSmallIcon(android.R.drawable.ic_media_play)
-        provider.setNotificationContentIntent(contentPendingIntent)
         setMediaNotificationProvider(provider)
 
         // 7) مستمع اللاعب
@@ -270,17 +269,19 @@ class RadioService : MediaSessionService() {
 
     override fun onDestroy() {
         sleepTimer?.cancel()
+        sleepTimer = null
         stopRecording()
         releaseLocks()
         statsHandler.removeCallbacks(statsRunnable)
-        mediaSession?.run {
-            try {
-                if (::player.isInitialized) player.release()
-            } catch (_: Exception) {
-            }
-            release()
-            mediaSession = null
+
+        try {
+            if (::player.isInitialized) player.release()
+        } catch (_: Exception) {
         }
+
+        mediaSession?.release()
+        mediaSession = null
+
         instance = null
         super.onDestroy()
     }
@@ -453,4 +454,170 @@ class RadioService : MediaSessionService() {
     // الأقفال
     // ==========================================================
 
-    private fun acquireL
+    private fun acquireLocks() {
+        try {
+            val pm = getSystemService(POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "RadioJoo::ServiceWakeLock")
+            wakeLock?.acquire(10 * 60 * 60 * 1000L)
+
+            val wm = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
+            wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "RadioJoo::ServiceWifiLock")
+            wifiLock?.acquire()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun releaseLocks() {
+        try {
+            if (wakeLock?.isHeld == true) wakeLock?.release()
+            if (wifiLock?.isHeld == true) wifiLock?.release()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    // ==========================================================
+    // التسجيل
+    // ==========================================================
+
+    fun getRecordingsFolder(): File {
+        val folder = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC),
+            "RadioJoo"
+        )
+        if (!folder.exists()) folder.mkdirs()
+        return folder
+    }
+
+    fun toggleRecording(): Boolean {
+        if (isRecording) stopRecording() else startRecording()
+        return isRecording
+    }
+
+    private fun startRecording() {
+        if (availableUrls.isEmpty()) return
+        isRecording = true
+        val currentUrl = availableUrls.getOrNull(currentUrlIndex) ?: return
+        val finalUrl = if (isUsingProxy) getProxiedUrl(currentUrl) else currentUrl
+        recordingJob = serviceScope.launch {
+            try {
+                val dir = getRecordingsFolder()
+                val safeTitle = currentTitle.replace(Regex("[^a-zA-Z0-9_ -]"), "_")
+                val file = File(dir, "Rec_${safeTitle}_${System.currentTimeMillis()}.mp3")
+                val connection = URL(finalUrl).openConnection().apply {
+                    connectTimeout = 10000
+                    readTimeout = 10000
+                    setRequestProperty(
+                        "User-Agent",
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                    )
+                }
+                connection.getInputStream().use { input ->
+                    FileOutputStream(file).use { output ->
+                        val buffer = ByteArray(4096)
+                        var bytesRead: Int
+                        while (isRecording && input.read(buffer).also { bytesRead = it } != -1) {
+                            output.write(buffer, 0, bytesRead)
+                        }
+                    }
+                }
+                MediaScannerConnection.scanFile(
+                    applicationContext,
+                    arrayOf(file.absolutePath),
+                    arrayOf("audio/mpeg"),
+                    null
+                )
+            } catch (e: Exception) {
+                e.printStackTrace()
+                isRecording = false
+            }
+        }
+    }
+
+    private fun stopRecording() {
+        isRecording = false
+        recordingJob?.cancel()
+        recordingJob = null
+    }
+
+    // ==========================================================
+    // مؤقت النوم
+    // ==========================================================
+
+    fun startSleepTimer(minutes: Int) {
+        sleepTimer?.cancel()
+        if (minutes <= 0) {
+            sleepTimeRemainingMs = 0L
+            return
+        }
+        val totalMs = minutes * 60 * 1000L
+        sleepTimer = object : CountDownTimer(totalMs, 1000) {
+            override fun onTick(millisUntilFinished: Long) {
+                sleepTimeRemainingMs = millisUntilFinished
+            }
+
+            override fun onFinish() {
+                sleepTimeRemainingMs = 0L
+                stopAndExitApp()
+            }
+        }.start()
+    }
+
+    // ==========================================================
+    // الإغلاق الكامل
+    // ==========================================================
+
+    private fun stopAndExitApp() {
+        sleepTimer?.cancel()
+        sleepTimer = null
+        stopRecording()
+        statsHandler.removeCallbacks(statsRunnable)
+        try {
+            if (::player.isInitialized) player.stop()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        releaseLocks()
+        try {
+            stopSelf()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        // ننتظر قليلاً حتى يكتمل stopSelf ثم نقتل العملية
+        Handler(Looper.getMainLooper()).postDelayed({
+            android.os.Process.killProcess(android.os.Process.myPid())
+        }, 400)
+    }
+
+    // ==========================================================
+    // إحصاءات البيانات والمدة
+    // ==========================================================
+
+    fun getListeningDurationFormatted(): String {
+        if (!::player.isInitialized || !player.isPlaying || stationStartTimeMs == 0L) return "00:00:00"
+        val diffSec = (System.currentTimeMillis() - stationStartTimeMs) / 1000
+        return String.format(
+            Locale.US,
+            "%02d:%02d:%02d",
+            diffSec / 3600,
+            (diffSec % 3600) / 60,
+            diffSec % 60
+        )
+    }
+
+    private fun calculateDataUsage() {
+        if (::player.isInitialized && player.isPlaying) {
+            val currentRx = TrafficStats.getUidRxBytes(android.os.Process.myUid())
+            if (lastRxBytes != 0L && currentRx > lastRxBytes) {
+                val bytesThisSecond = currentRx - lastRxBytes
+                totalSessionBytes += bytesThisSecond
+                currentSpeedKbps = bytesThisSecond / 1024.0
+                totalDataMb = totalSessionBytes / (1024.0 * 1024.0)
+            }
+            lastRxBytes = currentRx
+        } else {
+            currentSpeedKbps = 0.0
+        }
+    }
+}
