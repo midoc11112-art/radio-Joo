@@ -5,10 +5,15 @@ import androidx.room.PrimaryKey
 
 @Entity(tableName = "stations")
 data class StationEntity(
-    @PrimaryKey(autoGenerate = true)
-    val id: Int = 0,
+    @PrimaryKey
+    val uuid: String,
     val name: String,
-    val url: String,
+    val primaryUrl: String,
+    val fallbackUrls: String = "",
     val category: String = "عام",
-    val isFavorite: Boolean = false
+    val favicon: String = "",
+    val isFavorite: Boolean = false,
+    val popularityScore: Int = 0,
+    val actualBitrate: Int = 0,
+    val isOnline: Boolean = true
 )
