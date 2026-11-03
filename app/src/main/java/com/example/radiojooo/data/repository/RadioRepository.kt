@@ -21,16 +21,17 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
     private val okHttpClient by lazy {
         OkHttpClient.Builder()
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(10, TimeUnit.SECONDS)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
             .build()
     }
 
     val allStations: Flow<List<StationEntity>> = stationDao.getAllStations()
 
+    // ✅ بسيط: يجيب من السيرفر ويخزن مباشرة - بدون أي validation
     suspend fun fetchStationsFromServer(): Int = withContext(Dispatchers.IO) {
         try {
-            Log.d("RadioRepository", "جاري جلب المحطات...")
+            Log.d("RadioRepository", "جاري جلب المحطات من السيرفر...")
 
             val request = Request.Builder()
                 .url(STATIONS_ENDPOINT)
@@ -57,24 +58,35 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                 return@withContext 0
             }
 
-            // Validation حقيقي - نتأكد إن كل محطة شغالة
-            val validated = validateStations(stations)
+            // ✅ نحفظ المفضلة القديمة
+            val currentFavs = stationDao.getStationsListDirect()
+                .filter { it.isFavorite }
+                .map { it.uuid }
+                .toSet()
 
-            Log.d("RadioRepository", "عدد المحطات الشغالة: " + validated.size)
-
-            if (validated.isNotEmpty()) {
-                saveStations(validated)
+            val updatedStations = stations.map { station ->
+                if (station.uuid in currentFavs) {
+                    station.copy(isFavorite = true)
+                } else {
+                    station
+                }
             }
 
-            return@withContext validated.size
+            // ✅ نحذف القديم ونضيف الجديد
+            stationDao.deleteAllStations()
+            stationDao.insertStations(updatedStations)
+
+            Log.d("RadioRepository", "تم حفظ " + updatedStations.size + " محطة بنجاح")
+            return@withContext updatedStations.size
 
         } catch (e: Exception) {
-            Log.e("RadioRepository", "خطأ: " + e.message)
+            Log.e("RadioRepository", "خطأ في جلب المحطات: " + e.message)
             e.printStackTrace()
         }
         return@withContext 0
     }
 
+    // ✅ بسيط: يجيب كل المحطات من السيرفر ويخزنها
     suspend fun fetchAllStationsInBackground() = withContext(Dispatchers.IO) {
         try {
             Log.d("RadioRepository", "جاري جلب كل المحطات...")
@@ -92,82 +104,31 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
             val jsonObject = JSONObject(jsonStr)
             val stationsArray = jsonObject.getJSONArray("stations")
 
+            Log.d("RadioRepository", "عدد المحطات الكلية: " + stationsArray.length())
+
             val stations = parseStations(stationsArray)
 
             if (stations.isNotEmpty()) {
-                val validated = validateStations(stations)
-                if (validated.isNotEmpty()) {
-                    saveStations(validated)
-                    Log.d("RadioRepository", "تم حفظ " + validated.size + " محطة شغالة")
+                val currentFavs = stationDao.getStationsListDirect()
+                    .filter { it.isFavorite }
+                    .map { it.uuid }
+                    .toSet()
+
+                val updatedStations = stations.map { station ->
+                    if (station.uuid in currentFavs) {
+                        station.copy(isFavorite = true)
+                    } else {
+                        station
+                    }
                 }
+
+                stationDao.deleteAllStations()
+                stationDao.insertStations(updatedStations)
+                Log.d("RadioRepository", "تم حفظ " + updatedStations.size + " محطة")
             }
 
         } catch (e: Exception) {
             Log.e("RadioRepository", "خطأ في الخلفية: " + e.message)
-        }
-    }
-
-    // Validation حقيقي - نتأكد إن كل محطة شغالة فعلاً
-    private suspend fun validateStations(stations: List<StationEntity>): List<StationEntity> = withContext(Dispatchers.IO) {
-        val validated = mutableListOf<StationEntity>()
-
-        for (station in stations) {
-            if (validated.size >= 150) break
-
-            try {
-                val isValid = validateOneStation(station.primaryUrl)
-                if (isValid) {
-                    validated.add(station)
-                }
-            } catch (e: Exception) {
-                // محطة مش شغالة - نتخطاها
-            }
-        }
-
-        return@withContext validated
-    }
-
-    private fun validateOneStation(url: String): Boolean {
-        return try {
-            // نجرب HEAD أولاً (أسرع)
-            val headRequest = Request.Builder()
-                .url(url)
-                .head()
-                .header("User-Agent", "RadioJoo/12.0")
-                .header("Icy-MetaData", "0")
-                .build()
-
-            val headResponse = okHttpClient.newCall(headRequest).execute()
-
-            if (headResponse.isSuccessful) {
-                val contentType = headResponse.header("Content-Type") ?: ""
-                if (!contentType.contains("video/") && !contentType.contains("text/html")) {
-                    headResponse.close()
-                    return true
-                }
-            }
-            headResponse.close()
-
-            // لو HEAD فشل، نجرب GET مع Range
-            val getRequest = Request.Builder()
-                .url(url)
-                .header("User-Agent", "RadioJoo/12.0")
-                .header("Icy-MetaData", "0")
-                .header("Range", "bytes=0-0")
-                .build()
-
-            val getResponse = okHttpClient.newCall(getRequest).execute()
-
-            if (getResponse.isSuccessful || getResponse.code == 206) {
-                val contentType = getResponse.header("Content-Type") ?: ""
-                getResponse.close()
-                return !contentType.contains("video/") && !contentType.contains("text/html")
-            }
-            getResponse.close()
-
-            false
-        } catch (e: Exception) {
-            false
         }
     }
 
@@ -195,28 +156,12 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                     popularity = obj.optInt("popularity", 0),
                     lastUpdated = System.currentTimeMillis()
                 ))
-            } catch (e: Exception) {}
-        }
-
-        return stations
-    }
-
-    private suspend fun saveStations(stations: List<StationEntity>) {
-        val currentFavs = stationDao.getStationsListDirect()
-            .filter { it.isFavorite }
-            .map { it.uuid }
-            .toSet()
-
-        val updatedStations = stations.map { station ->
-            if (station.uuid in currentFavs) {
-                station.copy(isFavorite = true)
-            } else {
-                station
+            } catch (e: Exception) {
+                Log.e("RadioRepository", "خطأ في قراءة محطة: " + e.message)
             }
         }
 
-        stationDao.deleteAllStations()
-        stationDao.insertStations(updatedStations)
+        return stations
     }
 
     suspend fun checkForUpdates(): Boolean = withContext(Dispatchers.IO) {
@@ -238,7 +183,9 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
     suspend fun ensureInitialDataLoaded() {
         withContext(Dispatchers.IO) {
             val count = stationDao.getStationsCount()
+            Log.d("RadioRepository", "عدد المحطات الحالي: " + count)
             if (count == 0) {
+                Log.d("RadioRepository", "قاعدة البيانات فارغة - جاري جلب المحطات...")
                 fetchStationsFromServer()
             }
         }
