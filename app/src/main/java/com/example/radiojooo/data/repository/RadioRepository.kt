@@ -17,7 +17,6 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
     private val PROXY_BASE_URL = "https://radio-joo-proxy.midoc11112.workers.dev"
     private val STATIONS_ENDPOINT = "$PROXY_BASE_URL/stations"
-    private val ALL_STATIONS_ENDPOINT = "$PROXY_BASE_URL/stations/all"
 
     private val okHttpClient by lazy {
         OkHttpClient.Builder()
@@ -28,6 +27,7 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
     val allStations: Flow<List<StationEntity>> = stationDao.getAllStations()
 
+    // ✅ بسيط: يجيب من السيرفر ويخزن مباشرة - بدون أي validation أو limit
     suspend fun fetchStationsFromServer(): Int = withContext(Dispatchers.IO) {
         try {
             Log.d("RadioRepository", "جاري جلب المحطات...")
@@ -47,8 +47,10 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
             val jsonStr = response.body?.string() ?: return@withContext 0
             val jsonObject = JSONObject(jsonStr)
             val stationsArray = jsonObject.getJSONArray("stations")
+            val totalFromServer = jsonObject.optInt("totalStations", 0)
 
-            Log.d("RadioRepository", "عدد المحطات: " + stationsArray.length())
+            Log.d("RadioRepository", "السيرفر بعت: " + totalFromServer + " محطة")
+            Log.d("RadioRepository", "عدد المحطات في الـ array: " + stationsArray.length())
 
             val stations = parseStations(stationsArray)
 
@@ -59,7 +61,7 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
             saveStations(stations)
 
-            Log.d("RadioRepository", "تم حفظ " + stations.size + " محطة")
+            Log.d("RadioRepository", "تم حفظ " + stations.size + " محطة بنجاح")
             return@withContext stations.size
 
         } catch (e: Exception) {
@@ -67,37 +69,6 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
             e.printStackTrace()
         }
         return@withContext 0
-    }
-
-    suspend fun fetchAllStationsInBackground() = withContext(Dispatchers.IO) {
-        try {
-            Log.d("RadioRepository", "جاري جلب كل المحطات...")
-
-            val request = Request.Builder()
-                .url(ALL_STATIONS_ENDPOINT)
-                .addHeader("Accept", "application/json")
-                .build()
-
-            val response = okHttpClient.newCall(request).execute()
-
-            if (!response.isSuccessful) return@withContext
-
-            val jsonStr = response.body?.string() ?: return@withContext
-            val jsonObject = JSONObject(jsonStr)
-            val stationsArray = jsonObject.getJSONArray("stations")
-
-            Log.d("RadioRepository", "عدد المحطات الكلية: " + stationsArray.length())
-
-            val stations = parseStations(stationsArray)
-
-            if (stations.isNotEmpty()) {
-                saveStations(stations)
-                Log.d("RadioRepository", "تم حفظ " + stations.size + " محطة")
-            }
-
-        } catch (e: Exception) {
-            Log.e("RadioRepository", "خطأ: " + e.message)
-        }
     }
 
     private fun parseStations(stationsArray: org.json.JSONArray): List<StationEntity> {
@@ -167,7 +138,9 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
     suspend fun ensureInitialDataLoaded() {
         withContext(Dispatchers.IO) {
             val count = stationDao.getStationsCount()
+            Log.d("RadioRepository", "عدد المحطات الحالي: " + count)
             if (count == 0) {
+                Log.d("RadioRepository", "قاعدة البيانات فارغة - جاري جلب المحطات...")
                 fetchStationsFromServer()
             }
         }
