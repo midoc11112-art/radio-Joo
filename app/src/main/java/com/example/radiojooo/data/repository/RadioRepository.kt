@@ -21,8 +21,8 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
     private val okHttpClient by lazy {
         OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
             .build()
     }
 
@@ -48,7 +48,7 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
             val jsonObject = JSONObject(jsonStr)
             val stationsArray = jsonObject.getJSONArray("stations")
 
-            Log.d("RadioRepository", "عدد المحطات: " + stationsArray.length())
+            Log.d("RadioRepository", "عدد المحطات من السيرفر: " + stationsArray.length())
 
             val stations = parseStations(stationsArray)
 
@@ -57,10 +57,16 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                 return@withContext 0
             }
 
-            saveStations(stations)
+            // Validation حقيقي - نتأكد إن كل محطة شغالة
+            val validated = validateStations(stations)
 
-            Log.d("RadioRepository", "تم حفظ " + stations.size + " محطة")
-            return@withContext stations.size
+            Log.d("RadioRepository", "عدد المحطات الشغالة: " + validated.size)
+
+            if (validated.isNotEmpty()) {
+                saveStations(validated)
+            }
+
+            return@withContext validated.size
 
         } catch (e: Exception) {
             Log.e("RadioRepository", "خطأ: " + e.message)
@@ -86,17 +92,82 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
             val jsonObject = JSONObject(jsonStr)
             val stationsArray = jsonObject.getJSONArray("stations")
 
-            Log.d("RadioRepository", "عدد المحطات الكلية: " + stationsArray.length())
-
             val stations = parseStations(stationsArray)
 
             if (stations.isNotEmpty()) {
-                saveStations(stations)
-                Log.d("RadioRepository", "تم حفظ " + stations.size + " محطة")
+                val validated = validateStations(stations)
+                if (validated.isNotEmpty()) {
+                    saveStations(validated)
+                    Log.d("RadioRepository", "تم حفظ " + validated.size + " محطة شغالة")
+                }
             }
 
         } catch (e: Exception) {
             Log.e("RadioRepository", "خطأ في الخلفية: " + e.message)
+        }
+    }
+
+    // Validation حقيقي - نتأكد إن كل محطة شغالة فعلاً
+    private suspend fun validateStations(stations: List<StationEntity>): List<StationEntity> = withContext(Dispatchers.IO) {
+        val validated = mutableListOf<StationEntity>()
+
+        for (station in stations) {
+            if (validated.size >= 150) break
+
+            try {
+                val isValid = validateOneStation(station.primaryUrl)
+                if (isValid) {
+                    validated.add(station)
+                }
+            } catch (e: Exception) {
+                // محطة مش شغالة - نتخطاها
+            }
+        }
+
+        return@withContext validated
+    }
+
+    private fun validateOneStation(url: String): Boolean {
+        return try {
+            // نجرب HEAD أولاً (أسرع)
+            val headRequest = Request.Builder()
+                .url(url)
+                .head()
+                .header("User-Agent", "RadioJoo/12.0")
+                .header("Icy-MetaData", "0")
+                .build()
+
+            val headResponse = okHttpClient.newCall(headRequest).execute()
+
+            if (headResponse.isSuccessful) {
+                val contentType = headResponse.header("Content-Type") ?: ""
+                if (!contentType.contains("video/") && !contentType.contains("text/html")) {
+                    headResponse.close()
+                    return true
+                }
+            }
+            headResponse.close()
+
+            // لو HEAD فشل، نجرب GET مع Range
+            val getRequest = Request.Builder()
+                .url(url)
+                .header("User-Agent", "RadioJoo/12.0")
+                .header("Icy-MetaData", "0")
+                .header("Range", "bytes=0-0")
+                .build()
+
+            val getResponse = okHttpClient.newCall(getRequest).execute()
+
+            if (getResponse.isSuccessful || getResponse.code == 206) {
+                val contentType = getResponse.header("Content-Type") ?: ""
+                getResponse.close()
+                return !contentType.contains("video/") && !contentType.contains("text/html")
+            }
+            getResponse.close()
+
+            false
+        } catch (e: Exception) {
+            false
         }
     }
 
