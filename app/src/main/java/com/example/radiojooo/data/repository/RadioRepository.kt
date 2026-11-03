@@ -30,7 +30,7 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
     suspend fun fetchStationsFromServer(): Int = withContext(Dispatchers.IO) {
         try {
-            Log.d("RadioRepository", "جاري جلب المحطات السريعة...")
+            Log.d("RadioRepository", "جاري جلب المحطات...")
 
             val request = Request.Builder()
                 .url(STATIONS_ENDPOINT)
@@ -48,22 +48,22 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
             val jsonObject = JSONObject(jsonStr)
             val stationsArray = jsonObject.getJSONArray("stations")
 
-            Log.d("RadioRepository", "عدد المحطات المستلمة: " + stationsArray.length())
+            Log.d("RadioRepository", "عدد المحطات: " + stationsArray.length())
 
             val stations = parseStations(stationsArray)
 
             if (stations.isEmpty()) {
-                Log.e("RadioRepository", "لم يتم العثور على محطات صالحة")
+                Log.e("RadioRepository", "لا توجد محطات")
                 return@withContext 0
             }
 
             saveStations(stations)
 
-            Log.d("RadioRepository", "تم حفظ " + stations.size + " محطة بنجاح")
+            Log.d("RadioRepository", "تم حفظ " + stations.size + " محطة")
             return@withContext stations.size
 
         } catch (e: Exception) {
-            Log.e("RadioRepository", "خطأ في جلب المحطات: " + e.message)
+            Log.e("RadioRepository", "خطأ: " + e.message)
             e.printStackTrace()
         }
         return@withContext 0
@@ -71,7 +71,7 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
     suspend fun fetchAllStationsInBackground() = withContext(Dispatchers.IO) {
         try {
-            Log.d("RadioRepository", "جاري جلب كل المحطات في الخلفية...")
+            Log.d("RadioRepository", "جاري جلب كل المحطات...")
 
             val request = Request.Builder()
                 .url(ALL_STATIONS_ENDPOINT)
@@ -80,10 +80,7 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
             val response = okHttpClient.newCall(request).execute()
 
-            if (!response.isSuccessful) {
-                Log.e("RadioRepository", "فشل الاتصال: " + response.code)
-                return@withContext
-            }
+            if (!response.isSuccessful) return@withContext
 
             val jsonStr = response.body?.string() ?: return@withContext
             val jsonObject = JSONObject(jsonStr)
@@ -95,12 +92,11 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
             if (stations.isNotEmpty()) {
                 saveStations(stations)
-                Log.d("RadioRepository", "تم حفظ " + stations.size + " محطة في الخلفية")
+                Log.d("RadioRepository", "تم حفظ " + stations.size + " محطة")
             }
 
         } catch (e: Exception) {
-            Log.e("RadioRepository", "خطأ في جلب المحطات في الخلفية: " + e.message)
-            e.printStackTrace()
+            Log.e("RadioRepository", "خطأ في الخلفية: " + e.message)
         }
     }
 
@@ -110,14 +106,13 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
         for (i in 0 until stationsArray.length()) {
             try {
                 val obj = stationsArray.getJSONObject(i)
-
                 val uuid = obj.optString("uuid", "")
-                val name = obj.optString("name", "محطة")
+                val name = obj.optString("name", "")
                 val primaryUrl = obj.optString("primaryUrl", "")
 
                 if (uuid.isBlank() || primaryUrl.isBlank()) continue
 
-                val station = StationEntity(
+                stations.add(StationEntity(
                     uuid = uuid,
                     name = name,
                     primaryUrl = primaryUrl,
@@ -128,12 +123,8 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
                     isFavorite = false,
                     popularity = obj.optInt("popularity", 0),
                     lastUpdated = System.currentTimeMillis()
-                )
-
-                stations.add(station)
-            } catch (e: Exception) {
-                Log.e("RadioRepository", "خطأ في قراءة محطة: " + e.message)
-            }
+                ))
+            } catch (e: Exception) {}
         }
 
         return stations
@@ -161,9 +152,9 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
         try {
             val lastUpdate = stationDao.getLastUpdateTime()
             val currentTime = System.currentTimeMillis()
-            val twentyFourHours = 24 * 60 * 60 * 1000L
+            val twoHours = 2 * 60 * 60 * 1000L
 
-            if (lastUpdate == null || (currentTime - lastUpdate) > twentyFourHours) {
+            if (lastUpdate == null || (currentTime - lastUpdate) > twoHours) {
                 fetchStationsFromServer()
                 return@withContext true
             }
@@ -176,9 +167,7 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
     suspend fun ensureInitialDataLoaded() {
         withContext(Dispatchers.IO) {
             val count = stationDao.getStationsCount()
-            Log.d("RadioRepository", "عدد المحطات الحالي: " + count)
             if (count == 0) {
-                Log.d("RadioRepository", "قاعدة البيانات فارغة - جاري جلب المحطات...")
                 fetchStationsFromServer()
             }
         }
