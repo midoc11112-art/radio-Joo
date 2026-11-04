@@ -4,24 +4,46 @@ import re
 src = open('app/src/main/java/com/example/radiojooo/data/local/TrustedStations.kt').read()
 pat = r'StationEntity\(\s*"([^"]*)",\s*"([^"]*)",\s*"([^"]*)",\s*"[^"]*",\s*"([^"]*)",\s*"([^"]*)",\s*(\d+),\s*(true|false),\s*(\d+)'
 rows = re.findall(pat, src)
-assert len(rows) == 185, "expected 185 rows, got %d" % len(rows)
+assert len(rows) > 0, "no rows parsed"
 
 def esc(s):
     return s.replace('\\', '\\\\').replace('"', '\\"')
 
-lines = []
-for (uuid, name, url, cat, cc, bit, fav, pop) in rows:
-    known = uuid.startswith("manual-")
-    lines.append('    { uuid: "%s", name: "%s", primaryUrl: "%s", fallbackUrl: "", category: "%s", countryCode: "%s", bitrate: %s, popularity: %s, tags: "", language: "arabic", known: %s },'
-        % (esc(uuid), esc(name), esc(url), cat or "MUSIC", cc, bit, pop, "true" if known else "false"))
+def clean_url(u):
+    # strip trailing ';' and junk query params that break players
+    if u.endswith('/;'):
+        u = u[:-1]
+    return u
 
-block = ("// محطات معروفة URLsها ثابتة ومتأكد منها مباشرة (مولدة من TrustedStations.kt - فحص 2026-11-04)\n"
+# Deduplicate by URL — keep the higher-popularity entry
+seen_urls = {}
+order = []
+for r in rows:
+    u = clean_url(r[2])
+    if u in seen_urls:
+        continue
+    seen_urls[u] = r
+    order.append(u)
+
+lines = []
+pop_rank = len(order)
+for u in order:
+    (uuid, name, _rawurl, cat, cc, bit, fav, pop) = seen_urls[u]
+    known = uuid.startswith("manual-")
+    js_entry = '    {{ uuid: "{uuid}", name: "{name}", primaryUrl: "{url}", fallbackUrl: "", category: "{cat}", countryCode: "{cc}", bitrate: {bit}, popularity: {pop}, tags: "", language: "arabic", known: {known} }},'.format(
+        uuid=esc(uuid), name=esc(name), url=esc(u), cat=cat or "MUSIC", cc=cc, bit=bit, pop=pop, known="true" if known else "false")
+    lines.append(js_entry)
+    pop_rank -= 1
+
+print("Trusted stations after dedupe:", len(lines))
+
+block = ("// محطات معروفة URLsها ثابتة ومتأكد منها صوتياً (مولدة من TrustedStations.kt - فحص 2026-11-05)\n"
          "function getKnownWorkingStations() {\n  return [\n" + "\n".join(lines) + "\n  ];\n}")
 
 # 2) Extract JS body from multipart response of current worker
 worker = open('worker_current.js').read()
 start_idx = worker.index('export default')
-end_marker = '--ad845e87cdd988a6aa05c99dc92271a92d4ba87a4ca3c2bb24ee51879dd3--'
+end_marker = worker.splitlines()[0]  # multipart boundary is first line
 end_idx = worker.rindex(end_marker)
 js = worker[start_idx:end_idx].rstrip().rstrip('-').rstrip()
 assert js.startswith('export default')

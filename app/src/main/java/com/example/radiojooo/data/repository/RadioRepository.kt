@@ -75,17 +75,33 @@ class RadioRepository(private val stationDao: StationDao, cacheDir: File) {
     }
 
     /**
-     * يحفظ القائمة الموثوقة مرة واحدة فقط (يستخدم uuid كمفتاح، فالـ insert IGNORE
-     * لن يكرر محطات موجودة ولن يمسبها المفضلة عند المستخدم).
+     * يحفظ القائمة الموثوقة ويهاجر النسخ القديمة (تفصيل في seedTrustedStations).
      */
     private suspend fun seedTrustedStations() {
-        // insertStationsIgnore يعتمد على uuid كمفتاح — آمن للتكرار ولا يمسح بيانات المستخدم،
-        // فنقدر ننفذه بأمان في أي وقت بدون flag file (الحذف اليدوي للملف كان سبب عدم ظهور المحطات).
-        val count = stationDao.getStationsCount()
-        if (count >= TrustedStations.list.size) return
-        Log.d("RadioRepository", "جاري حفظ القائمة الموثوقة (" + TrustedStations.list.size + " محطة)...")
-        stationDao.insertStationsIgnore(TrustedStations.list.map { it.copy(lastUpdated = System.currentTimeMillis()) })
-        Log.d("RadioRepository", "تم. عدد المحطات الآن: " + stationDao.getStationsCount())
+        val trusted = TrustedStations.list.map { it.copy(lastUpdated = System.currentTimeMillis()) }
+        val trustedUrls = trusted.map { normalizeUrl(it.primaryUrl) }.toHashSet()
+        val trustedNames = trusted.map { normalizeName(it.name) }.toHashSet()
+
+        stationDao.insertStationsIgnore(trusted)
+
+        // تنظيف النسخ القديمة المكررة/الميتة (يحمي مفضلات المستخدم)
+        val existing = stationDao.getStationsListDirect()
+        val stale = existing.filter { st ->
+            !st.isFavorite &&
+                normalizeUrl(st.primaryUrl) !in trustedUrls &&
+                normalizeName(st.name) in trustedNames
+        }
+        if (stale.isNotEmpty()) {
+            stationDao.deleteByUuids(stale.map { it.uuid })
+            Log.d("RadioRepository", "حذف ${stale.size} نسخة قديمة مكررة من محطات القائمة الموثوقة")
+        }
+        Log.d("RadioRepository", "القائمة الموثوقة محفوظة. الإجمالي: " + stationDao.getStationsCount())
+    }
+
+    private fun normalizeUrl(url: String): String {
+        var u = url.trim().trimEnd('/')
+        if (u.endsWith(";")) u = u.dropLast(1).trimEnd('/')
+        return u.lowercase()
     }
 
     /**

@@ -35,6 +35,9 @@ interface StationDao {
     @Query("DELETE FROM stations")
     suspend fun deleteAllStations()
 
+    @Query("DELETE FROM stations WHERE uuid IN (:uuids)")
+    suspend fun deleteByUuids(uuids: List<String>)
+
     @Query("UPDATE stations SET isFavorite = :isFavorite WHERE uuid = :uuid")
     suspend fun updateFavoriteStatus(uuid: String, isFavorite: Boolean)
 
