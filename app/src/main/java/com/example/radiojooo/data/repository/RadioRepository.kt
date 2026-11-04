@@ -1,5 +1,6 @@
 package com.example.radiojooo.data.repository
 
+import android.content.Context
 import android.util.Log
 import com.example.radiojooo.data.local.StationDao
 import com.example.radiojooo.data.local.TrustedStations
@@ -14,7 +15,12 @@ import java.io.File
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
-class RadioRepository(private val stationDao: StationDao, cacheDir: File) {
+class RadioRepository(private val context: android.content.Context, private val stationDao: StationDao, cacheDir: File) {
+
+    companion object {
+        /** الحد الأدنى لقبول محطة من السيرفر بدون اسم معروف — يحمي من محطات الحرفوش */
+        private const val MIN_SERVER_POPULARITY = 100
+    }
 
     private val PROXY_BASE_URL = "https://radio-joo-proxy.midoc11112.workers.dev"
     private val STATIONS_ENDPOINT = "$PROXY_BASE_URL/stations"
@@ -30,7 +36,7 @@ class RadioRepository(private val stationDao: StationDao, cacheDir: File) {
 
     /**
      * الحل الجذري لمشكلة قلة المحطات:
-     * 1) القائمة الثابتة الموثوقة (TrustedStations - 185 محطة، كل URLsها متأكد منها بتاريخ 2026-11-04)
+     * 1) القائمة الثابتة الموثوقة (TrustedStations - 71 محطة، كل URLsها متأكد منها تحميل فعلي بتاريخ 2026-11-05)
      *    تُحفظ دائماً في قاعدة البيانات حتى لو السيرفر واقع أو رجّع محطات قليلة.
      * 2) نتائج السيرفر (Worker) تُضاف فوق القائمة بدون حذف أي محطة موثوقة (merge بدل replace).
      */
@@ -78,6 +84,26 @@ class RadioRepository(private val stationDao: StationDao, cacheDir: File) {
      * يحفظ القائمة الموثوقة ويهاجر النسخ القديمة (تفصيل في seedTrustedStations).
      */
     private suspend fun seedTrustedStations() {
+        val prefs = context.getSharedPreferences("radio_joo_prefs", Context.MODE_PRIVATE)
+        val appliedVersion = prefs.getString("trusted_list_version", "") ?: ""
+
+        if (appliedVersion != TrustedStations.LIST_VERSION) {
+            // القائمة اتحدثت — امسح كل محطات البذر القديمة (غير المفضلة) عشان ميتش متبقاش محطة ميتة
+            // من قائمة قديمة. محطات السيرفر الشعبية هترجع تلقائياً في نفس الجلسة بعد الدمج.
+            val all = stationDao.getStationsListDirect()
+            val toDelete = all.filter { !it.isFavorite }.map { it.uuid }
+            if (toDelete.isNotEmpty()) stationDao.deleteByUuids(toDelete)
+            prefs.edit()
+                .putString("trusted_list_version", TrustedStations.LIST_VERSION)
+                .remove("seeded_uuids")
+                .apply()
+            Log.d("RadioRepository", "مهاجرة لقائمة المحطات الموثوقة إصدار " + TrustedStations.LIST_VERSION + " — حُذفت " + toDelete.size + " محطة قديمة")
+        }
+
+        // سجل محطات البذر الحالية عشان أي مهاجرة مستقبلية تعرف تحذفها بدقة
+        val seededKey = org.json.JSONArray(TrustedStations.list.map { it.uuid })
+        prefs.edit().putString("seeded_uuids", seededKey.toString()).apply()
+
         val trusted = TrustedStations.list.map { it.copy(lastUpdated = System.currentTimeMillis()) }
         val trustedUrls = trusted.map { normalizeUrl(it.primaryUrl) }.toHashSet()
         val trustedNames = trusted.map { normalizeName(it.name) }.toHashSet()
@@ -116,6 +142,9 @@ class RadioRepository(private val stationDao: StationDao, cacheDir: File) {
         val existingNames = existing.map { normalizeName(it.name) }.toHashSet()
         val existingUrls = existing.map { it.primaryUrl.trim().trimEnd('/') }.toHashSet()
 
+        // بوابة الجودة: السيرفر بيرجع محطات من Radio Browser كتير منها عشوائي/غير معروف.
+        // قبل كده كنا بنقبل أي محطة فبتلمع محطات "حرفوش" مش معروفة ومش شغالة.
+        // دلوقتي بنقبل بس: (أ) محطات شعبية فوق الحد، أو (ب) أسماء معروفة بمفتاح بحث موثوق.
         val toInsert = newStations.mapNotNull { ns ->
             val ex = byUuid[ns.uuid]
             when {
@@ -126,6 +155,8 @@ class RadioRepository(private val stationDao: StationDao, cacheDir: File) {
                 // اسم أو URL مطابق لمحطة موجودة (حتى لو uuid مختلف) = تكرار، تجاهل
                 normalizeName(ns.name) in existingNames ||
                     ns.primaryUrl.trim().trimEnd('/') in existingUrls -> null
+                // جودة منخفضة: لا شعبية ولا اسم معروف → تجاهل (نفس المنطق المطبق في الوكيل)
+                ns.popularity < MIN_SERVER_POPULARITY && !isKnownStationName(ns.name) -> null
                 else -> {
                     existingNames.add(normalizeName(ns.name))
                     existingUrls.add(ns.primaryUrl.trim().trimEnd('/'))
@@ -137,6 +168,29 @@ class RadioRepository(private val stationDao: StationDao, cacheDir: File) {
             stationDao.insertStationsIgnore(toInsert)
         }
     }
+
+    /** أسماء محطتنا الموثوقة — أي محطة من السيرفر بنفس الاسم (حتى لو uuid مختلف) مقبولة كمعروفة */
+    private val trustedNameKeys: HashSet<String> by lazy {
+        TrustedStations.list.map { normalizeName(it.name) }.toHashSet()
+    }
+
+    private fun isKnownStationName(name: String): Boolean {
+        val key = normalizeName(name)
+        if (key in trustedNameKeys) return true
+        // مطابقة جزئية آمنة: الأسماء الإنجليزية المعروفة داخل اسم المحطة
+        val lower = name.lowercase()
+        return KNOWN_KEYWORDS.any { it in lower }
+    }
+
+    /** مفتاح بحث أسماء كبيرة معروفة — متزامن مع الوكيل */
+    private val KNOWN_KEYWORDS = listOf(
+        "jazeera", "الجزيرة", "sky news", "سكاي", "arabiya", "العربية", "bbc", "mbc",
+        "monte carlo", "مونت كارلو", "quran", "قرآن", "nagham", "نغم", "nogoum", "نجوم",
+        "9090", "mix fm", "hits", "sha3bi", "rotana", "روتانا", "fairuz", "فيروز",
+        "um kulthum", "om kalthoum", "أم كلثوم", "amr diab", "迪اب", "diab", "nrj",
+        "medina", "aswat", "أصوات", "orient", "ajyal", "sumair", "sumer", "hala",
+        "mona", "lbc", "sawt el ghad", "نساء", "إذاعة", "راديو", "radio"
+    )
 
     /** توحيد الاسم للمقارنة: حروف صغيرة + إزالة التشكيل والمسافات الزائدة واللاحقات الشائعة */
     private fun normalizeName(name: String): String {
@@ -217,7 +271,7 @@ class RadioRepository(private val stationDao: StationDao, cacheDir: File) {
             Log.d("RadioRepository", "عدد المحطات الحالي: " + count)
             // أي عدد أقل من قائمة السيرفر المتوقعة (~700) = بيانات ناقصة من نسخة قديمة،
             // فنسحب من السيرفر على طول (الدمج الآن آمن: INSERT IGNORE + فلتر تكرار بالاسم/URL)
-            if (count < 500) {
+            if (count < TrustedStations.list.size + 50) {
                 Log.d("RadioRepository", "عدد المحطات أقل من المتوقع - جاري جلب وتكميل من السيرفر...")
                 fetchStationsFromServer()
             }

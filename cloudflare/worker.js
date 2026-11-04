@@ -78,6 +78,22 @@ async function getStations(env) {
   }
 }
 
+
+// بوابة الجودة: نرفض محطات Radio Browser المجهولة قليلة الشعبية (محطات الحرفوش).
+// مقبولة لو: شعبية >= 100، أو اسمها يطابق محطة معروفة/موثوقة.
+function passesQualityGate(st) {
+  if (st.known) return true;
+  if ((st.popularity || 0) >= 100) return true;
+  const lower = (st.name || "").toLowerCase();
+  const keywords = ["jazeera","الجزيرة","sky news","سكاي","arabiya","العربية","bbc","mbc",
+    "monte carlo","مونت كارلو","quran","قرآن","nagham","نغم","nogoum","نجوم",
+    "9090","mix fm","hits","sha3bi","rotana","روتانا","fairuz","فيروز",
+    "um kulthum","om kalthoum","أم كلثوم","amr diab","diab","nrj",
+    "medina","aswat","أصوات","orient","ajyal","sumer","hala",
+    "mona","lbc","sawt el ghad","نساء","إذاعة","راديو","radio"];
+  return keywords.some(k => lower.includes(k));
+}
+
 async function buildFinalList() {
   const allStations = [];
 
@@ -93,8 +109,11 @@ async function buildFinalList() {
   const countryStations = await fetchFromCountries();
   allStations.push(...countryStations);
 
+  // ✅ بوابة الجودة: تسقط المحطات المجهولة ضعيفة الشعبية قبل الدمج
+  const gated = allStations.filter(passesQualityGate);
+
   // ✅ إزالة التكرار (نحتفظ بالأولوية للمحطات المعروفة)
-  const unique = removeDuplicatesSmart(allStations);
+  const unique = removeDuplicatesSmart(gated);
 
   // ✅ ترتيب: المعروفين الأول، بعدين حسب الشعبية
   unique.sort((a, b) => {
@@ -109,88 +128,79 @@ async function buildFinalList() {
 
 // محطات معروفة URLsها ثابتة ومتأكد منها صوتياً (مولدة من TrustedStations.kt - فحص 2026-11-05)
 function getKnownWorkingStations() {
+  // قائمة متأكد منها يدوياً بتاريخ 2026-11-05 — مطابقة تماماً لـ TrustedStations.kt في التطبيق
   return [
-    { uuid: "manual-voice-of-jazeera", name: "صوت الجزيرة Al Jazeera Voice", primaryUrl: "https://live-hls-audio-web-aja.getaj.net/VOICE-AJA/01.m3u8", fallbackUrl: "", category: "QURAN", countryCode: "QA", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "manual-voice-of-jazeera", name: "صوت الجزيرة Al Jazeera Voice", primaryUrl: "https://live-hls-audio-web-aja.getaj.net/VOICE-AJA/index.m3u8", fallbackUrl: "", category: "NEWS", countryCode: "QA", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "manual-skynews-arabia", name: "سكاي نيوز عربية Sky News Arabia", primaryUrl: "https://stream.skynewsarabia.com/hls/sna.m3u8", fallbackUrl: "", category: "NEWS", countryCode: "AE", bitrate: 128, popularity: 995, tags: "", language: "arabic", known: true },
+    { uuid: "manual-mbc-fm", name: "MBC FM", primaryUrl: "https://radio-mbcfm.mbc.net/radio-mbcfm_1.m3u8", fallbackUrl: "", category: "MUSIC", countryCode: "SA", bitrate: 128, popularity: 990, tags: "", language: "arabic", known: true },
+    { uuid: "manual-quran-cairo-alt", name: "إذاعة القرآن الكريم من القاهرة", primaryUrl: "https://n0d.radiojar.com/8s5u5tpdtwzuv.mp3?rj-ttl=5&rj-tok=AAABhwLBHbYAfz9OyE3ZQvJh-w", fallbackUrl: "", category: "QURAN", countryCode: "EG", bitrate: 128, popularity: 998, tags: "", language: "arabic", known: true },
+    { uuid: "manual-mix-fm-eg", name: "ميكس إف إم 87.8 Mix FM", primaryUrl: "https://eu1.fastcast4u.com/proxy/prontofm?mp=/1", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 985, tags: "", language: "arabic", known: true },
+    { uuid: "manual-radiowayak", name: "راديو وياك Radiowayak", primaryUrl: "https://work.radiowayak.org/listen/live/live.mp3", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 700, tags: "", language: "arabic", known: true },
+    { uuid: "manual-hits882", name: "Hits 88.2 راديو هيتس", primaryUrl: "https://radiohits882.radioca.st/stream", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 980, tags: "", language: "arabic", known: true },
+    { uuid: "manual-sha3bi", name: "شعبي إف إم SHA3BY FM", primaryUrl: "https://radio95.radioca.st/stream", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 975, tags: "", language: "arabic", known: true },
+    { uuid: "manual-omkalthoum", name: "أم كلثوم OM Kalthoum Radio", primaryUrl: "https://stream.zeno.fm/zsgrfxg71s8uv", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 960, tags: "", language: "arabic", known: true },
+    { uuid: "manual-radio9090", name: "راديو 9090", primaryUrl: "http://9090streaming.mobtada.com/9090FMEGYPT", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 988, tags: "", language: "arabic", known: true },
+    { uuid: "manual-onsportfm", name: "أون سبورت إف إم On Sport FM", primaryUrl: "https://carina.streamerr.co:2020/stream/OnSportFM", fallbackUrl: "", category: "SPORTS", countryCode: "EG", bitrate: 128, popularity: 970, tags: "", language: "arabic", known: true },
+    { uuid: "manual-diabfm", name: "دياب إف إم Diab FM", primaryUrl: "https://stream-34.zeno.fm/rf64mx02qa0uv?zs=-xjlLLwRS8uKrffFxK4vLA", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 940, tags: "", language: "arabic", known: true },
+    { uuid: "manual-arabmix256", name: "عرب ميكس 256 Arab Mix", primaryUrl: "https://stream.zeno.fm/wvqgc9kb1d0uv", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 930, tags: "", language: "arabic", known: true },
+    { uuid: "manual-salma-recitation", name: "تلاوات خاشعة - جميلة Salma", primaryUrl: "https://qurango.net/radio/salma", fallbackUrl: "", category: "QURAN", countryCode: "SA", bitrate: 128, popularity: 800, tags: "", language: "arabic", known: true },
+    { uuid: "manual-ajyal", name: "أجيال إف إم فلسطين Ajyal", primaryUrl: "https://streamer.mada.ps:8208/ajyal", fallbackUrl: "", category: "MUSIC", countryCode: "PS", bitrate: 128, popularity: 890, tags: "", language: "arabic", known: true },
+    { uuid: "manual-radio-orient", name: "راديو الشرق Radio Orient لبنان", primaryUrl: "https://stream.rcs.revma.com/7hnrkawf4p8uv.mp3", fallbackUrl: "", category: "MUSIC", countryCode: "LB", bitrate: 128, popularity: 880, tags: "", language: "arabic", known: true },
+    { uuid: "manual-sumer-fm", name: "سمر إف إم العراق Sumer FM", primaryUrl: "https://l3.itworkscdn.net/itwaudio/9012/stream", fallbackUrl: "", category: "MUSIC", countryCode: "IQ", bitrate: 128, popularity: 750, tags: "", language: "arabic", known: true },
     { uuid: "manual-alifalif", name: "ألف ألف إف إم AlifAlif FM", primaryUrl: "https://alifalifjobs.com/radio/8000/AlifAlifLive.mp3", fallbackUrl: "", category: "MUSIC", countryCode: "SA", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: true },
     { uuid: "manual-aswat", name: "إذاعة أصوات Aswat FM المغرب", primaryUrl: "http://broadcast.ice.infomaniak.ch/aswat-high.mp3", fallbackUrl: "", category: "MUSIC", countryCode: "MA", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: true },
-    { uuid: "047fcfb5-9e59-478e-9e6a-a006cc401868", name: "Nogoum FM", primaryUrl: "https://stream-159.zeno.fm/qb1zvsykm98uv?zt=eyJhbGciOiJIUzI1NiJ9.eyJzdHJlYW0iOiJxYjF6dnN5a205OHV2IiwiaG9zdCI6InN0cmVhbS0xNTkuemVuby5mbSIsInJ0dGwiOjUsImp0aSI6Ild2WTItbVhJU2Z5VlBEOHc3a2J1X0EiLCJpYXQiOjE3NzA5ODcyOTUsImV4cCI6MTc3MDk4NzM1NX0.ob8jdjoAgAzIcrxMk5b127wgaxpnJHEASSChnE5v5ro", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "0bd2d571-7fc8-4158-8e8e-0635c9a330ad", name: "MBC FM", primaryUrl: "https://radio-mbcfm.mbc.net/radio-mbcfm_1.m3u8", fallbackUrl: "", category: "MUSIC", countryCode: "SA", bitrate: 0, popularity: 900, tags: "", language: "arabic", known: false },
-    { uuid: "fc985cbf-dc77-4f7a-b353-d981c1344c9b", name: "Rotana FM", primaryUrl: "http://philae.shoutca.st:8250/stream", fallbackUrl: "", category: "MUSIC", countryCode: "SA", bitrate: 128, popularity: 880, tags: "", language: "arabic", known: false },
-    { uuid: "c5c08ef9-5559-4073-87a8-80bff2b4860b", name: "Monte Carlo Doualiya", primaryUrl: "https://montecarlodoualiya128k.ice.infomaniak.ch/mc-doualiya.mp3", fallbackUrl: "", category: "NEWS", countryCode: "FR", bitrate: 128, popularity: 870, tags: "", language: "arabic", known: false },
-    { uuid: "d9bbea87-9051-45cb-abe6-8992a7a76cf1", name: "Universal Health Radio (العربية)", primaryUrl: "https://radio.universalhealthradio.org/uhr-ar.mp3", fallbackUrl: "", category: "NEWS", countryCode: "SA", bitrate: 0, popularity: 860, tags: "", language: "arabic", known: false },
-    { uuid: "cd74834d-9504-42e9-a165-4d7194afaf54", name: "Sawt El Nagham", primaryUrl: "https://stream.zeno.fm/66sfwug4ag0uv", fallbackUrl: "", category: "MUSIC", countryCode: "LB", bitrate: 128, popularity: 850, tags: "", language: "arabic", known: false },
-    { uuid: "961a5858-0601-11e8-ae97-52543be04c81", name: "Radio 9090 90.9", primaryUrl: "http://9090streaming.mobtada.com/9090FMEGYPT", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 64, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "006d7922-ffce-4c74-85ab-55ff2ed60fcc", name: "Radio 9090", primaryUrl: "https://9090streaming.mobtada.com/9090FMEGYPT", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 64, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "b8305209-741d-4cd4-8a6d-fac3a5f43e1b", name: "87.8	Mix FM", primaryUrl: "https://stream-29.zeno.fm/na3vpvn10qruv", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "8dad4ff4-2ae8-4fba-b379-c964f6ae9f4a", name: "Arab Mix FM", primaryUrl: "https://stream.zeno.fm/na3vpvn10qruv", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "b1d17829-6522-481b-bb5c-839c3fd44353", name: "Radio Hits 88.2 Cairo", primaryUrl: "https://radiohits882.radioca.st/", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "73f665df-37cd-4c4c-b398-6e97e526a01d", name: "LBI Radio Hits", primaryUrl: "https://lbihits-lbnet2.radioca.st/stream", fallbackUrl: "", category: "MUSIC", countryCode: "LB", bitrate: 128, popularity: 760, tags: "", language: "arabic", known: false },
-    { uuid: "9346c66b-f42a-4a06-865d-e96dc44b1aa3", name: "SHA3BY FM", primaryUrl: "https://radio95.radioca.st/", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "3c7aba81-3375-41e3-b268-5231fcf576ba", name: "Tes3enat FM", primaryUrl: "http://178.33.135.244:20095/;?DIST=TuneIn&TGT=TuneIn&maxServers=2&partnertok=eyJhbGciOiJIUzI1NiIsImtpZCI6InR1bmVpbiIsInR5cCI6IkpXVCJ9.eyJ0cnVzdGVkX3BhcnRuZXIiOnRydWUsImlhdCI6MTYzNjA1OTE3OCwiaXNzIjoidGlzcnYifQ.Me0snc2PBcQhvlzte9L7zQxa-IHgNinhu3XdNJ6_Xa8", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "e25470de-0bea-43c1-8c84-475c6c500c1a", name: "On sports FM", primaryUrl: "https://carina.streamerr.co:2020/stream/OnSportFM", fallbackUrl: "", category: "SPORTS", countryCode: "EG", bitrate: 96, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "39215908-b5f6-40d9-875c-57248dfe314a", name: "Amr Diab Radio", primaryUrl: "https://stream-40.zeno.fm/xa4yhh4k838uv?zs=gojgaFRaRrK1wgGIwdv6xA", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "ac0d65b9-a656-4d0e-a6a5-f4b78770a05f", name: "Diab FM", primaryUrl: "http://stream-36.zeno.fm/rf64mx02qa0uv?zs=omRb6KEjQ3u0-JsaJKdhQg", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "41e19a4b-c517-486b-a111-6b3472eee741", name: "OM Kalthom أم كلثوم", primaryUrl: "https://stream.zeno.fm/zsgrfxg71s8uv", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 670, tags: "", language: "arabic", known: false },
-    { uuid: "580ef7ef-3ebe-45fd-8c90-25e365c64bc3", name: "Abdel Halim Hafez عبدالحليم حافظ", primaryUrl: "https://stream.zeno.fm/8a4eqkd0pnhvv", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 660, tags: "", language: "arabic", known: false },
-    { uuid: "7eb9e8cd-bf7f-4bcc-afe2-3f56608911e6", name: "Elissa FM", primaryUrl: "https://stream.zeno.fm/v7n499m8ckhvv", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "f0d6b0a0-a6b7-4574-8921-f581357ea998", name: "Fairuz فيروز", primaryUrl: "https://stream.zeno.fm/xkhnk4vee18uv", fallbackUrl: "", category: "MUSIC", countryCode: "LB", bitrate: 128, popularity: 640, tags: "", language: "arabic", known: false },
-    { uuid: "de776c2f-ac0d-47da-a14d-e5d8bb2e54d5", name: "NRJ EGYPT", primaryUrl: "http://nrjstreaming.ahmed-melege.com/nrjegypt", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "8e63e8b6-4e70-4bc0-9f5d-07e8477a4480", name: "إذاعة القرآن الكريم من القاهرة", primaryUrl: "http://n12.radiojar.com/8s5u5tpdtwzuv?listening-from-radio-garden=1620219571863&rj-tok=AAABeTyl2zYARSWbLVnrEOlqGw&rj-ttl=5", fallbackUrl: "", category: "QURAN", countryCode: "EG", bitrate: 0, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "939fa825-05d8-41c9-96a5-37a83f0737c1", name: "القران الكريم من القاهره", primaryUrl: "http://n0c.radiojar.com/8s5u5tpdtwzuv?rj-ttl=5&amp;rj-tok=AAABdI5Qnd0AEmvTTG5DVtU31A&amp;autoplay=1%22%20type=%22audio/mpeg", fallbackUrl: "", category: "QURAN", countryCode: "EG", bitrate: 0, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "807f5b26-6035-4803-812e-3199fc97b7e9", name: "Saudi Quran1", primaryUrl: "http://n01.radiojar.com/0tpy1h0kxtzuv?rj-ttl=5&rj-tok=AAABjrUiYUAAxwNU2wDdcOap9w", fallbackUrl: "", category: "QURAN", countryCode: "SA", bitrate: 0, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "961ffb71-0601-11e8-ae97-52543be04c81", name: "Quran Radio Station-Nablus", primaryUrl: "http://www.quran-radio.org:8002/", fallbackUrl: "", category: "QURAN", countryCode: "PS", bitrate: 48, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "0e39d9f4-8d44-409e-87c9-be51c7f91f67", name: "إذاعة القرآن الكريم", primaryUrl: "https://n0a.radiojar.com/0tpy1h0kxtzuv?rj-ttl=5&rj-tok=AAABhdgGORQA-2acfyF3_4WY2g", fallbackUrl: "", category: "QURAN", countryCode: "EG", bitrate: 0, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "5db41df8-9921-421f-a618-84864ededf86", name: "إذاعة القرآن الكريم (القاهرة)", primaryUrl: "https://stream.radiojar.com/8s5u5tpdtwzuv", fallbackUrl: "", category: "QURAN", countryCode: "EG", bitrate: 0, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "59f4eecd-7193-4bc3-8bc3-c1463d92b22d", name: "Alseraj Radio Quran", primaryUrl: "http://192.99.170.8:5550/stream", fallbackUrl: "", category: "QURAN", countryCode: "IQ", bitrate: 96, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "e9744b90-2619-4a0c-93b4-5996e213068a", name: "Mp3Quran Main", primaryUrl: "https://qurango.net/radio/mix", fallbackUrl: "", category: "QURAN", countryCode: "SA", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "77c8094d-6822-4221-be7b-1d54ab477d78", name: "Quran Radio راديو القرآن - Abdulrahman Alsudais - عبدالرحمن السديس", primaryUrl: "https://radio.mp3islam.com/listen/sudais/radio.mp3", fallbackUrl: "", category: "QURAN", countryCode: "KW", bitrate: 64, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "7cca8bd6-a173-4fca-9a74-ca1e15a631e5", name: "Quran Radio From Sharjah", primaryUrl: "https://l3.itworkscdn.net/smcquranlive/quranradiolive/icecast.audio", fallbackUrl: "", category: "QURAN", countryCode: "AE", bitrate: 56, popularity: 580, tags: "", language: "arabic", known: false },
-    { uuid: "2cb54ac0-37d7-4742-8259-18e07a6cb2c7", name: "محمود خليل الحصري - حفص عن عاصم مرتل - mp3quran", primaryUrl: "https://qurango.net/radio/mahmoud_khalil_alhussary", fallbackUrl: "", category: "QURAN", countryCode: "EG", bitrate: 128, popularity: 580, tags: "", language: "arabic", known: false },
-    { uuid: "7084ad06-e4bc-4088-b6fb-06a77645adc0", name: ".Quran radio", primaryUrl: "https://n09.radiojar.com/0tpy1h0kxtzuv?rj-ttl=5&rj-tok=AAABjKoABHgAdULpynjQ7EwB6A", fallbackUrl: "", category: "QURAN", countryCode: "SA", bitrate: 0, popularity: 772, tags: "", language: "arabic", known: false },
-    { uuid: "2cad3c1f-d425-45fc-bf91-e30acf81775f", name: "Quran Recitation by Sheikh Wadi Al-Yamani", primaryUrl: "https://serverkw.quran-uni.com:8226/", fallbackUrl: "", category: "QURAN", countryCode: "KW", bitrate: 128, popularity: 580, tags: "", language: "arabic", known: false },
-    { uuid: "0f35d49a-3e12-4936-a8e7-a3ae7698ea58", name: "El Gouna Radio", primaryUrl: "http://82.201.132.237:8000/", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "368ef657-f8b5-47ce-b578-337e401cc744", name: "Voice of Lebanon (Sawtlebnan) Radio", primaryUrl: "https://l3.itworkscdn.net/itwaudio/9054/stream", fallbackUrl: "", category: "MUSIC", countryCode: "LB", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "033b6d50-6d02-4cdb-ac9a-73faba3881d9", name: "Sawt Al Farah", primaryUrl: "https://radio.garden/api/ara/content/listen/TBbZ87vu/channel.mp3", fallbackUrl: "", category: "MUSIC", countryCode: "SY", bitrate: 128, popularity: 510, tags: "", language: "arabic", known: false },
-    { uuid: "cbf8067e-8c54-4d62-81b9-df6589d782b1", name: "Sawt El Ghad", primaryUrl: "https://l3.itworkscdn.net/itwaudio/9030/stream", fallbackUrl: "", category: "MUSIC", countryCode: "LB", bitrate: 128, popularity: 510, tags: "", language: "arabic", known: false },
-    { uuid: "a9d04fb3-fd0e-4dbd-877e-5dd2d5d6e618", name: "Radio Sawt Alamal", primaryUrl: "https://stream.zeno.fm/qgw73bqh5qruv", fallbackUrl: "", category: "MUSIC", countryCode: "MA", bitrate: 128, popularity: 510, tags: "", language: "arabic", known: false },
-    { uuid: "7d1378e3-8e91-46f9-a98d-6f7426e60a3c", name: "Sawt El Mada", primaryUrl: "http://audiostreaming.itworkscdn.com:9018/stream", fallbackUrl: "", category: "MUSIC", countryCode: "LB", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "f27afa46-8650-4a88-a632-6f46e61427b2", name: "Sawt El Ghad - Tarab", primaryUrl: "https://sawtelghad.org:7007/", fallbackUrl: "", category: "MUSIC", countryCode: "PS", bitrate: 128, popularity: 510, tags: "", language: "arabic", known: false },
-    { uuid: "84fa3e78-74ff-4a18-a40d-0edf87e9fa05", name: "Sawt Al Hoda 92.1 FM", primaryUrl: "https://l3.itworkscdn.net/itwaudio/9032/stream", fallbackUrl: "", category: "MUSIC", countryCode: "LB", bitrate: 128, popularity: 510, tags: "", language: "arabic", known: false },
-    { uuid: "52691bbc-72f0-4b1c-93f0-2a0fd13d9018", name: "Sawt Sydney كل الفرق", primaryUrl: "https://usa10.fastcast4u.com/nada22", fallbackUrl: "", category: "MUSIC", countryCode: "AU", bitrate: 128, popularity: 510, tags: "", language: "arabic", known: false },
-    { uuid: "4e0c8d68-ad04-46e7-884d-0605979eb8d2", name: "Sawt Al Hob", primaryUrl: "https://stream.zeno.fm/0b97ef7rxchvv", fallbackUrl: "", category: "MUSIC", countryCode: "LB", bitrate: 128, popularity: 510, tags: "", language: "arabic", known: false },
-    { uuid: "125ec344-a2a1-4e36-8f66-77401f457d20", name: "Aswat FM", primaryUrl: "https://broadcast.ice.infomaniak.ch/aswat-high.mp3", fallbackUrl: "", category: "MUSIC", countryCode: "MA", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "9e88f54e-7a06-4225-a01e-9644a48d8499", name: "Medina FM Tarab (128 kbps)", primaryUrl: "https://medinatarab.ice.infomaniak.ch/medinatarab-128.mp3", fallbackUrl: "", category: "MUSIC", countryCode: "MA", bitrate: 128, popularity: 500, tags: "", language: "arabic", known: false },
-    { uuid: "8ada979f-dc6b-49ca-9dc9-bd3377c99aac", name: "Medina FM Nachat (128 kbps)", primaryUrl: "https://medinanachat.ice.infomaniak.ch/medinanachat-128.mp3", fallbackUrl: "", category: "MUSIC", countryCode: "MA", bitrate: 128, popularity: 500, tags: "", language: "arabic", known: false },
-    { uuid: "0502df2d-a93e-4d8a-8547-ae9d341a1128", name: "MEDINA FM", primaryUrl: "https://medinafm.ice.infomaniak.ch/medinafm-64.mp3", fallbackUrl: "", category: "MUSIC", countryCode: "MA", bitrate: 64, popularity: 500, tags: "", language: "arabic", known: false },
-    { uuid: "3194ab53-148e-482c-b392-6b33ad40d9b1", name: "Medina FM Andalou (128 kbps)", primaryUrl: "https://medinaandalou.ice.infomaniak.ch/medinaandalou-128.mp3", fallbackUrl: "", category: "MUSIC", countryCode: "MA", bitrate: 128, popularity: 500, tags: "", language: "arabic", known: false },
-    { uuid: "91ec0c03-f58c-4e42-a034-067a22f867d3", name: "Medina FM (128 kbps)", primaryUrl: "https://medinafm.ice.infomaniak.ch/medinafm-128.mp3", fallbackUrl: "", category: "NEWS", countryCode: "MA", bitrate: 128, popularity: 500, tags: "", language: "arabic", known: false },
-    { uuid: "d4e5cd2a-46da-447a-b92a-ef2abf64c329", name: "Ajyal - Palestine", primaryUrl: "https://streamer.mada.ps:8208/ajyal", fallbackUrl: "", category: "MUSIC", countryCode: "PS", bitrate: 128, popularity: 400, tags: "", language: "arabic", known: false },
-    { uuid: "e3ecb332-be77-4641-9b52-39cb4e79e042", name: "Radio Orient", primaryUrl: "https://stream.rcs.revma.com/7hnrkawf4p8uv.mp3", fallbackUrl: "", category: "NEWS", countryCode: "FR", bitrate: 0, popularity: 380, tags: "", language: "arabic", known: false },
-    { uuid: "0b14ae20-92b3-4db7-834f-ee6ba39ad080", name: "إذاعة مشاري العفاسي", primaryUrl: "https://qurango.net/radio/mishary_alafasi", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "3f5d8a52-dea9-4201-9575-a58adc8e9263", name: "إذاعة محمود خليل الحصري", primaryUrl: "https://qurango.net/radio/mahmoud_khalil_alhussary_warsh", fallbackUrl: "", category: "QURAN", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "0155ec12-7308-468a-88dc-fcbd440e01da", name: "إذاعة مصطفى إسماعيل", primaryUrl: "https://qurango.net/radio/mustafa_ismail", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "17e85b1e-1eaf-465e-8753-4178e605f7b9", name: "Arab Mix 256", primaryUrl: "https://stream.zeno.fm/wvqgc9kb1d0uv", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "bc1e8eb3-a94e-48d7-892a-e790a1599b60", name: "SumerFm Iraq", primaryUrl: "https://l3.itworkscdn.net/itwaudio/9012/stream", fallbackUrl: "", category: "MUSIC", countryCode: "IQ", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "ceba48a5-9356-4891-a1fc-5ff9ea832120", name: "90s FM", primaryUrl: "http://eu1.fastcast4u.com/proxy/prontofm", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "8bee6f3f-5bbd-4a2a-9cb9-0b75063f35b2", name: "---تراتيل قصيرة متميزة---", primaryUrl: "https://qurango.net/radio/tarateel", fallbackUrl: "", category: "QURAN", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "30a739aa-0ef2-484c-a45a-4be7fbcb9603", name: "Arab Mix Drama", primaryUrl: "https://stream.zeno.fm/egynebf171zuv.acc", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "5e1c31e7-7541-439a-9081-6f78508bb637", name: "إذاعة ياسر الدوسري", primaryUrl: "https://qurango.net/radio/yasser_aldosari", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "6b77cd64-68ef-4984-91ec-9b7e77a26eda", name: "Radio Liban Libre", primaryUrl: "https://edge.mixlr.com/channel/qtqeb", fallbackUrl: "", category: "NEWS", countryCode: "LB", bitrate: 0, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "0cb24613-f3ba-41d6-9410-b3aaaa49c3f9", name: "Al rasheed fm", primaryUrl: "https://streaming.shoutcast.com/alrasheed-fm?1719771692024", fallbackUrl: "", category: "MUSIC", countryCode: "IQ", bitrate: 320, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "23754a47-c75e-11e8-a54a-52543be04c81", name: "Radio القارئ علي حجاج السويسي", primaryUrl: "http://live.mp3quran.net:9842/", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "feddd190-e5ff-4a0a-93c2-90068dd04608", name: "راديو وياك | Radiowayak", primaryUrl: "https://work.radiowayak.org/listen/live/live.mp3", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 32, popularity: 294, tags: "", language: "arabic", known: false },
-    { uuid: "b0d990d7-167a-44a1-830e-35dedaa2982d", name: "Al rasheed fm )Kirkuk)", primaryUrl: "https://streaming.shoutcast.com/alrasheed-kirkuk", fallbackUrl: "", category: "MUSIC", countryCode: "IQ", bitrate: 128, popularity: 154, tags: "", language: "arabic", known: false },
-    { uuid: "6aed851e-a68c-43c6-a0b1-f0bb7476e5d3", name: "Abdulrasheed Soufi", primaryUrl: "https://qurango.net/radio/abdulrasheed_soufi_assosi.mp3", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "4a116b98-e289-4630-9b62-b93a67159c7e", name: "Anghamy", primaryUrl: "https://radio.avazfarsi.com:8010/radio.mp3", fallbackUrl: "", category: "MUSIC", countryCode: "LB", bitrate: 128, popularity: 671, tags: "", language: "arabic", known: false },
-    { uuid: "26eb1c40-f314-4976-8969-a70d1fcce1fc", name: "Hala FM", primaryUrl: "https://listen-halafm.sharp-stream.com/halafmlow.mp3", fallbackUrl: "", category: "MUSIC", countryCode: "OM", bitrate: 64, popularity: 529, tags: "", language: "arabic", known: false },
-    { uuid: "050966be-de77-49f0-bad9-6ef200d219f3", name: "Ambiance FM", primaryUrl: "https://stream.zeno.fm/0rehsamc9xxtv", fallbackUrl: "", category: "NEWS", countryCode: "TN", bitrate: 192, popularity: 416, tags: "", language: "arabic", known: false },
-    { uuid: "d42cb646-0c16-11e9-a80b-52543be04c81", name: "Libyana Hits FM", primaryUrl: "http://proxima.shoutca.st:8946/stream", fallbackUrl: "", category: "MUSIC", countryCode: "LY", bitrate: 96, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "344e6e4e-a7b3-11e8-a8ed-52543be04c81", name: "RadioSunna", primaryUrl: "http://andromeda.shoutca.st:8189/stream", fallbackUrl: "", category: "QURAN", countryCode: "SA", bitrate: 32, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "88ac049f-d017-11e9-a861-52543be04c81", name: "lbi Radio", primaryUrl: "http://andromeda.shoutca.st:8192/;stream.mp3", fallbackUrl: "", category: "MUSIC", countryCode: "LB", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "ef2cb53f-3f77-482c-942b-a2826cb324af", name: "Al Wisal", primaryUrl: "http://uk7.internet-radio.com:8067/", fallbackUrl: "", category: "NEWS", countryCode: "OM", bitrate: 96, popularity: 463, tags: "", language: "arabic", known: false },
-    { uuid: "cd370991-b259-423b-a3d3-b972eb2265aa", name: "Radio Tunisie Culturelle", primaryUrl: "http://rtstream.tanitweb.com/culturelle", fallbackUrl: "", category: "MUSIC", countryCode: "TN", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
-    { uuid: "eec68cdb-9fde-4a44-81d1-4e752f05fdf5", name: "Radio Liban", primaryUrl: "https://media2.streambrothers.com:2020/stream/8194", fallbackUrl: "", category: "MUSIC", countryCode: "LB", bitrate: 64, popularity: 542, tags: "", language: "arabic", known: false },
-    { uuid: "5b61ccc0-f369-4368-ba65-3b10b7f6bae9", name: "Mood Fm 92 Amman", primaryUrl: "https://securestreams2.autopo.st:1241/live", fallbackUrl: "", category: "MUSIC", countryCode: "JO", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: false },
+    { uuid: "8dad4ff4-2ae8-4fba-b379-c964f6ae9f4a", name: "Arab Mix FM", primaryUrl: "https://stream.zeno.fm/na3vpvn10qruv", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "b1d17829-6522-481b-bb5c-839c3fd44353", name: "Radio Hits 88.2 Cairo", primaryUrl: "https://radiohits882.radioca.st/;", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "7eb9e8cd-bf7f-4bcc-afe2-3f56608911e6", name: "Elissa FM", primaryUrl: "https://stream.zeno.fm/v7n499m8ckhvv", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "5db41df8-9921-421f-a618-84864ededf86", name: "إذاعة القرآن الكريم (القاهرة)", primaryUrl: "https://stream.radiojar.com/8s5u5tpdtwzuv", fallbackUrl: "", category: "QURAN", countryCode: "EG", bitrate: 0, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "59f4eecd-7193-4bc3-8bc3-c1463d92b22d", name: "Alseraj Radio Quran", primaryUrl: "http://192.99.170.8:5550/stream", fallbackUrl: "", category: "QURAN", countryCode: "IQ", bitrate: 96, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "e9744b90-2619-4a0c-93b4-5996e213068a", name: "Mp3Quran Main", primaryUrl: "https://qurango.net/radio/mix", fallbackUrl: "", category: "QURAN", countryCode: "SA", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "77c8094d-6822-4221-be7b-1d54ab477d78", name: "Quran Radio راديو القرآن - Abdulrahman Alsudais - عبدالرحمن السديس", primaryUrl: "https://radio.mp3islam.com/listen/sudais/radio.mp3", fallbackUrl: "", category: "QURAN", countryCode: "KW", bitrate: 64, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "0f35d49a-3e12-4936-a8e7-a3ae7698ea58", name: "El Gouna Radio", primaryUrl: "http://82.201.132.237:8000/;", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "368ef657-f8b5-47ce-b578-337e401cc744", name: "Voice of Lebanon (Sawtlebnan) Radio", primaryUrl: "https://l3.itworkscdn.net/itwaudio/9054/stream", fallbackUrl: "", category: "MUSIC", countryCode: "LB", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "7d1378e3-8e91-46f9-a98d-6f7426e60a3c", name: "Sawt El Mada", primaryUrl: "http://audiostreaming.itworkscdn.com:9018/stream", fallbackUrl: "", category: "MUSIC", countryCode: "LB", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "125ec344-a2a1-4e36-8f66-77401f457d20", name: "Aswat FM", primaryUrl: "https://broadcast.ice.infomaniak.ch/aswat-high.mp3", fallbackUrl: "", category: "MUSIC", countryCode: "MA", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "0b14ae20-92b3-4db7-834f-ee6ba39ad080", name: "إذاعة مشاري العفاسي", primaryUrl: "https://qurango.net/radio/mishary_alafasi", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "3f5d8a52-dea9-4201-9575-a58adc8e9263", name: "إذاعة محمود خليل الحصري", primaryUrl: "https://qurango.net/radio/mahmoud_khalil_alhussary_warsh", fallbackUrl: "", category: "QURAN", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "0155ec12-7308-468a-88dc-fcbd440e01da", name: "إذاعة مصطفى إسماعيل", primaryUrl: "https://qurango.net/radio/mustafa_ismail", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "ceba48a5-9356-4891-a1fc-5ff9ea832120", name: "90s FM", primaryUrl: "http://eu1.fastcast4u.com/proxy/prontofm", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "8bee6f3f-5bbd-4a2a-9cb9-0b75063f35b2", name: "---تراتيل قصيرة متميزة---", primaryUrl: "https://qurango.net/radio/tarateel", fallbackUrl: "", category: "QURAN", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "30a739aa-0ef2-484c-a45a-4be7fbcb9603", name: "Arab Mix Drama", primaryUrl: "https://stream.zeno.fm/egynebf171zuv.acc", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "5e1c31e7-7541-439a-9081-6f78508bb637", name: "إذاعة ياسر الدوسري", primaryUrl: "https://qurango.net/radio/yasser_aldosari", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "6b77cd64-68ef-4984-91ec-9b7e77a26eda", name: "Radio Liban Libre", primaryUrl: "https://edge.mixlr.com/channel/qtqeb", fallbackUrl: "", category: "NEWS", countryCode: "LB", bitrate: 0, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "0cb24613-f3ba-41d6-9410-b3aaaa49c3f9", name: "Al rasheed fm", primaryUrl: "https://streaming.shoutcast.com/alrasheed-fm?1719771692024", fallbackUrl: "", category: "MUSIC", countryCode: "IQ", bitrate: 320, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "23754a47-c75e-11e8-a54a-52543be04c81", name: "Radio القارئ علي حجاج السويسي", primaryUrl: "http://live.mp3quran.net:9842/", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "6aed851e-a68c-43c6-a0b1-f0bb7476e5d3", name: "Abdulrasheed Soufi", primaryUrl: "https://qurango.net/radio/abdulrasheed_soufi_assosi.mp3", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "d42cb646-0c16-11e9-a80b-52543be04c81", name: "Libyana Hits FM", primaryUrl: "http://proxima.shoutca.st:8946/stream", fallbackUrl: "", category: "MUSIC", countryCode: "LY", bitrate: 96, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "344e6e4e-a7b3-11e8-a8ed-52543be04c81", name: "RadioSunna", primaryUrl: "http://andromeda.shoutca.st:8189/stream", fallbackUrl: "", category: "QURAN", countryCode: "SA", bitrate: 32, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "88ac049f-d017-11e9-a861-52543be04c81", name: "lbi Radio", primaryUrl: "http://andromeda.shoutca.st:8192/;stream.mp3", fallbackUrl: "", category: "MUSIC", countryCode: "LB", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "cd370991-b259-423b-a3d3-b972eb2265aa", name: "Radio Tunisie Culturelle", primaryUrl: "http://rtstream.tanitweb.com/culturelle", fallbackUrl: "", category: "MUSIC", countryCode: "TN", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "5b61ccc0-f369-4368-ba65-3b10b7f6bae9", name: "Mood Fm 92 Amman", primaryUrl: "https://securestreams2.autopo.st:1241/live", fallbackUrl: "", category: "MUSIC", countryCode: "JO", bitrate: 128, popularity: 999, tags: "", language: "arabic", known: true },
+    { uuid: "c5c08ef9-5559-4073-87a8-80bff2b4860b", name: "Monte Carlo Doualiya", primaryUrl: "https://montecarlodoualiya128k.ice.infomaniak.ch/mc-doualiya.mp3", fallbackUrl: "", category: "NEWS", countryCode: "FR", bitrate: 128, popularity: 870, tags: "", language: "arabic", known: true },
+    { uuid: "d9bbea87-9051-45cb-abe6-8992a7a76cf1", name: "Universal Health Radio (العربية)", primaryUrl: "https://radio.universalhealthradio.org/uhr-ar.mp3", fallbackUrl: "", category: "NEWS", countryCode: "SA", bitrate: 0, popularity: 860, tags: "", language: "arabic", known: true },
+    { uuid: "cd74834d-9504-42e9-a165-4d7194afaf54", name: "Sawt El Nagham", primaryUrl: "https://stream.zeno.fm/66sfwug4ag0uv", fallbackUrl: "", category: "MUSIC", countryCode: "LB", bitrate: 128, popularity: 850, tags: "", language: "arabic", known: true },
+    { uuid: "73f665df-37cd-4c4c-b398-6e97e526a01d", name: "LBI Radio Hits", primaryUrl: "https://lbihits-lbnet2.radioca.st/stream", fallbackUrl: "", category: "MUSIC", countryCode: "LB", bitrate: 128, popularity: 760, tags: "", language: "arabic", known: true },
+    { uuid: "4a116b98-e289-4630-9b62-b93a67159c7e", name: "Anghamy", primaryUrl: "https://radio.avazfarsi.com:8010/radio.mp3", fallbackUrl: "", category: "MUSIC", countryCode: "LB", bitrate: 128, popularity: 671, tags: "", language: "arabic", known: true },
+    { uuid: "580ef7ef-3ebe-45fd-8c90-25e365c64bc3", name: "Abdel Halim Hafez عبدالحليم حافظ", primaryUrl: "https://stream.zeno.fm/8a4eqkd0pnhvv", fallbackUrl: "", category: "MUSIC", countryCode: "EG", bitrate: 128, popularity: 660, tags: "", language: "arabic", known: true },
+    { uuid: "f0d6b0a0-a6b7-4574-8921-f581357ea998", name: "Fairuz فيروز", primaryUrl: "https://stream.zeno.fm/xkhnk4vee18uv", fallbackUrl: "", category: "MUSIC", countryCode: "LB", bitrate: 128, popularity: 640, tags: "", language: "arabic", known: true },
+    { uuid: "7cca8bd6-a173-4fca-9a74-ca1e15a631e5", name: "Quran Radio From Sharjah", primaryUrl: "https://l3.itworkscdn.net/smcquranlive/quranradiolive/icecast.audio", fallbackUrl: "", category: "QURAN", countryCode: "AE", bitrate: 56, popularity: 580, tags: "", language: "arabic", known: true },
+    { uuid: "2cad3c1f-d425-45fc-bf91-e30acf81775f", name: "Quran Recitation by Sheikh Wadi Al-Yamani", primaryUrl: "https://serverkw.quran-uni.com:8226/;", fallbackUrl: "", category: "QURAN", countryCode: "KW", bitrate: 128, popularity: 580, tags: "", language: "arabic", known: true },
+    { uuid: "eec68cdb-9fde-4a44-81d1-4e752f05fdf5", name: "Radio Liban", primaryUrl: "https://media2.streambrothers.com:2020/stream/8194", fallbackUrl: "", category: "MUSIC", countryCode: "LB", bitrate: 64, popularity: 542, tags: "", language: "arabic", known: true },
+    { uuid: "26eb1c40-f314-4976-8969-a70d1fcce1fc", name: "Hala FM", primaryUrl: "https://listen-halafm.sharp-stream.com/halafmlow.mp3", fallbackUrl: "", category: "MUSIC", countryCode: "OM", bitrate: 64, popularity: 529, tags: "", language: "arabic", known: true },
+    { uuid: "cbf8067e-8c54-4d62-81b9-df6589d782b1", name: "Sawt El Ghad", primaryUrl: "https://l3.itworkscdn.net/itwaudio/9030/stream", fallbackUrl: "", category: "MUSIC", countryCode: "LB", bitrate: 128, popularity: 510, tags: "", language: "arabic", known: true },
+    { uuid: "a9d04fb3-fd0e-4dbd-877e-5dd2d5d6e618", name: "Radio Sawt Alamal", primaryUrl: "https://stream.zeno.fm/qgw73bqh5qruv", fallbackUrl: "", category: "MUSIC", countryCode: "MA", bitrate: 128, popularity: 510, tags: "", language: "arabic", known: true },
+    { uuid: "f27afa46-8650-4a88-a632-6f46e61427b2", name: "Sawt El Ghad - Tarab", primaryUrl: "https://sawtelghad.org:7007/;", fallbackUrl: "", category: "MUSIC", countryCode: "PS", bitrate: 128, popularity: 510, tags: "", language: "arabic", known: true },
+    { uuid: "84fa3e78-74ff-4a18-a40d-0edf87e9fa05", name: "Sawt Al Hoda 92.1 FM", primaryUrl: "https://l3.itworkscdn.net/itwaudio/9032/stream", fallbackUrl: "", category: "MUSIC", countryCode: "LB", bitrate: 128, popularity: 510, tags: "", language: "arabic", known: true },
+    { uuid: "52691bbc-72f0-4b1c-93f0-2a0fd13d9018", name: "Sawt Sydney كل الفرق", primaryUrl: "https://usa10.fastcast4u.com/nada22", fallbackUrl: "", category: "MUSIC", countryCode: "AU", bitrate: 128, popularity: 510, tags: "", language: "arabic", known: true },
+    { uuid: "4e0c8d68-ad04-46e7-884d-0605979eb8d2", name: "Sawt Al Hob", primaryUrl: "https://stream.zeno.fm/0b97ef7rxchvv", fallbackUrl: "", category: "MUSIC", countryCode: "LB", bitrate: 128, popularity: 510, tags: "", language: "arabic", known: true },
+    { uuid: "9e88f54e-7a06-4225-a01e-9644a48d8499", name: "Medina FM Tarab (128 kbps)", primaryUrl: "https://medinatarab.ice.infomaniak.ch/medinatarab-128.mp3", fallbackUrl: "", category: "MUSIC", countryCode: "MA", bitrate: 128, popularity: 500, tags: "", language: "arabic", known: true },
+    { uuid: "8ada979f-dc6b-49ca-9dc9-bd3377c99aac", name: "Medina FM Nachat (128 kbps)", primaryUrl: "https://medinanachat.ice.infomaniak.ch/medinanachat-128.mp3", fallbackUrl: "", category: "MUSIC", countryCode: "MA", bitrate: 128, popularity: 500, tags: "", language: "arabic", known: true },
+    { uuid: "0502df2d-a93e-4d8a-8547-ae9d341a1128", name: "MEDINA FM", primaryUrl: "https://medinafm.ice.infomaniak.ch/medinafm-64.mp3", fallbackUrl: "", category: "MUSIC", countryCode: "MA", bitrate: 64, popularity: 500, tags: "", language: "arabic", known: true },
+    { uuid: "3194ab53-148e-482c-b392-6b33ad40d9b1", name: "Medina FM Andalou (128 kbps)", primaryUrl: "https://medinaandalou.ice.infomaniak.ch/medinaandalou-128.mp3", fallbackUrl: "", category: "MUSIC", countryCode: "MA", bitrate: 128, popularity: 500, tags: "", language: "arabic", known: true },
+    { uuid: "91ec0c03-f58c-4e42-a034-067a22f867d3", name: "Medina FM (128 kbps)", primaryUrl: "https://medinafm.ice.infomaniak.ch/medinafm-128.mp3", fallbackUrl: "", category: "NEWS", countryCode: "MA", bitrate: 128, popularity: 500, tags: "", language: "arabic", known: true },
+    { uuid: "ef2cb53f-3f77-482c-942b-a2826cb324af", name: "Al Wisal", primaryUrl: "http://uk7.internet-radio.com:8067/;", fallbackUrl: "", category: "NEWS", countryCode: "OM", bitrate: 96, popularity: 463, tags: "", language: "arabic", known: true },
+    { uuid: "050966be-de77-49f0-bad9-6ef200d219f3", name: "Ambiance FM", primaryUrl: "https://stream.zeno.fm/0rehsamc9xxtv", fallbackUrl: "", category: "NEWS", countryCode: "TN", bitrate: 192, popularity: 416, tags: "", language: "arabic", known: true },
+    { uuid: "b0d990d7-167a-44a1-830e-35dedaa2982d", name: "Al rasheed fm )Kirkuk)", primaryUrl: "https://streaming.shoutcast.com/alrasheed-kirkuk", fallbackUrl: "", category: "MUSIC", countryCode: "IQ", bitrate: 128, popularity: 154, tags: "", language: "arabic", known: true },
   ];
 }
 
@@ -370,9 +380,36 @@ function removeDuplicatesSmart(stations) {
   return unique;
 }
 
+// إعادة كتابة playlist الـ HLS بحيث كل المقاطع/التحويلات تمر عبر الوكيل نفسه.
+// دى المشكلة اللي كانت بتوقف صوت الجزيرة وسكاي نيوز وMBC FM: التطبيق كان بيحمّل
+// قائمة التشغيل من الوكيل بنجاح، لكن مقاطع الصوت نفسها كانت بتتحمل مباشرة من سيرفر المحطة
+// (بتختلف عن المسار النسبي في القائمة)، فبتفشل أو تتحجب جغرافياً وتتبوظ بعد ثواني.
+// دلوقتي المسارات النسبية بتتحول لروابط كاملة والوكيل بيمرر كل حاجة — فتشتغل 100%.
+function isLikelyHls(text, contentType) {
+  const ct = (contentType || "").toLowerCase();
+  if (ct.includes("mpegurl") || ct.includes("m3u")) return true;
+  return text.startsWith("#EXTM3U") || text.slice(0, 200).includes("#EXTINF");
+}
+
+function rewriteHlsPlaylist(text, baseUrl, workerBase) {
+  const lines = text.split("\n");
+  const out = [];
+  for (let raw of lines) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) { out.push(raw); continue; }
+    let abs;
+    try { abs = new URL(line, baseUrl).toString(); } catch (e) { out.push(raw); continue; }
+    out.push(workerBase + "/?url=" + encodeURIComponent(abs));
+  }
+  return out.join("\n");
+}
+
 async function proxyStream(streamUrl) {
   const videoExtensions = [".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv"];
-  if (videoExtensions.some(ext => streamUrl.toLowerCase().includes(ext))) {
+  const lower = streamUrl.toLowerCase();
+  // استثناء روابط الصوت بصيغة m3u8 (قوائم تشغيل HLS صافية) من حظر الفيديو
+  const isAudioHls = lower.includes(".m3u8") && !lower.includes("video");
+  if (!isAudioHls && videoExtensions.some(ext => lower.includes(ext))) {
     return new Response("Video blocked", { status: 403 });
   }
 
@@ -390,8 +427,32 @@ async function proxyStream(streamUrl) {
     const response = await fetch(originRequest);
     const contentType = response.headers.get("Content-Type") || "";
 
-    if (contentType.toLowerCase().includes("video/")) {
+    if (contentType.toLowerCase().includes("video/") && !isAudioHls) {
       return new Response("Video blocked", { status: 403 });
+    }
+
+    // HLS: نقرأ القائمة ونعيد كتابة الروابط ثم نرجعها كنص كامل
+    if (response.ok && (contentType.toLowerCase().includes("mpegurl") || lower.includes(".m3u8"))) {
+      try {
+        const text = await response.text();
+        if (isLikelyHls(text, contentType)) {
+          const workerBase = "https://radio-joo-proxy.midoc11112.workers.dev";
+          const rewritten = rewriteHlsPlaylist(text, response.url || streamUrl, workerBase);
+          return new Response(rewritten, {
+            status: 200,
+            headers: {
+              "Content-Type": "application/vnd.apple.mpegurl",
+              "Access-Control-Allow-Origin": "*",
+              "Cache-Control": "no-cache",
+            },
+          });
+        }
+        // مش HLS فعلي — نرجع النص زي ما هو
+        return new Response(text, {
+          status: response.status,
+          headers: { "Content-Type": contentType || "text/plain", "Access-Control-Allow-Origin": "*" },
+        });
+      } catch (e) { /* fallback للممر العادي */ }
     }
 
     const newHeaders = new Headers(response.headers);

@@ -17,7 +17,7 @@ class StationSyncWorker(
         try {
             val database = AppDatabase.getDatabase(applicationContext)
             val stationDao = database.stationDao()
-            val repository = RadioRepository(stationDao, applicationContext.cacheDir)
+            val repository = RadioRepository(applicationContext, stationDao, applicationContext.cacheDir)
 
             val updatedCount = repository.fetchStationsFromServer()
 
