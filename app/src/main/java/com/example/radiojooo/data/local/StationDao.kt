@@ -19,6 +19,19 @@ interface StationDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertStations(stations: List<StationEntity>)
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertStationsIgnore(stations: List<StationEntity>): List<Long>
+
+    @Query("UPDATE stations SET lastUrlWorks = :works, failCount = :failCount WHERE uuid = :uuid")
+    suspend fun updateHealth(uuid: String, works: Boolean, failCount: Int)
+
+    /** المحطات اللي محتاجة فحص ذاتي: لم تُفحص من قبل أو فشل آخر فحص */
+    @Query("SELECT * FROM stations WHERE lastUrlWorks IS NULL OR lastUrlWorks = 0 ORDER BY popularity DESC LIMIT :limit")
+    suspend fun getStationsNeedingCheck(limit: Int): List<StationEntity>
+
+    @Query("DELETE FROM stations WHERE lastUrlWorks = 0 AND failCount >= :maxFails AND isFavorite = 0")
+    suspend fun pruneDeadStations(maxFails: Int)
+
     @Query("DELETE FROM stations")
     suspend fun deleteAllStations()
 

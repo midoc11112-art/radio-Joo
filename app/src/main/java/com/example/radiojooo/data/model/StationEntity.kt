@@ -15,5 +15,9 @@ data class StationEntity(
     val bitrate: Int = 0,
     var isFavorite: Boolean = false,
     val popularity: Int = 0,
-    val lastUpdated: Long = System.currentTimeMillis()
+    val lastUpdated: Long = System.currentTimeMillis(),
+    /** حالة الفحص الذاتي: null = لم تُفحص بعد، true = الستريم شغال، false = فشل آخر فحص */
+    val lastUrlWorks: Boolean? = null,
+    /** كم مرة فشل الستريم على التوالي (يستخدم لخفض ترتيب المحطات الميتة) */
+    val failCount: Int = 0
 )

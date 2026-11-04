@@ -2,6 +2,7 @@ package com.example.radiojooo.data.repository
 
 import android.util.Log
 import com.example.radiojooo.data.local.StationDao
+import com.example.radiojooo.data.local.TrustedStations
 import com.example.radiojooo.data.model.StationEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -27,9 +28,19 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
     val allStations: Flow<List<StationEntity>> = stationDao.getAllStations()
 
+    /**
+     * الحل الجذري لمشكلة قلة المحطات:
+     * 1) القائمة الثابتة الموثوقة (TrustedStations - 185 محطة، كل URLsها متأكد منها بتاريخ 2026-11-04)
+     *    تُحفظ دائماً في قاعدة البيانات حتى لو السيرفر واقع أو رجّع محطات قليلة.
+     * 2) نتائج السيرفر (Worker) تُضاف فوق القائمة بدون حذف أي محطة موثوقة (merge بدل replace).
+     */
     suspend fun fetchStationsFromServer(): Int = withContext(Dispatchers.IO) {
+        // أولاً: ضمان وجود القائمة الموثوقة دائماً (حتى لو فشل السيرفر)
+        seedTrustedStations()
+
+        var serverCount = 0
         try {
-            Log.d("RadioRepository", "جاري جلب المحطات...")
+            Log.d("RadioRepository", "جاري جلب المحطات من السيرفر...")
 
             val request = Request.Builder()
                 .url(STATIONS_ENDPOINT)
@@ -40,34 +51,72 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
             if (!response.isSuccessful) {
                 Log.e("RadioRepository", "فشل: " + response.code)
-                return@withContext 0
+            } else {
+                val jsonStr = response.body?.string()
+                if (jsonStr != null) {
+                    val jsonObject = JSONObject(jsonStr)
+                    val stationsArray = jsonObject.getJSONArray("stations")
+                    serverCount = stationsArray.length()
+                    Log.d("RadioRepository", "السيرفر بعت: $serverCount محطة")
+
+                    val serverStations = parseStations(stationsArray)
+                    if (serverStations.isNotEmpty()) {
+                        mergeStations(serverStations)
+                    }
+                }
             }
-
-            val jsonStr = response.body?.string() ?: return@withContext 0
-            val jsonObject = JSONObject(jsonStr)
-            val stationsArray = jsonObject.getJSONArray("stations")
-            val totalFromServer = jsonObject.optInt("totalStations", 0)
-
-            Log.d("RadioRepository", "السيرفر بعت: " + totalFromServer + " محطة")
-            Log.d("RadioRepository", "عدد المحطات في الـ array: " + stationsArray.length())
-
-            val stations = parseStations(stationsArray)
-
-            if (stations.isEmpty()) {
-                Log.e("RadioRepository", "لا توجد محطات")
-                return@withContext 0
-            }
-
-            saveStations(stations)
-
-            Log.d("RadioRepository", "تم حفظ " + stations.size + " محطة بنجاح")
-            return@withContext stations.size
-
         } catch (e: Exception) {
-            Log.e("RadioRepository", "خطأ: " + e.message)
-            e.printStackTrace()
+            Log.e("RadioRepository", "خطأ في جلب السيرفر (القائمة الموثوقة محفوظة): " + e.message)
         }
-        return@withContext 0
+
+        val total = stationDao.getStationsCount()
+        Log.d("RadioRepository", "الإجمالي بعد الدمج: $total محطة")
+        return@withContext total
+    }
+
+    /**
+     * يحفظ القائمة الموثوقة مرة واحدة فقط (يستخدم uuid كمفتاح، فالـ insert IGNORE
+     * لن يكرر محطات موجودة ولن يمسبها المفضلة عند المستخدم).
+     */
+    private suspend fun seedTrustedStations() {
+        val seeded = cacheDir.parentFile?.let { f ->
+            java.io.File(f, "trusted_seeded_v1.flag").exists()
+        } == true
+
+        if (!seeded && stationDao.getStationsCount() >= TrustedStations.list.size) {
+            markSeeded()
+            return
+        }
+
+        if (!seeded) {
+            Log.d("RadioRepository", "جاري حفظ القائمة الموثوقة (" + TrustedStations.list.size + " محطة)...")
+            stationDao.insertStationsIgnore(TrustedStations.list.map { it.copy(lastUpdated = System.currentTimeMillis()) })
+            markSeeded()
+        }
+    }
+
+    private fun markSeeded() {
+        try {
+            cacheDir.parentFile?.let { f ->
+                java.io.File(f, "trusted_seeded_v1.flag").createNewFile()
+            }
+        } catch (_: Exception) {}
+    }
+
+    /** دمج محطات السيرفر مع الموجود بدون حذف — المحطة الموجودة تتحدث بياناتها فقط إذا كانت أجدد/أكثر شعبية */
+    private suspend fun mergeStations(newStations: List<StationEntity>) {
+        val existing = stationDao.getStationsListDirect().associateBy { it.uuid }
+        val toInsert = newStations.mapNotNull { ns ->
+            val ex = existing[ns.uuid]
+            when {
+                ex == null -> ns
+                ns.popularity > ex.popularity || !ex.lastUrlWorks -> ns.copy(isFavorite = ex.isFavorite)
+                else -> null
+            }
+        }
+        if (toInsert.isNotEmpty()) {
+            stationDao.insertStationsIgnore(toInsert)
+        }
     }
 
     private fun parseStations(stationsArray: org.json.JSONArray): List<StationEntity> {

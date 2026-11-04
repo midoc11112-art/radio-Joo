@@ -21,10 +21,13 @@ class StationSyncWorker(
 
             val updatedCount = repository.fetchStationsFromServer()
 
-            // تنظيف المحطات الميتة: اللي فشلت 3 مرات أو أكثر في التشغيل المتتالي (المفضلة لا تُحذف)
-            try { stationDao.pruneDeadStations(maxFails = 3) } catch (_: Exception) {}
+            // تنظيف المحطات الميتة: اللي فشلت 3 مرات متتالية في التشغيل الحقيقي
+            // (المحطات المفضلة محمية من الحذف)
+            try {
+                stationDao.pruneDeadStations(maxFails = 3)
+            } catch (_: Exception) {}
 
-            if (updatedCount > 0) {
+            if (updatedCount >= 0) {
                 Result.success()
             } else {
                 Result.retry()
