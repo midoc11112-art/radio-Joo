@@ -199,8 +199,10 @@ class RadioRepository(private val stationDao: StationDao, cacheDir: File) {
             seedTrustedStations()
             val count = stationDao.getStationsCount()
             Log.d("RadioRepository", "عدد المحطات الحالي: " + count)
-            if (count == 0) {
-                Log.d("RadioRepository", "قاعدة البيانات فارغة - جاري جلب المحطات...")
+            // أي عدد أقل من قائمة السيرفر المتوقعة (~700) = بيانات ناقصة من نسخة قديمة،
+            // فنسحب من السيرفر على طول (الدمج الآن آمن: INSERT IGNORE + فلتر تكرار بالاسم/URL)
+            if (count < 500) {
+                Log.d("RadioRepository", "عدد المحطات أقل من المتوقع - جاري جلب وتكميل من السيرفر...")
                 fetchStationsFromServer()
             }
         }
