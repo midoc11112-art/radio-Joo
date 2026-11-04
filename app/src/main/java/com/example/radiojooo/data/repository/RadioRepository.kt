@@ -90,8 +90,23 @@ class RadioRepository(private val context: android.content.Context, private val 
         if (appliedVersion != TrustedStations.LIST_VERSION) {
             // القائمة اتحدثت — امسح كل محطات البذر القديمة (غير المفضلة) عشان ميتش متبقاش محطة ميتة
             // من قائمة قديمة. محطات السيرفر الشعبية هترجع تلقائياً في نفس الجلسة بعد الدمج.
+            // احذف محطات البذر القديمة المسجلة + أي محطة غير مفضلة بدون تصنيف يدوي
+            // (محطات السيرفر العشوائية كانت بتتسلل للقوائم وتعمل مشاكل في التصنيف)
+            val seededJson = prefs.getString("seeded_uuids", null)
+            val seededUuids = HashSet<String>()
+            if (seededJson != null) {
+                val arr = org.json.JSONArray(seededJson)
+                for (i in 0 until arr.length()) seededUuids.add(arr.getString(i))
+            }
             val all = stationDao.getStationsListDirect()
-            val toDelete = all.filter { !it.isFavorite }.map { it.uuid }
+            val toDelete = all.filter { st ->
+                !st.isFavorite && (
+                    st.uuid in seededUuids ||
+                    st.category.isBlank() ||
+                    st.uuid.startsWith("v2-") ||
+                    st.uuid.startsWith("manual-")
+                )
+            }.map { it.uuid }
             if (toDelete.isNotEmpty()) stationDao.deleteByUuids(toDelete)
             prefs.edit()
                 .putString("trusted_list_version", TrustedStations.LIST_VERSION)
