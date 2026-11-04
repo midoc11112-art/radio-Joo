@@ -40,6 +40,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.FilteringMediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import com.example.radiojooo.R
+import com.example.radiojooo.data.local.AppDatabase
 import com.example.radiojooo.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -227,10 +228,31 @@ class RadioService : Service() {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 updateNotification()
             }
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                // ستريم شغال فعلياً → سجّل نجاح المحطة في الداتا بيز وصفّر عدّاد الفشل
+                if (playbackState == Player.STATE_READY && currentStationUuid.isNotBlank()) {
+                    serviceScope.launch {
+                        try {
+                            AppDatabase.getDatabase(applicationContext).stationDao()
+                                .updateHealth(currentStationUuid, works = true, failCount = 0)
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
         })
     }
 
     private fun handlePlaybackError(error: PlaybackException) {
+        // سجّل فشل الستريم في الداتا بيز (يُستخدم لخفض ترتيب المحطات الميتة وتنظيفها لاحقاً)
+        if (currentStationUuid.isNotBlank()) {
+            serviceScope.launch {
+                try {
+                    val dao = AppDatabase.getDatabase(applicationContext).stationDao()
+                    val st = dao.getStationById(currentStationUuid)
+                    if (st != null) dao.updateHealth(currentStationUuid, works = false, failCount = st.failCount + 1)
+                } catch (_: Exception) {}
+            }
+        }
         retryCount++
         if (retryCount <= maxRetries) {
             when {
