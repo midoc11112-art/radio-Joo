@@ -104,6 +104,7 @@ class RadioRepository(private val context: android.content.Context, private val 
                     st.uuid in seededUuids ||
                     st.category.isBlank() ||
                     st.uuid.startsWith("v2-") ||
+                    st.uuid.startsWith("x-") ||
                     st.uuid.startsWith("manual-")
                 )
             }.map { it.uuid }
