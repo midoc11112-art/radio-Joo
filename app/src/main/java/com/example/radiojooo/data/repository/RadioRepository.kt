@@ -110,7 +110,7 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
             val ex = existing[ns.uuid]
             when {
                 ex == null -> ns
-                ns.popularity > ex.popularity || !ex.lastUrlWorks -> ns.copy(isFavorite = ex.isFavorite)
+                ns.popularity > ex.popularity || ex.lastUrlWorks == false -> ns.copy(isFavorite = ex.isFavorite)
                 else -> null
             }
         }
