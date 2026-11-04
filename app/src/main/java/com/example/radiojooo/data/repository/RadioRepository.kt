@@ -14,7 +14,7 @@ import java.io.File
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
-class RadioRepository(private val stationDao: StationDao, private val cacheDir: File) {
+class RadioRepository(private val stationDao: StationDao, cacheDir: File) {
 
     private val PROXY_BASE_URL = "https://radio-joo-proxy.midoc11112.workers.dev"
     private val STATIONS_ENDPOINT = "$PROXY_BASE_URL/stations"
@@ -79,28 +79,13 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
      * لن يكرر محطات موجودة ولن يمسبها المفضلة عند المستخدم).
      */
     private suspend fun seedTrustedStations() {
-        val seeded = cacheDir.parentFile?.let { f ->
-            java.io.File(f, "trusted_seeded_v1.flag").exists()
-        } == true
-
-        if (!seeded && stationDao.getStationsCount() >= TrustedStations.list.size) {
-            markSeeded()
-            return
-        }
-
-        if (!seeded) {
-            Log.d("RadioRepository", "جاري حفظ القائمة الموثوقة (" + TrustedStations.list.size + " محطة)...")
-            stationDao.insertStationsIgnore(TrustedStations.list.map { it.copy(lastUpdated = System.currentTimeMillis()) })
-            markSeeded()
-        }
-    }
-
-    private fun markSeeded() {
-        try {
-            cacheDir.parentFile?.let { f ->
-                java.io.File(f, "trusted_seeded_v1.flag").createNewFile()
-            }
-        } catch (_: Exception) {}
+        // insertStationsIgnore يعتمد على uuid كمفتاح — آمن للتكرار ولا يمسح بيانات المستخدم،
+        // فنقدر ننفذه بأمان في أي وقت بدون flag file (الحذف اليدوي للملف كان سبب عدم ظهور المحطات).
+        val count = stationDao.getStationsCount()
+        if (count >= TrustedStations.list.size) return
+        Log.d("RadioRepository", "جاري حفظ القائمة الموثوقة (" + TrustedStations.list.size + " محطة)...")
+        stationDao.insertStationsIgnore(TrustedStations.list.map { it.copy(lastUpdated = System.currentTimeMillis()) })
+        Log.d("RadioRepository", "تم. عدد المحطات الآن: " + stationDao.getStationsCount())
     }
 
     /** دمج محطات السيرفر مع الموجود بدون حذف — المحطة الموجودة تتحدث بياناتها فقط إذا كانت أجدد/أكثر شعبية */
@@ -185,6 +170,8 @@ class RadioRepository(private val stationDao: StationDao, private val cacheDir: 
 
     suspend fun ensureInitialDataLoaded() {
         withContext(Dispatchers.IO) {
+            // نضمن القائمة الموثوقة دائماً — حتى لو قاعدة البيانات فيها محطات قليلة من نسخة قديمة
+            seedTrustedStations()
             val count = stationDao.getStationsCount()
             Log.d("RadioRepository", "عدد المحطات الحالي: " + count)
             if (count == 0) {
