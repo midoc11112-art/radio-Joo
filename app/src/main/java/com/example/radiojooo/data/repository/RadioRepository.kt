@@ -88,20 +88,45 @@ class RadioRepository(private val stationDao: StationDao, cacheDir: File) {
         Log.d("RadioRepository", "تم. عدد المحطات الآن: " + stationDao.getStationsCount())
     }
 
-    /** دمج محطات السيرفر مع الموجود بدون حذف — المحطة الموجودة تتحدث بياناتها فقط إذا كانت أجدد/أكثر شعبية */
+    /**
+     * دمج محطات السيرفر مع الموجود بدون حذف.
+     * مشكلة سابقة كانت هنا: محطات نفس الاسم بتيجي من السيرفر بـ uuid مختلف عن uuid
+     * القائمة الموثوقة، فـ "merge" كان بيرجعها كمحطات جديدة ويتسبب في تكرار واضح
+     * للمستخدم (نفس المحطة مرتين). دلوقتي بنفلتر أي محطة اسمها URLها موجودين بالفعل.
+     */
     private suspend fun mergeStations(newStations: List<StationEntity>) {
-        val existing = stationDao.getStationsListDirect().associateBy { it.uuid }
+        val existing = stationDao.getStationsListDirect()
+        val byUuid = existing.associateBy { it.uuid }
+        val existingNames = existing.map { normalizeName(it.name) }.toHashSet()
+        val existingUrls = existing.map { it.primaryUrl.trim().trimEnd('/') }.toHashSet()
+
         val toInsert = newStations.mapNotNull { ns ->
-            val ex = existing[ns.uuid]
+            val ex = byUuid[ns.uuid]
             when {
-                ex == null -> ns
-                ns.popularity > ex.popularity || ex.lastUrlWorks == false -> ns.copy(isFavorite = ex.isFavorite)
-                else -> null
+                // نفس الـ uuid: تحدث فقط لو الشعبية أعلى أو المحطة الحالية معلومة ميتة
+                ex != null && (ns.popularity > ex.popularity || ex.lastUrlWorks == false) ->
+                    ns.copy(isFavorite = ex.isFavorite)
+                ex != null -> null
+                // اسم أو URL مطابق لمحطة موجودة (حتى لو uuid مختلف) = تكرار، تجاهل
+                normalizeName(ns.name) in existingNames ||
+                    ns.primaryUrl.trim().trimEnd('/') in existingUrls -> null
+                else -> {
+                    existingNames.add(normalizeName(ns.name))
+                    existingUrls.add(ns.primaryUrl.trim().trimEnd('/'))
+                    ns
+                }
             }
         }
         if (toInsert.isNotEmpty()) {
             stationDao.insertStationsIgnore(toInsert)
         }
+    }
+
+    /** توحيد الاسم للمقارنة: حروف صغيرة + إزالة التشكيل والمسافات الزائدة واللاحقات الشائعة */
+    private fun normalizeName(name: String): String {
+        return name.lowercase()
+            .replace(Regex("[\\u064B-\\u0652\\u0670]"), "")
+            .replace(Regex("[^\\p{L}\\p{N}]"), "")
     }
 
     private fun parseStations(stationsArray: org.json.JSONArray): List<StationEntity> {
