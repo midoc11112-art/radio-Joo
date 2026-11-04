@@ -29,7 +29,7 @@ async function getStations(env) {
   try {
     let cached = null;
     try {
-      cached = await env.STATIONS_KV.get("stations_v21", "json");
+      cached = await env.STATIONS_KV.get("stations_v22", "json");
     } catch (e) {}
 
     const now = Date.now();
@@ -37,7 +37,7 @@ async function getStations(env) {
 
     if (cached && cached.lastUpdated && (now - cached.lastUpdated) < twoHours && cached.stations.length > 30) {
       return new Response(JSON.stringify({
-        version: "21.0.0",
+        version: "22.0.0",
         lastUpdated: new Date(cached.lastUpdated).toISOString(),
         totalStations: cached.stations.length,
         stations: cached.stations
@@ -54,7 +54,7 @@ async function getStations(env) {
 
     if (stations.length > 0) {
       try {
-        await env.STATIONS_KV.put("stations_v21", JSON.stringify({
+        await env.STATIONS_KV.put("stations_v22", JSON.stringify({
           lastUpdated: now,
           stations: stations
         }), { expirationTtl: 86400 });
@@ -62,7 +62,7 @@ async function getStations(env) {
     }
 
     return new Response(JSON.stringify({
-      version: "21.0.0",
+      version: "22.0.0",
       lastUpdated: new Date(now).toISOString(),
       totalStations: stations.length,
       stations: stations

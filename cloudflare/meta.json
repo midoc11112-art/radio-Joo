@@ -1,0 +1,1 @@
+{"main": "worker.js", "part_names": ["worker.js"], "bindings": [{"type": "kv_namespace", "name": "STATIONS_KV", "namespace_id": "d35828c1866e47eebbd1f9ef4e334ca0"}], "compatibility_date": "2025-06-01"}
