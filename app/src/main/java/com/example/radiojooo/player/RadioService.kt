@@ -39,6 +39,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.FilteringMediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import com.example.radiojooo.R
+import com.example.radiojooo.data.local.AppDatabase
 import com.example.radiojooo.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -145,8 +146,16 @@ class RadioService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForegroundWithNotification()
         intent?.let {
-            when (it.getStringExtra("ACTION")) {
-                "PLAY_STATION" -> {
+            // دعم أزرار الإشعار (action) بالإضافة لـ extra ACTION
+            when {
+                it.action == RadioActionReceiver.ACTION_PLAY_PAUSE -> {
+                    if (isPlaying()) pausePlayback() else resumePlayback()
+                    updateNotification()
+                }
+                it.action == RadioActionReceiver.ACTION_STOP -> {
+                    closeApp()
+                }
+                it.getStringExtra("ACTION") == "PLAY_STATION" -> {
                     val title = it.getStringExtra("TITLE") ?: "راديو جو PRO"
                     val uuid = it.getStringExtra("UUID") ?: ""
                     val pUrl = it.getStringExtra("PRIMARY_URL") ?: ""
@@ -219,12 +228,28 @@ class RadioService : Service() {
             .setHandleAudioBecomingNoisy(true)
             .build()
         player.setWakeMode(C.WAKE_MODE_NETWORK)
+
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 handlePlaybackError(error)
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 updateNotification()
+            }
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                // ✅ سجّل نجاح المحطة في DB → تظهر دائمًا
+                if (playbackState == Player.STATE_READY && currentStationUuid.isNotBlank()) {
+                    serviceScope.launch {
+                        try {
+                            AppDatabase.getDatabase(applicationContext).stationDao().updateHealth(
+                                uuid = currentStationUuid,
+                                works = true,
+                                failCount = 0,
+                                timestamp = System.currentTimeMillis()
+                            )
+                        } catch (_: Exception) {}
+                    }
+                }
             }
         })
     }
@@ -252,6 +277,23 @@ class RadioService : Service() {
             }
         } else {
             retryCount = 0
+            // ❌ فشل نهائي → سجّل المحطة كـ dead في DB → تختفي من القائمة
+            if (currentStationUuid.isNotBlank()) {
+                serviceScope.launch {
+                    try {
+                        val dao = AppDatabase.getDatabase(applicationContext).stationDao()
+                        val station = dao.getStationById(currentStationUuid)
+                        if (station != null) {
+                            dao.updateHealth(
+                                uuid = currentStationUuid,
+                                works = false,
+                                failCount = station.failCount + 1,
+                                timestamp = System.currentTimeMillis()
+                            )
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
         }
     }
 
