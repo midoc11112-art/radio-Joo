@@ -51,7 +51,6 @@ interface StationDao {
     @Query("DELETE FROM stations WHERE isFavorite = 0 AND lastUrlWorks = 0 AND failCount >= 3")
     suspend fun cleanupDeadStations()
 
-    // دالة جديدة لإعادة ضبط الفحص (عشان الريفريش)
     @Query("UPDATE stations SET lastUrlWorks = NULL, failCount = 0")
     suspend fun resetAllHealthStatus()
 }
