@@ -46,7 +46,7 @@ class RadioRepository(
     val healthComplete: SharedFlow<HealthCheckResult> = _healthComplete.asSharedFlow()
 
     private val apiClient = OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build()
-    private val healthClient = OkHttpClient.Builder().connectTimeout(4, TimeUnit.SECONDS).readTimeout(4, TimeUnit.SECONDS).followRedirects(true).retryOnConnectionFailure(false).build()
+    private val healthClient = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS).readTimeout(5, TimeUnit.SECONDS).followRedirects(true).retryOnConnectionFailure(false).build()
     private val healthSemaphore = Semaphore(6)
 
     val allStations: Flow<List<StationEntity>> = stationDao.getVisibleStations()
