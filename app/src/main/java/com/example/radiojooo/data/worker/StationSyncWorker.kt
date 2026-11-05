@@ -13,8 +13,8 @@ class StationSyncWorker(
     override suspend fun doWork(): Result {
         return try {
             val repository = RadioRepository(applicationContext)
+            // بنجلب المحطات الجديدة بس، من غير أي فحص بيخفي المحطات
             repository.fetchStationsFromServer()
-            repository.runHealthChecks(batchSize = 30)
             Result.success()
         } catch (e: Exception) {
             Result.retry()
