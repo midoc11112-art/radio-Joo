@@ -1,22 +1,32 @@
 package com.example.radiojooo.ui
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.view.View
+import android.widget.Toast
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.repeatOnLifecycle
-import com.example.radiojooo.R
+import androidx.media3.common.util.UnstableApi
 import com.example.radiojooo.databinding.ActivityPlayerBinding
 import com.example.radiojooo.player.RadioService
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.launch
+import java.util.Locale
 
+@UnstableApi
 class PlayerActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityPlayerBinding
     private val viewModel: RadioViewModel by viewModels()
+
+    private val updateHandler = Handler(Looper.getMainLooper())
+    private val updateRunnable = object : Runnable {
+        override fun run() {
+            updatePlayerUI()
+            updateHandler.postDelayed(this, 1000)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -24,43 +34,62 @@ class PlayerActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         setupListeners()
-        observeViewModel()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        RadioService.getInstance()?.setAppForegroundState(true)
+        updateHandler.post(updateRunnable)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        RadioService.getInstance()?.setAppForegroundState(false)
+        updateHandler.removeCallbacks(updateRunnable)
     }
 
     private fun setupListeners() {
-        binding.buttonBack.setOnClickListener {
+        binding.btnBack.setOnClickListener {
             finish()
         }
 
-        binding.buttonPlayPause.setOnClickListener {
-            val intent = Intent(this, RadioService::class.java).apply {
-                action = RadioService.ACTION_PLAY_PAUSE
-            }
-            startService(intent)
+        binding.btnPlayPause.setOnClickListener {
+            val service = RadioService.getInstance() ?: return@setOnClickListener
+            if (service.isPlaying()) service.pausePlayback() else service.resumePlayback()
         }
 
-        binding.buttonFavorite.setOnClickListener {
-            viewModel.currentPlayingStation.value?.let { station ->
-                viewModel.toggleFavorite(station)
+        binding.btnRecord.setOnClickListener {
+            val service = RadioService.getInstance() ?: return@setOnClickListener
+            val isRec = service.toggleRecording()
+            binding.tvRecordingStatus.visibility = if (isRec) View.VISIBLE else View.GONE
+        }
+
+        binding.btnOpenFolder.setOnClickListener {
+            val service = RadioService.getInstance() ?: return@setOnClickListener
+            val folder = service.getRecordingsFolder()
+            try {
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(Uri.fromFile(folder), "*/*")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(intent)
+            } catch (e: Exception) {
+                Toast.makeText(this, "مجلد التسجيلات: ${folder.absolutePath}", Toast.LENGTH_LONG).show()
             }
         }
     }
 
-    private fun observeViewModel() {
-        lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                viewModel.currentPlayingStation.collectLatest { station ->
-                    if (station != null) {
-                        binding.textViewStationTitle.text = station.name
-                        binding.textViewCategory.text = station.category
-                        binding.textViewCountry.text = station.countryCode
-                        val favIcon = if (station.isFavorite) R.drawable.ic_favorite_filled else R.drawable.ic_favorite_border
-                        binding.buttonFavorite.setImageResource(favIcon)
-                    } else {
-                        finish()
-                    }
-                }
-            }
-        }
+    private fun updatePlayerUI() {
+        val service = RadioService.getInstance() ?: return
+        val currentStation = viewModel.currentPlayingStation.value
+
+        binding.tvStationTitle.text = currentStation?.name ?: service.currentTitle
+        binding.btnPlayPause.text = if (service.isPlaying()) "إيقاف مؤقت ⏸️" else "تشغيل 🔴"
+
+        binding.tvDataUsage.text = String.format(Locale.US, "%.2f MB", service.totalDataMb)
+        binding.tvListeningTime.text = service.getListeningDurationFormatted()
+        binding.tvConnectionSpeed.text = String.format(Locale.US, "%.1f KB/s", service.currentSpeedKbps)
+
+        binding.tvRecordingStatus.visibility = if (service.isRecording) View.VISIBLE else View.GONE
     }
 }
