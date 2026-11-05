@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
@@ -72,7 +73,22 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
         initialValue = emptyList()
     )
 
-    val categoryCounts: StateFlow> = repository.allStations.map { list ->
+    val categoryCounts: StateFlow> = repository.allStations
+        .map { list -> calculateCounts(list) }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyMap()
+        )
+
+    init {
+        viewModelScope.launch {
+            repository.ensureInitialDataLoaded()
+            refreshData()
+        }
+    }
+
+    private fun calculateCounts(list: List<StationEntity>): Map<String, Int> {
         val result = HashMap<String, Int>()
         result["ALL"] = list.size
         result["FAVORITES"] = list.count { it.isFavorite }
@@ -81,18 +97,7 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
             val count = result[cat] ?: 0
             result[cat] = count + 1
         }
-        result
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
-        initialValue = emptyMap()
-    )
-
-    init {
-        viewModelScope.launch {
-            repository.ensureInitialDataLoaded()
-            refreshData()
-        }
+        return result
     }
 
     fun setSearchQuery(query: String) {
