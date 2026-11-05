@@ -93,9 +93,9 @@ class RadioRepository(
                     Log.d("RadioRepository", "بدء فحص $totalToCheck محطة...")
                     var totalHealthy = 0
                     var safety = 0
-                    while (safety < 50 && stationDao.getUncheckedCount() > 0) {
-                        totalHealthy += runHealthChecks(batchSize = 30)
-                        _healthChecked.value = minOf(_healthChecked.value + 30, totalToCheck)
+                    while (safety < 100 && stationDao.getUncheckedCount() > 0) {
+                        totalHealthy += runHealthChecks(batchSize = 50)
+                        _healthChecked.value = minOf(_healthChecked.value + 50, totalToCheck)
                         safety++
                     }
                     stationDao.cleanupDeadStations()
@@ -108,7 +108,7 @@ class RadioRepository(
         }
     }
 
-    suspend fun runHealthChecks(batchSize: Int = 30): Int = coroutineScope {
+    suspend fun runHealthChecks(batchSize: Int = 50): Int = coroutineScope {
         var healthyCount = 0
         try {
             val unchecked = stationDao.getUncheckedStations(batchSize)
