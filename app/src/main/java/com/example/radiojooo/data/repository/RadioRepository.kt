@@ -24,6 +24,7 @@ import okhttp3.Request
 import okhttp3.Response
 import org.json.JSONObject
 import java.io.File
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 data class HealthCheckResult(val total: Int, val healthy: Int)
@@ -46,7 +47,7 @@ class RadioRepository(
 
     private val apiClient = OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build()
     private val healthClient = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS).readTimeout(5, TimeUnit.SECONDS).followRedirects(true).retryOnConnectionFailure(true).build()
-    private val healthSemaphore = Semaphore(10) // زيادة عدد الفحوص المتوازية
+    private val healthSemaphore = Semaphore(10)
 
     val allStations: Flow<List<StationEntity>> = stationDao.getVisibleStations()
 
@@ -73,7 +74,7 @@ class RadioRepository(
         var healthyCount = 0
         try {
             val unchecked = stationDao.getUncheckedStations(batchSize)
-            val staleThreshold = System.currentTimeMillis() - 12 * 60 * 60 * 1000L // إعادة فحص القديمة كل 12 ساعة
+            val staleThreshold = System.currentTimeMillis() - 12 * 60 * 60 * 1000L
             val stale = stationDao.getStaleVerifiedStations(staleThreshold, batchSize / 2)
             val toCheck = (unchecked + stale).distinctBy { it.uuid }
             if (toCheck.isEmpty()) return@coroutineScope 0
@@ -83,7 +84,7 @@ class RadioRepository(
             }.awaitAll()
 
             healthyCount = results.count { it.second }
-            if (healthyCount == 0 && results.size >= 5) return@coroutineScope 0 // حماية من انقطاع الشبكة
+            if (healthyCount == 0 && results.size >= 5) return@coroutineScope 0
 
             for ((station, works) in results) {
                 val newFailCount = if (works) 0 else station.failCount + 1
@@ -111,6 +112,20 @@ class RadioRepository(
         return contentType.contains("audio") || contentType.contains("mpeg") || contentType.contains("mpegurl") || contentType.contains("octet-stream")
     }
 
+    // ✅ الدالة اللي كانت ناقصة وسببت الخطأ
+    suspend fun checkForUpdates(): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val lastUpdate = stationDao.getLastUpdateTime() ?: 0L
+            val currentTime = System.currentTimeMillis()
+            val twoHours = 2 * 60 * 60 * 1000L
+            if (lastUpdate == 0L || (currentTime - lastUpdate) > twoHours) {
+                fetchStationsFromServer()
+                return@withContext true
+            }
+        } catch (e: Exception) { e.printStackTrace() }
+        return@withContext false
+    }
+
     suspend fun ensureInitialDataLoaded() {
         withContext(Dispatchers.IO) {
             try {
@@ -132,6 +147,17 @@ class RadioRepository(
     }
 
     suspend fun toggleFavorite(uuid: String, currentStatus: Boolean) = stationDao.updateFavoriteStatus(uuid, !currentStatus)
+
+    // ✅ دالة البروكسي اللي كانت ناقصة برضه
+    fun wrapProxy(rawUrl: String): String {
+        if (rawUrl.isBlank()) return ""
+        if (rawUrl.contains("radio-joo-proxy")) return rawUrl
+        return try {
+            PROXY_BASE_URL + "/?url=" + URLEncoder.encode(rawUrl, "UTF-8")
+        } catch (e: Exception) {
+            PROXY_BASE_URL + "/?url=" + rawUrl
+        }
+    }
 
     private fun parseStations(stationsArray: org.json.JSONArray): List<StationEntity> {
         val stations = mutableListOf<StationEntity>()
