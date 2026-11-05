@@ -36,7 +36,6 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import androidx.media3.exoplayer.source.FilteringMediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import com.example.radiojooo.R
 import com.example.radiojooo.data.local.AppDatabase
@@ -117,7 +116,7 @@ class RadioService : Service() {
     var sleepTimeRemainingMs = 0L
         private set
     private var retryCount = 0
-    private val maxRetries = 3
+    private val maxRetries = 5 // زيادة عدد المحاولات
     private val statsHandler = Handler(Looper.getMainLooper())
     private val statsRunnable = object : Runnable {
         override fun run() {
@@ -144,7 +143,6 @@ class RadioService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // ✅ تشغيل Foreground بنوع MediaPlayback عشان النظام ميقفلوش
         startForegroundWithNotification()
         
         intent?.let {
@@ -168,7 +166,6 @@ class RadioService : Service() {
                 }
             }
         }
-        // ✅ START_STICKY عشان النظام يعيد التشغيل لو قتل الخدمة
         return START_STICKY
     }
 
@@ -185,10 +182,7 @@ class RadioService : Service() {
         super.onDestroy()
     }
 
-    // ✅ عدم إيقاف الخدمة عند إزالة التطبيق من قائمة التطبيقات الأخيرة
-    override fun onTaskRemoved(rootIntent: Intent?) {
-        // لا نفعل شيئاً، الخدمة تستمر في العمل
-    }
+    override fun onTaskRemoved(rootIntent: Intent?) {}
 
     private fun initializePlayer() {
         val renderersFactory = DefaultRenderersFactory(this).apply {
@@ -197,28 +191,34 @@ class RadioService : Service() {
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters()
                 .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
-                .setMaxVideoSize(1, 1)
-                .setForceHighestSupportedBitrate(false)
-                .setMaxAudioBitrate(48000)
+                // ✅ إزالة القيد على الـ Bitrate لضمان تشغيل كل المحطات
                 .build()
         }
+        // ✅ زيادة الـ Buffer لتحمل تقلبات الشبكة
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(3000, 8000, 500, 1000)
-            .setTargetBufferBytes(128 * 1024)
-            .setPrioritizeTimeOverSizeThresholds(true)
-            .setBackBuffer(0, false)
+            .setBufferDurationsMs(
+                15000, // minBufferMs (15 ثانية)
+                60000, // maxBufferMs (60 ثانية)
+                2500,  // bufferForPlaybackMs
+                5000   // bufferForPlaybackAfterRebufferMs
+            )
+            .setTargetBufferBytes(-1) // استخدام الافتراضي
             .build()
+            
+        // ✅ إعدادات مصدر البيانات ليكون أكثر تسامحاً
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(15000)
-            .setReadTimeoutMs(15000)
+            .setConnectTimeoutMs(30000) // 30 ثانية
+            .setReadTimeoutMs(30000) // 30 ثانية
             .setAllowCrossProtocolRedirects(true)
             .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
             .setDefaultRequestProperties(mapOf(
                 "Accept" to "audio/*",
                 "Icy-MetaData" to "0"
             ))
+            
         mediaSourceFactory = DefaultMediaSourceFactory(this)
             .setDataSourceFactory(dataSourceFactory)
+            
         player = ExoPlayer.Builder(this, renderersFactory)
             .setTrackSelector(trackSelector)
             .setLoadControl(loadControl)
@@ -230,19 +230,19 @@ class RadioService : Service() {
                     .build(),
                 true
             )
-            .setHandleAudioBecomingNoisy(true)
+            // ✅ تعطيل معالجة فصل السماعة (لأنها أحياناً بتسبب مشاكل)
+            .setHandleAudioBecomingNoisy(false) 
             .build()
-        // ✅ setWakeMode لضمان بقاء الشبكة شغالة
+            
         player.setWakeMode(C.WAKE_MODE_NETWORK)
+        
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 handlePlaybackError(error)
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 updateNotification()
-                if (isPlaying) {
-                    acquireLocks() // تأكيد الأقفال أثناء التشغيل
-                }
+                if (isPlaying) acquireLocks()
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_READY && currentStationUuid.isNotBlank()) {
@@ -264,24 +264,12 @@ class RadioService : Service() {
     private fun handlePlaybackError(error: PlaybackException) {
         retryCount++
         if (retryCount <= maxRetries) {
-            when {
-                !isUsingProxy -> {
-                    statsHandler.postDelayed({
-                        val currentUrl = availableUrls.getOrNull(currentUrlIndex) ?: return@postDelayed
-                        startStream(currentUrl, useProxy = true)
-                    }, 2000)
+            // محاولة إعادة التشغيل بعد فترة
+            statsHandler.postDelayed({
+                if (availableUrls.isNotEmpty()) {
+                    startStream(availableUrls.getOrNull(currentUrlIndex) ?: availableUrls[0], useProxy = true)
                 }
-                availableUrls.size > 1 -> {
-                    statsHandler.postDelayed({ tryNextMirrorServer() }, 3000)
-                }
-                else -> {
-                    statsHandler.postDelayed({
-                        val currentUrl = availableUrls.getOrNull(currentUrlIndex) ?: return@postDelayed
-                        val normalizedUrl = normalizeUrl(currentUrl)
-                        if (normalizedUrl != currentUrl) startStream(normalizedUrl, useProxy = true)
-                    }, 4000)
-                }
-            }
+            }, 3000L * retryCount)
         } else {
             retryCount = 0
             if (currentStationUuid.isNotBlank()) {
@@ -389,7 +377,6 @@ class RadioService : Service() {
     private fun startForegroundWithNotification() {
         val notification = buildNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // ✅ النوع الصحيح لخدمة الميديا
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
         } else {
             startForeground(NOTIFICATION_ID, notification)
@@ -413,7 +400,7 @@ class RadioService : Service() {
         stationStartTimeMs = System.currentTimeMillis()
         if (availableUrls.isNotEmpty()) startStream(availableUrls[0], useProxy = true)
         updateNotification()
-        acquireLocks() // ✅ تأكيد الأقفال عند بدء التشغيل
+        acquireLocks()
     }
 
     private fun startStream(streamUrl: String, useProxy: Boolean = false) {
@@ -441,12 +428,14 @@ class RadioService : Service() {
                 .setMimeType(mimeType)
                 .setMediaMetadata(metadata)
                 .build()
+                
+            // ✅ استخدام المصدر المباشر بدون FilteringMediaSource
             val mediaSource = mediaSourceFactory.createMediaSource(mediaItem)
-            val filteredSource = FilteringMediaSource(mediaSource, C.TRACK_TYPE_AUDIO)
-            player.setMediaSource(filteredSource)
+            
+            player.setMediaSource(mediaSource)
             player.prepare()
             player.playWhenReady = true
-            acquireLocks() // ✅ تأكيد الأقفال عند بدء البث
+            acquireLocks()
         } catch (e: Exception) {
             e.printStackTrace()
             handlePlaybackError(PlaybackException("Stream error", e, PlaybackException.ERROR_CODE_UNSPECIFIED))
@@ -484,7 +473,7 @@ class RadioService : Service() {
             val pm = getSystemService(POWER_SERVICE) as PowerManager
             if (wakeLock == null || wakeLock?.isHeld == false) {
                 wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "RadioJoo::ServiceWakeLock")
-                wakeLock?.acquire(10 * 60 * 60 * 1000L) // 10 ساعات كحد أقصى
+                wakeLock?.acquire(10 * 60 * 60 * 1000L)
             }
             val wm = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
             if (wifiLock == null || wifiLock?.isHeld == false) {
