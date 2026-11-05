@@ -183,11 +183,12 @@ class RadioService : Service() {
                 try { bufferTimeoutHandler.removeCallbacks(bufferTimeoutRunnable); handlePlaybackError(error) } catch (t: Throwable) {}
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (isPlaying) {
-                    hasPlayedSuccessfully = true
+                try {
+                    updateNotification()
+                    if (isPlaying) {
                         acquireLocks()
                         bufferTimeoutHandler.removeCallbacks(bufferTimeoutRunnable)
-                        toast("▶️ ${currentTitle}")
+                        hasPlayedSuccessfully = true
                         if (currentStationUuid.isNotBlank()) {
                             serviceScope.launch {
                                 try {
@@ -212,7 +213,6 @@ class RadioService : Service() {
         
         val urls = synchronized(availableUrls) { availableUrls.toList() }
         
-        // 1. تجربة الرابط الاحتياطي التالي (إن وجد)
         if (currentUrlIndex < urls.size - 1) {
             currentUrlIndex++
             toast("🔄 محاولة خادم بديل (${currentUrlIndex + 1}/${urls.size})")
@@ -222,7 +222,6 @@ class RadioService : Service() {
             return
         }
 
-        // 2. إعادة محاولة الرابط الحالي
         retryCount++
         if (retryCount <= maxRetries) {
             val delayMs = when (retryCount) { 1 -> 2000L; 2 -> 4000L; else -> 8000L }
@@ -233,12 +232,11 @@ class RadioService : Service() {
             return
         }
 
-        // 3. اللجوء للذكاء الاصطناعي (Heal)
         retryCount = 0
         if (currentStationUuid.isBlank() || isDestroyed.get()) return
         if (!isHealing.compareAndSet(false, true)) return
 
-        toast("🧠 Oracle AI يبحث عن بدائل...")
+        toast("🧠 Oracle AI يبحث...")
         
         val uuidToHeal = currentStationUuid
         val errCap = "unknown"
@@ -258,6 +256,7 @@ class RadioService : Service() {
                     val newUrl = healResult.url
                     toast("🔍 تم العثور على: ${healResult.matchedName}")
                     delay(2000L) // عرض الاسم لمدة ثانيتين
+                    
                     val isValidAudio = withContext(Dispatchers.IO) {
                         try {
                             val probe = URL(newUrl).openConnection().apply { connectTimeout = 5000; readTimeout = 5000 }
@@ -267,12 +266,11 @@ class RadioService : Service() {
                         } catch (e: Exception) { false }
                     }
                     if (isValidAudio) {
-                        toast("✅ وجدت بديلاً شغالاً")
                         statsHandler.post {
                             try {
                                 if (!isDestroyed.get() && ::player.isInitialized) {
                                     synchronized(availableUrls) { availableUrls.clear(); availableUrls.add(newUrl) }
-                                    currentUrlIndex = 0; retryCount = 0
+                                    currentUrlIndex = 0; retryCount = 0; hasPlayedSuccessfully = false
                                     startStream(newUrl, useProxy = true)
                                 }
                             } catch (t: Throwable) {} finally { isHealing.set(false) }

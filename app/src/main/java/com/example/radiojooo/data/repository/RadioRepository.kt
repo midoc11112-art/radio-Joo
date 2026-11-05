@@ -98,7 +98,6 @@ class RadioRepository(
         return@withContext stationDao.getTotalCount()
     }
 
-    // ✅ لا فحص تلقائي - فقط جلب + عرض كل المحطات
     suspend fun ensureInitialDataLoaded() {
         try {
             dbMutex.withLock {
@@ -106,12 +105,10 @@ class RadioRepository(
                 _healthChecked.value = 0
                 fetchStationsFromServer()
             }
-            // لا performHealthChecks هنا!
             _healthComplete.emit(HealthCheckResult(0, 0))
         } catch (t: Throwable) { Log.e("RadioRepository", "Init: ${t.message}") }
     }
 
-    // ✅ الريفريش اليدوي فقط يفحص
     suspend fun forceRefreshAll() {
         try {
             dbMutex.withLock {
@@ -186,4 +183,3 @@ class RadioRepository(
         return list
     }
 }
-
