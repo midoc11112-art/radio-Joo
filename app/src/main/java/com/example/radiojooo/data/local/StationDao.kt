@@ -9,10 +9,10 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface StationDao {
-
     @Query("SELECT * FROM stations ORDER BY popularity DESC")
     fun getAllStations(): Flow<List<StationEntity>>
 
+    // استعلام حاسم: يعرض فقط المحطات التي تعمل، أو المحطات الشعبية التي لم يتم فحصها بعد
     @Query("""
         SELECT * FROM stations 
         WHERE (lastUrlWorks = 1 AND failCount < 3)
