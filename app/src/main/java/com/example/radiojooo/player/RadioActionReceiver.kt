@@ -6,14 +6,9 @@ import android.content.Intent
 
 class RadioActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        val service = RadioService.getInstance() ?: return
-        when (intent.action) {
-            ACTION_PLAY_PAUSE -> {
-                if (service.isPlaying()) service.pausePlayback() else service.resumePlayback()
-                service.updateNotification()
-            }
-            ACTION_STOP -> service.closeApp()
-        }
+        val serviceIntent = Intent(context, RadioService::class.java)
+        serviceIntent.action = intent.action
+        context.startService(serviceIntent)
     }
 
     companion object {
