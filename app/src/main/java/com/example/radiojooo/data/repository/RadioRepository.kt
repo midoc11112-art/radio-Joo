@@ -47,8 +47,10 @@ class RadioRepository(
     val healthComplete: SharedFlow<HealthCheckResult> = _healthComplete.asSharedFlow()
 
     private val apiClient = OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build()
-    private val healthClient = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(10, TimeUnit.SECONDS).followRedirects(true).retryOnConnectionFailure(true).build()
-    private val healthSemaphore = Semaphore(10)
+    private val healthClient = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS).readTimeout(5, TimeUnit.SECONDS).followRedirects(true).retryOnConnectionFailure(true).build()
+    
+    // 🚀 السر هنا: رفع التزامن من 10 إلى 150 محطة في نفس اللحظة
+    private val healthSemaphore = Semaphore(150)
 
     val allStations: Flow<List<StationEntity>> = stationDao.getVisibleStations()
 
@@ -82,33 +84,55 @@ class RadioRepository(
                 Log.d("RadioRepository", "اكتمل جلب المحطات، استعداداً للفحص...")
                 
                 delay(500)
-
-                val uncheckedAtStart = stationDao.getUncheckedCount()
-                val staleAtStart = stationDao.getStaleVerifiedStations(System.currentTimeMillis() - 24 * 60 * 60 * 1000L, Int.MAX_VALUE).size
-                val totalToCheck = uncheckedAtStart + staleAtStart
-                _healthTotal.value = totalToCheck
-                _healthChecked.value = 0
-
-                if (totalToCheck > 0) {
-                    Log.d("RadioRepository", "بدء فحص $totalToCheck محطة...")
-                    var totalHealthy = 0
-                    var safety = 0
-                    while (safety < 100 && stationDao.getUncheckedCount() > 0) {
-                        totalHealthy += runHealthChecks(batchSize = 50)
-                        _healthChecked.value = minOf(_healthChecked.value + 50, totalToCheck)
-                        safety++
-                    }
-                    stationDao.cleanupDeadStations()
-                    _healthChecked.value = totalToCheck
-                    _healthComplete.emit(HealthCheckResult(totalToCheck, totalHealthy))
-                } else {
-                    _healthComplete.emit(HealthCheckResult(0, 0))
-                }
+                performHealthChecks()
             } catch (e: Exception) { Log.e("RadioRepository", "InitError: ${e.message}") }
         }
     }
 
-    suspend fun runHealthChecks(batchSize: Int = 50): Int = coroutineScope {
+    // 🚀 دالة جديدة مخصصة للريفريش الشامل
+    suspend fun forceRefreshAll() = withContext(Dispatchers.IO) {
+        try {
+            Log.d("RadioRepository", "بدأ الريفريش الشامل...")
+            // 1. مسح حالة الفحص القديمة
+            stationDao.resetAllHealthStatus()
+            
+            // 2. جلب المحطات الجديدة
+            fetchStationsFromServer()
+            
+            // 3. فحص كل حاجة من الأول
+            delay(500)
+            performHealthChecks()
+        } catch (e: Exception) {
+            Log.e("RadioRepository", "Refresh error: ${e.message}")
+        }
+    }
+
+    private suspend fun performHealthChecks() {
+        val uncheckedAtStart = stationDao.getUncheckedCount()
+        val staleAtStart = stationDao.getStaleVerifiedStations(System.currentTimeMillis() - 24 * 60 * 60 * 1000L, Int.MAX_VALUE).size
+        val totalToCheck = uncheckedAtStart + staleAtStart
+        _healthTotal.value = totalToCheck
+        _healthChecked.value = 0
+
+        if (totalToCheck > 0) {
+            Log.d("RadioRepository", "بدء فحص $totalToCheck محطة...")
+            var totalHealthy = 0
+            var safety = 0
+            // فحص دفعات كبيرة (200 محطة لكل دفعة)
+            while (safety < 100 && stationDao.getUncheckedCount() > 0) {
+                totalHealthy += runHealthChecks(batchSize = 200)
+                _healthChecked.value = minOf(_healthChecked.value + 200, totalToCheck)
+                safety++
+            }
+            stationDao.cleanupDeadStations()
+            _healthChecked.value = totalToCheck
+            _healthComplete.emit(HealthCheckResult(totalToCheck, totalHealthy))
+        } else {
+            _healthComplete.emit(HealthCheckResult(0, 0))
+        }
+    }
+
+    suspend fun runHealthChecks(batchSize: Int = 200): Int = coroutineScope {
         var healthyCount = 0
         try {
             val unchecked = stationDao.getUncheckedStations(batchSize)
@@ -117,6 +141,7 @@ class RadioRepository(
             val toCheck = (unchecked + stale).distinctBy { it.uuid }
             if (toCheck.isEmpty()) return@coroutineScope 0
 
+            // 150 محطة بتتفحص مع بعض في نفس اللحظة
             val results = toCheck.map { station ->
                 async(Dispatchers.IO) { healthSemaphore.withPermit { station to checkStationHealth(station.primaryUrl) } }
             }.awaitAll()

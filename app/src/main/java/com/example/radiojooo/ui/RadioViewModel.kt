@@ -97,9 +97,22 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
             _currentPlayingStation.value = _currentPlayingStation.value?.let { if (it.uuid == station.uuid) it.copy(isFavorite = !station.isFavorite) else it }
         }
     }
+    
+    // 🚀 التعديل هنا: الريفريش بينادي forceRefreshAll (جلب + فحص شامل)
     fun refreshData() {
         viewModelScope.launch(Dispatchers.IO) {
-            try { _isLoading.value = true; _refreshResult.emit(repository.fetchStationsFromServer()); _isLoading.value = false } catch (e: Exception) { _isLoading.value = false }
+            try { 
+                _isLoading.value = true; 
+                repository.forceRefreshAll()
+                _refreshResult.emit(stationDaoCount()) 
+                _isLoading.value = false 
+            } catch (e: Exception) { 
+                _isLoading.value = false 
+            }
         }
+    }
+    
+    private suspend fun stationDaoCount(): Int {
+        return AppDatabase.getDatabase(getApplication()).stationDao().getTotalCount()
     }
 }
