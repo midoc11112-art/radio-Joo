@@ -1,4 +1,4 @@
-package com.example.radiojooo.player
+﻿package com.example.radiojooo.player
 
 import android.app.*
 import android.content.Context
@@ -338,10 +338,10 @@ class RadioService : Service() {
     private fun buildNotification(): Notification {
         val contentIntent = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val stopIntent = PendingIntent.getBroadcast(this, 1,
+        val stopPendingIntent = PendingIntent.getBroadcast(this, 1,
             Intent(RadioActionReceiver.ACTION_STOP).apply { setPackage(packageName) },
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val playPauseIntent = PendingIntent.getBroadcast(this, 0,
+        val playPausePendingIntent = PendingIntent.getBroadcast(this, 0,
             Intent(RadioActionReceiver.ACTION_PLAY_PAUSE).apply { setPackage(packageName) },
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
