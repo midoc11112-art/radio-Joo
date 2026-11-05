@@ -175,7 +175,7 @@ class RadioRepository(
         "jazeera", "الجزيرة", "sky news", "سكاي", "arabiya", "العربية", "bbc", "mbc",
         "monte carlo", "مونت كارلو", "quran", "قرآن", "nagham", "نغم", "nogoum", "نجوم",
         "9090", "mix fm", "hits", "sha3bi", "rotana", "روتانا", "fairuz", "فيروز",
-        "um kulthum", "om kalthoum", "أم كلثوم", "amr diab", "迪اب", "diab", "nrj",
+        "um kulthum", "om kalthoum", "أم كلثوم", "amr diab", "دياب", "diab", "nrj",
         "medina", "aswat", "أصوات", "orient", "ajyal", "sumair", "sumer", "hala",
         "mona", "lbc", "sawt el ghad", "نساء", "إذاعة", "راديو", "radio"
     )
