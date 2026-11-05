@@ -1,4 +1,4 @@
-﻿package com.example.radiojooo.player
+package com.example.radiojooo.player
 
 import android.app.*
 import android.content.Context
@@ -33,18 +33,24 @@ import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
 class RadioService : Service() {
+
     companion object {
         private var instance: RadioService? = null
         private const val CHANNEL_ID = "radio_joo_service_channel"
         private const val NOTIFICATION_ID = 1001
         fun getInstance(): RadioService? = instance
-        fun requestPlayStation(context: Context, title: String, uuid: String, pUrl: String, fUrl: String, bitrate: Int = 0, category: String = "", country: String = "") {
+
+        fun requestPlayStation(
+            context: Context, title: String, uuid: String, pUrl: String, fUrl: String,
+            bitrate: Int = 0, category: String = "", country: String = ""
+        ) {
             val intent = Intent(context, RadioService::class.java).apply {
                 putExtra("ACTION", "PLAY_STATION"); putExtra("TITLE", title); putExtra("UUID", uuid)
                 putExtra("PRIMARY_URL", pUrl); putExtra("FALLBACK_URL", fUrl); putExtra("BITRATE", bitrate)
                 putExtra("CATEGORY", category); putExtra("COUNTRY", country)
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
+            else context.startService(intent)
         }
     }
 
@@ -81,45 +87,161 @@ class RadioService : Service() {
     private val maxRetries = 3
     private val statsHandler = Handler(Looper.getMainLooper())
     private val bufferTimeoutHandler = Handler(Looper.getMainLooper())
-    private val statsRunnable = object : Runnable { override fun run() { if (isAppInForeground) { calculateDataUsage(); statsHandler.postDelayed(this, 1000) } } }
+    private val statsRunnable = object : Runnable {
+        override fun run() {
+            if (isAppInForeground) { calculateDataUsage(); statsHandler.postDelayed(this, 1000) }
+        }
+    }
+    
     private val bufferTimeoutRunnable = Runnable {
         try {
             if (::player.isInitialized && player.playbackState == Player.STATE_BUFFERING && !player.isPlaying) {
                 toast("⏱️ البث متجمد...")
                 handlePlaybackError(PlaybackException("Buffer timeout", null, PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT))
             }
+        } catch (t: Throwable) {}
+    }
 
-    private fun handlePlaybackError(error: PlaybackException) {
-        retryCount++
-        val errorType = when (error.errorCode) {
-            PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> "403"
-            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> "timeout"
-            PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND -> "not_found"
-            else -> "unknown"
+    private val isHealing = AtomicBoolean(false)
+    private val isDestroyed = AtomicBoolean(false)
+    private val repoInstance: RadioRepository by lazy { RadioRepository(applicationContext) }
+
+    inner class LocalBinder : Binder() { fun getService(): RadioService = this@RadioService }
+    override fun onBind(intent: Intent?): IBinder = binder
+
+    private fun toast(msg: String) {
+        try { Handler(Looper.getMainLooper()).post { Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show() } } catch (t: Throwable) {}
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        instance = this
+        createNotificationChannel()
+        acquireLocks()
+        initializePlayer()
+        statsHandler.post(statsRunnable)
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        try { startForegroundWithNotification() } catch (t: Throwable) {}
+        intent?.let {
+            when {
+                it.action == RadioActionReceiver.ACTION_PLAY_PAUSE -> {
+                    if (isPlaying()) pausePlayback() else resumePlayback(); updateNotification()
+                }
+                it.action == RadioActionReceiver.ACTION_STOP -> closeApp()
+                it.getStringExtra("ACTION") == "PLAY_STATION" -> {
+                    playStationInternal(
+                        it.getStringExtra("TITLE") ?: "راديو جو",
+                        it.getStringExtra("UUID") ?: "",
+                        it.getStringExtra("PRIMARY_URL") ?: "",
+                        it.getStringExtra("FALLBACK_URL") ?: "",
+                        it.getIntExtra("BITRATE", 0),
+                        it.getStringExtra("CATEGORY") ?: "",
+                        it.getStringExtra("COUNTRY") ?: ""
+                    )
+                }
+            }
         }
+        return START_STICKY
+    }
 
-        if (retryCount <= maxRetries) {
-            val delayMs = when (retryCount) { 1 -> 2000L; 2 -> 4000L; else -> 8000L }
-            toast("🔄 إعادة محاولة $retryCount/3")
-            statsHandler.postDelayed({
+    override fun onDestroy() {
+        isDestroyed.set(true)
+        sleepTimer?.cancel(); stopRecording(); releaseLocks()
+        statsHandler.removeCallbacksAndMessages(null)
+        bufferTimeoutHandler.removeCallbacksAndMessages(null)
+        try { if (::player.isInitialized) player.release() } catch (_: Throwable) {}
+        try { serviceScope.cancel() } catch (_: Throwable) {}
+        instance = null
+        super.onDestroy()
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {}
+
+    private fun initializePlayer() {
+        val renderersFactory = DefaultRenderersFactory(this).apply { setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF) }
+        trackSelector = DefaultTrackSelector(this).apply {
+            parameters = buildUponParameters().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true).setMaxAudioBitrate(48000).build()
+        }
+        val loadControl = DefaultLoadControl.Builder().setBufferDurationsMs(15000, 60000, 2500, 5000).setTargetBufferBytes(-1).build()
+        val dataSourceFactory = DefaultHttpDataSource.Factory()
+            .setConnectTimeoutMs(30000).setReadTimeoutMs(30000).setAllowCrossProtocolRedirects(true)
+            .setUserAgent("Mozilla/5.0 (Linux; Android 13) ExoPlayer/1.6.1")
+            .setDefaultRequestProperties(mapOf("Accept" to "audio/*", "Icy-MetaData" to "0"))
+        mediaSourceFactory = DefaultMediaSourceFactory(this).setDataSourceFactory(dataSourceFactory)
+
+        player = ExoPlayer.Builder(this, renderersFactory)
+            .setTrackSelector(trackSelector).setLoadControl(loadControl).setMediaSourceFactory(mediaSourceFactory)
+            .setAudioAttributes(AudioAttributes.Builder().setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).setUsage(C.USAGE_MEDIA).build(), true)
+            .setHandleAudioBecomingNoisy(false).build()
+        player.setWakeMode(C.WAKE_MODE_NETWORK)
+
+        player.addListener(object : Player.Listener {
+            override fun onPlayerError(error: PlaybackException) {
+                try { bufferTimeoutHandler.removeCallbacks(bufferTimeoutRunnable); handlePlaybackError(error) } catch (t: Throwable) {}
+            }
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
                 try {
-                    if (!isDestroyed.get() && ::player.isInitialized) {
-                        val urls = synchronized(availableUrls) { availableUrls.toList() }
-                        if (urls.isNotEmpty()) startStream(urls.getOrNull(currentUrlIndex) ?: urls[0], useProxy = true)
+                    updateNotification()
+                    if (isPlaying) {
+                        acquireLocks()
+                        bufferTimeoutHandler.removeCallbacks(bufferTimeoutRunnable)
+                        toast("▶️ ${currentTitle}")
+                        if (currentStationUuid.isNotBlank()) {
+                            serviceScope.launch {
+                                try {
+                                    delay(10000)
+                                    if (isPlaying() && currentStationUuid.isNotBlank()) {
+                                        repoInstance.sendFeedback(currentStationUuid, "exo_active", true)
+                                    }
+                                } catch (_: Throwable) {}
+                            }
+                        }
                     }
                 } catch (t: Throwable) {}
+            }
+            override fun onPlaybackStateChanged(state: Int) {
+                try { if (state == Player.STATE_READY) bufferTimeoutHandler.removeCallbacks(bufferTimeoutRunnable) } catch (t: Throwable) {}
+            }
+        })
+    }
+
+    private fun handlePlaybackError(error: PlaybackException) {
+        if (isHealing.get() || isDestroyed.get()) return
+        
+        val urls = synchronized(availableUrls) { availableUrls.toList() }
+        
+        // 1. تجربة الرابط الاحتياطي التالي (إن وجد)
+        if (currentUrlIndex < urls.size - 1) {
+            currentUrlIndex++
+            toast("🔄 محاولة خادم بديل (${currentUrlIndex + 1}/${urls.size})")
+            statsHandler.postDelayed({
+                if (!isDestroyed.get()) startStream(urls[currentUrlIndex], useProxy = true)
+            }, 2000L)
+            return
+        }
+
+        // 2. إعادة محاولة الرابط الحالي
+        retryCount++
+        if (retryCount <= maxRetries) {
+            val delayMs = when (retryCount) { 1 -> 2000L; 2 -> 4000L; else -> 8000L }
+            toast("🔄 إعادة محاولة $retryCount/$maxRetries")
+            statsHandler.postDelayed({
+                if (!isDestroyed.get()) startStream(urls.getOrNull(currentUrlIndex) ?: "", useProxy = true)
             }, delayMs)
             return
         }
 
+        // 3. اللجوء للذكاء الاصطناعي (Heal)
         retryCount = 0
         if (currentStationUuid.isBlank() || isDestroyed.get()) return
         if (!isHealing.compareAndSet(false, true)) return
 
-        toast("🧠 Oracle AI يبحث عن بديل...")
-
+        toast("🧠 Oracle AI يبحث عن بدائل...")
+        
         val uuidToHeal = currentStationUuid
-        val errCap = errorType
+        val errCap = "unknown"
         val countryCap = currentCountry
         val catCap = currentCategory
 
@@ -133,7 +255,6 @@ class RadioService : Service() {
                 val newUrl = withTimeoutOrNull(30000L) { runCatching { repoInstance.neuralHeal(station) }.getOrNull() }
 
                 if (newUrl != null && !isDestroyed.get()) {
-                    // ⚠️ فحص صارم: الرابط الجديد يجب أن يكون صوتاً فعلياً
                     val isValidAudio = withContext(Dispatchers.IO) {
                         try {
                             val probe = URL(newUrl).openConnection().apply { connectTimeout = 5000; readTimeout = 5000 }
@@ -175,17 +296,6 @@ class RadioService : Service() {
             statsHandler.post {
                 try {
                     if (!isDestroyed.get() && ::player.isInitialized) startStream(urls[currentUrlIndex], useProxy = true)
-                } catch (t: Throwable) {}
-            }
-        } else {
-            toast("❌ المحطة غير متاحة حالياً")
-        }
-    }
-        } else if (urls.isNotEmpty()) {
-            toast("🔄 محاولة بدون Proxy")
-            statsHandler.post {
-                try {
-                    if (!isDestroyed.get() && ::player.isInitialized) startStream(urls[0], useProxy = false)
                 } catch (t: Throwable) {}
             }
         } else {
@@ -269,6 +379,7 @@ class RadioService : Service() {
                 .setMediaMetadata(MediaMetadata.Builder().setTitle(currentTitle).build()).build()
             player.setMediaSource(mediaSourceFactory.createMediaSource(mediaItem))
             player.prepare(); player.playWhenReady = true
+            
             bufferTimeoutHandler.removeCallbacks(bufferTimeoutRunnable)
             bufferTimeoutHandler.postDelayed(bufferTimeoutRunnable, 25000L)
         } catch (t: Throwable) { toast("❌ خطأ في التشغيل") }
@@ -294,6 +405,7 @@ class RadioService : Service() {
             }
         } catch (t: Throwable) {}
     }
+
     private fun releaseLocks() {
         try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (t: Throwable) {}
         try { if (wifiLock?.isHeld == true) wifiLock?.release() } catch (t: Throwable) {}
@@ -304,7 +416,9 @@ class RadioService : Service() {
         if (!folder.exists()) folder.mkdirs()
         return folder
     }
+    
     fun toggleRecording(): Boolean { if (isRecording) stopRecording() else startRecording(); return isRecording }
+    
     private fun startRecording() {
         try {
             val urls = synchronized(availableUrls) { availableUrls.toList() }
@@ -327,6 +441,7 @@ class RadioService : Service() {
             }
         } catch (t: Throwable) { isRecording = false }
     }
+    
     private fun stopRecording() { isRecording = false; recordingJob?.cancel(); recordingJob = null }
 
     fun startSleepTimer(minutes: Int) {
