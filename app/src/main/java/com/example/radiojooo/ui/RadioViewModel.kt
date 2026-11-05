@@ -25,7 +25,6 @@ data class CategoryCounts(
     val newsCount: Int = 0,
     val musicCount: Int = 0,
     val sportsCount: Int = 0,
-    val tarabCount: Int = 0,
     val talkCount: Int = 0
 )
 
@@ -87,7 +86,6 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
             newsCount = list.count { it.category.equals("NEWS", true) },
             musicCount = list.count { it.category.equals("MUSIC", true) },
             sportsCount = list.count { it.category.equals("SPORTS", true) },
-            tarabCount = list.count { it.category.equals("TARAB", true) },
             talkCount = list.count { it.category.equals("TALK", true) }
         )
     }

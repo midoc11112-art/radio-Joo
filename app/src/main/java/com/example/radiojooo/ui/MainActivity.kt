@@ -151,7 +151,6 @@ class MainActivity : AppCompatActivity() {
                 R.id.chipNews -> "NEWS"
                 R.id.chipMusic -> "MUSIC"
                 R.id.chipSports -> "SPORTS"
-                R.id.chipTarab -> "TARAB"
                 R.id.chipTalk -> "TALK"
                 else -> "ALL"
             }
@@ -363,7 +362,6 @@ class MainActivity : AppCompatActivity() {
         "MUSIC" -> "الموسيقى"
         "SPORTS" -> "الرياضة"
         "EGYPT" -> "مصر"
-        "TARAB" -> "طرب"
         "TALK" -> "توك شو"
         else -> "عام"
     }
@@ -384,7 +382,6 @@ class MainActivity : AppCompatActivity() {
                 binding.chipNews.text = "📰 الأخبار (${counts.newsCount})"
                 binding.chipMusic.text = "🎵 الموسيقى (${counts.musicCount})"
                 binding.chipSports.text = "⚽ الرياضة (${counts.sportsCount})"
-                binding.chipTarab.text = "🎶 طرب (${counts.tarabCount})"
                 binding.chipTalk.text = "🎙️ توك شو (${counts.talkCount})"
             }
         }

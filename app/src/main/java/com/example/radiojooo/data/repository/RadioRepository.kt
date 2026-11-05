@@ -98,7 +98,6 @@ class RadioRepository(
                         _healthChecked.value = minOf(_healthChecked.value + 30, totalToCheck)
                         safety++
                     }
-                    // ✅ استدعاء الحذف النهائي للمحطات الميتة
                     stationDao.cleanupDeadStations()
                     _healthChecked.value = totalToCheck
                     _healthComplete.emit(HealthCheckResult(totalToCheck, totalHealthy))
@@ -129,7 +128,6 @@ class RadioRepository(
                 val newFailCount = if (works) 0 else station.failCount + 1
                 stationDao.updateHealth(station.uuid, works, newFailCount, System.currentTimeMillis())
             }
-            // ✅ حذف المحطات الميتة (التي وصلت 3 مرات فشل) فوراً بعد الدفعة
             stationDao.cleanupDeadStations()
         } catch (e: Exception) { Log.e("RadioRepository", "HealthCheck error: ${e.message}") }
         return@coroutineScope healthyCount
