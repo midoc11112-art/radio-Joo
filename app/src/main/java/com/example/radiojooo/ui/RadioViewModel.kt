@@ -17,7 +17,17 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
-data class CategoryCounts(val allCount: Int = 0, val favCount: Int = 0, val egyptCount: Int = 0, val quranCount: Int = 0, val newsCount: Int = 0, val musicCount: Int = 0, val sportsCount: Int = 0)
+data class CategoryCounts(
+    val allCount: Int = 0,
+    val favCount: Int = 0,
+    val egyptCount: Int = 0,
+    val quranCount: Int = 0,
+    val newsCount: Int = 0,
+    val musicCount: Int = 0,
+    val sportsCount: Int = 0,
+    val tarabCount: Int = 0,
+    val talkCount: Int = 0
+)
 
 class RadioViewModel(application: Application) : AndroidViewModel(application) {
     private val repository: RadioRepository
@@ -44,8 +54,6 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
         allRawStations = rawFlow.asStateFlow()
 
         viewModelScope.launch { repository.allStations.collect { list -> rawFlow.value = list; updateCategoryCounts(list) } }
-        
-        // ✅ هنا بنشغل دالة واحدة بس مسؤولة عن الجلب ثم الفحص
         viewModelScope.launch(Dispatchers.IO) { repository.ensureInitialDataLoaded() }
 
         val filteredFlow = MutableStateFlow<List<StationEntity>>(emptyList())
@@ -71,7 +79,17 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun updateCategoryCounts(list: List<StationEntity>) {
-        categoryCounts.value = CategoryCounts(list.size, list.count { it.isFavorite }, list.count { it.countryCode.equals("EG", true) || it.category.equals("EGYPT", true) }, list.count { it.category.equals("QURAN", true) }, list.count { it.category.equals("NEWS", true) }, list.count { it.category.equals("MUSIC", true) }, list.count { it.category.equals("SPORTS", true) })
+        categoryCounts.value = CategoryCounts(
+            allCount = list.size,
+            favCount = list.count { it.isFavorite },
+            egyptCount = list.count { it.countryCode.equals("EG", true) || it.category.equals("EGYPT", true) },
+            quranCount = list.count { it.category.equals("QURAN", true) },
+            newsCount = list.count { it.category.equals("NEWS", true) },
+            musicCount = list.count { it.category.equals("MUSIC", true) },
+            sportsCount = list.count { it.category.equals("SPORTS", true) },
+            tarabCount = list.count { it.category.equals("TARAB", true) },
+            talkCount = list.count { it.category.equals("TALK", true) }
+        )
     }
 
     fun setCurrentStation(station: StationEntity?) { _currentPlayingStation.value = station }

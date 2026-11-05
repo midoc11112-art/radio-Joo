@@ -151,6 +151,8 @@ class MainActivity : AppCompatActivity() {
                 R.id.chipNews -> "NEWS"
                 R.id.chipMusic -> "MUSIC"
                 R.id.chipSports -> "SPORTS"
+                R.id.chipTarab -> "TARAB"
+                R.id.chipTalk -> "TALK"
                 else -> "ALL"
             }
             viewModel.selectedCategory.value = category
@@ -210,7 +212,6 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-
         lifecycleScope.launch {
             viewModel.healthComplete.collect { result ->
                 hideHealthProgressChip()
@@ -230,20 +231,14 @@ class MainActivity : AppCompatActivity() {
     private fun updateHealthProgressChip(checked: Int, total: Int) {
         val chip = binding.healthProgressChip
         val overlayVisible = binding.verificationIndicator.visibility == View.VISIBLE
-
         binding.tvHealthProgress.text = "فحص المحطات... $checked/$total"
         binding.pbHealth.progress = if (total > 0) (checked * 100 / total) else 0
-
         val shouldShow = checked < total && !overlayVisible
         when {
             shouldShow && chip.visibility != View.VISIBLE -> {
                 chip.alpha = 0f
                 chip.visibility = View.VISIBLE
-                chip.animate()
-                    .alpha(1f)
-                    .setDuration(250)
-                    .setInterpolator(DecelerateInterpolator())
-                    .start()
+                chip.animate().alpha(1f).setDuration(250).setInterpolator(DecelerateInterpolator()).start()
             }
             !shouldShow && chip.visibility == View.VISIBLE && checked >= total -> {
                 hideHealthProgressChip()
@@ -254,14 +249,9 @@ class MainActivity : AppCompatActivity() {
     private fun hideHealthProgressChip() {
         val chip = binding.healthProgressChip
         if (chip.visibility != View.VISIBLE) return
-        chip.animate()
-            .alpha(0f)
-            .setDuration(300)
-            .setInterpolator(AccelerateInterpolator())
-            .withEndAction {
-                if (!isFinishing && !isDestroyed) chip.visibility = View.GONE
-            }
-            .start()
+        chip.animate().alpha(0f).setDuration(300).setInterpolator(AccelerateInterpolator()).withEndAction {
+            if (!isFinishing && !isDestroyed) chip.visibility = View.GONE
+        }.start()
     }
 
     private fun createHealthNotificationChannel() {
@@ -282,73 +272,47 @@ class MainActivity : AppCompatActivity() {
 
     private fun showHealthCompleteNotification(result: HealthCheckResult) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED) {
-                Toast.makeText(
-                    this,
-                    "✅ اكتمل فحص ${result.total} محطة — ${result.healthy} شغالة",
-                    Toast.LENGTH_LONG
-                ).show()
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(this, "✅ اكتمل فحص ${result.total} محطة — ${result.healthy} شغالة", Toast.LENGTH_LONG).show()
                 return
             }
         }
-
         val contentIntent = PendingIntent.getActivity(
             this, 0,
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-
         val notification = NotificationCompat.Builder(this, HEALTH_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification_play)
             .setContentTitle("✅ اكتمل فحص المحطات")
             .setContentText("${result.total} محطة تم فحصها — ${result.healthy} شغالة")
-            .setStyle(NotificationCompat.BigTextStyle()
-                .bigText("تم فحص ${result.total} محطة بنجاح.\nالمحطات الشغالة: ${result.healthy}\nالمحطات الميتة: ${result.total - result.healthy}"))
+            .setStyle(NotificationCompat.BigTextStyle().bigText("تم فحص ${result.total} محطة بنجاح.\nالمحطات الشغالة: ${result.healthy}\nالمحطات الميتة: ${result.total - result.healthy}"))
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
             .build()
-
         try {
-            getSystemService(NotificationManager::class.java)
-                ?.notify(HEALTH_NOTIFICATION_ID, notification)
+            getSystemService(NotificationManager::class.java)?.notify(HEALTH_NOTIFICATION_ID, notification)
         } catch (_: SecurityException) {
-            Toast.makeText(
-                this,
-                "✅ اكتمل الفحص — ${result.healthy}/${result.total} شغالة",
-                Toast.LENGTH_LONG
-            ).show()
+            Toast.makeText(this, "✅ اكتمل الفحص — ${result.healthy}/${result.total} شغالة", Toast.LENGTH_LONG).show()
         }
     }
 
     private fun showVerificationIndicator() {
         val indicator = binding.verificationIndicator
         if (indicator.visibility == View.VISIBLE) return
-
         indicator.alpha = 0f
         indicator.visibility = View.VISIBLE
-
-        indicator.animate()
-            .alpha(1f)
-            .setDuration(200)
-            .setInterpolator(DecelerateInterpolator())
-            .withEndAction {
-                indicator.postDelayed({
-                    if (isFinishing || isDestroyed) return@postDelayed
-                    indicator.animate()
-                        .alpha(0f)
-                        .setDuration(200)
-                        .setInterpolator(AccelerateInterpolator())
-                        .withEndAction {
-                            if (!isFinishing && !isDestroyed) {
-                                indicator.visibility = View.GONE
-                            }
-                        }
-                        .start()
-                }, 1600L)
-            }
-            .start()
+        indicator.animate().alpha(1f).setDuration(200).setInterpolator(DecelerateInterpolator()).withEndAction {
+            indicator.postDelayed({
+                if (isFinishing || isDestroyed) return@postDelayed
+                indicator.animate().alpha(0f).setDuration(200).setInterpolator(AccelerateInterpolator()).withEndAction {
+                    if (!isFinishing && !isDestroyed) {
+                        indicator.visibility = View.GONE
+                    }
+                }.start()
+            }, 1600L)
+        }.start()
     }
 
     private fun updateSleepTimerButton() {
@@ -399,6 +363,8 @@ class MainActivity : AppCompatActivity() {
         "MUSIC" -> "الموسيقى"
         "SPORTS" -> "الرياضة"
         "EGYPT" -> "مصر"
+        "TARAB" -> "طرب"
+        "TALK" -> "توك شو"
         else -> "عام"
     }
 
@@ -418,6 +384,8 @@ class MainActivity : AppCompatActivity() {
                 binding.chipNews.text = "📰 الأخبار (${counts.newsCount})"
                 binding.chipMusic.text = "🎵 الموسيقى (${counts.musicCount})"
                 binding.chipSports.text = "⚽ الرياضة (${counts.sportsCount})"
+                binding.chipTarab.text = "🎶 طرب (${counts.tarabCount})"
+                binding.chipTalk.text = "🎙️ توك شو (${counts.talkCount})"
             }
         }
         lifecycleScope.launch {
