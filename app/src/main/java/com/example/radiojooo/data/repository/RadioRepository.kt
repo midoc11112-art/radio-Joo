@@ -30,6 +30,7 @@ import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 data class HealthCheckResult(val total: Int, val healthy: Int)
+data class HealResult(val url: String, val matchedName: String)
 
 class RadioRepository(
     private val context: Context,
@@ -53,7 +54,7 @@ class RadioRepository(
 
     val allStations: Flow<List<StationEntity>> = stationDao.getVisibleStations()
 
-    suspend fun neuralHeal(station: StationEntity): String? = withContext(Dispatchers.IO) {
+    suspend fun neuralHeal(station: StationEntity): HealResult? = withContext(Dispatchers.IO) {
         try {
             val url = "$PROXY_BASE_URL/heal?uuid=${URLEncoder.encode(station.uuid, "UTF-8")}&name=${URLEncoder.encode(station.name, "UTF-8")}&country=${station.countryCode}&category=${station.category}"
             apiClient.newCall(Request.Builder().url(url).build()).execute().use { res ->
@@ -62,9 +63,10 @@ class RadioRepository(
                     val json = JSONObject(body)
                     if (json.optBoolean("success", false)) {
                         val newUrl = json.optString("newUrl")
+                        val matchedName = json.optString("matchedName", station.name)
                         if (newUrl.isNotBlank() && newUrl.startsWith("http")) {
                             runCatching { stationDao.updateStationUrl(station.uuid, newUrl) }
-                            return@withContext newUrl
+                            return@withContext HealResult(newUrl, matchedName)
                         }
                     }
                 }
@@ -184,3 +186,4 @@ class RadioRepository(
         return list
     }
 }
+

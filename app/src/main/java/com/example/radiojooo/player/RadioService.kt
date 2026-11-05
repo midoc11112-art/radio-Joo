@@ -1,4 +1,4 @@
-package com.example.radiojooo.player
+﻿package com.example.radiojooo.player
 
 import android.app.*
 import android.content.Context
@@ -95,7 +95,7 @@ class RadioService : Service() {
     
     private val bufferTimeoutRunnable = Runnable {
         try {
-            if (::player.isInitialized && player.playbackState == Player.STATE_BUFFERING && !player.isPlaying) {
+            if (::player.isInitialized && player.playbackState == Player.STATE_BUFFERING && !player.isPlaying && !hasPlayedSuccessfully) {
                 toast("⏱️ البث متجمد...")
                 handlePlaybackError(PlaybackException("Buffer timeout", null, PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT))
             }
@@ -104,6 +104,7 @@ class RadioService : Service() {
 
     private val isHealing = AtomicBoolean(false)
     private val isDestroyed = AtomicBoolean(false)
+    private var hasPlayedSuccessfully = false
     private val repoInstance: RadioRepository by lazy { RadioRepository(applicationContext) }
 
     inner class LocalBinder : Binder() { fun getService(): RadioService = this@RadioService }
@@ -182,9 +183,8 @@ class RadioService : Service() {
                 try { bufferTimeoutHandler.removeCallbacks(bufferTimeoutRunnable); handlePlaybackError(error) } catch (t: Throwable) {}
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                try {
-                    updateNotification()
-                    if (isPlaying) {
+                if (isPlaying) {
+                    hasPlayedSuccessfully = true
                         acquireLocks()
                         bufferTimeoutHandler.removeCallbacks(bufferTimeoutRunnable)
                         toast("▶️ ${currentTitle}")
@@ -252,9 +252,12 @@ class RadioService : Service() {
                 runCatching { dao.updateHealth(uuidToHeal, false, station.failCount + 1, System.currentTimeMillis()) }
                 runCatching { repoInstance.sendFeedback(uuidToHeal, "exo_error", false, errCap, countryCap, catCap) }
 
-                val newUrl = withTimeoutOrNull(30000L) { runCatching { repoInstance.neuralHeal(station) }.getOrNull() }
+                val healResult = withTimeoutOrNull(15000L) { runCatching { repoInstance.neuralHeal(station) }.getOrNull() }
 
-                if (newUrl != null && !isDestroyed.get()) {
+                if (healResult != null && !isDestroyed.get()) {
+                    val newUrl = healResult.url
+                    toast("🔍 تم العثور على: ${healResult.matchedName}")
+                    delay(2000L) // عرض الاسم لمدة ثانيتين
                     val isValidAudio = withContext(Dispatchers.IO) {
                         try {
                             val probe = URL(newUrl).openConnection().apply { connectTimeout = 5000; readTimeout = 5000 }
@@ -349,7 +352,7 @@ class RadioService : Service() {
         stopRecording()
         currentTitle = title; currentStationUuid = uuid; currentBitrate = bitrate
         currentCategory = category; currentCountry = country
-        retryCount = 0; isHealing.set(false)
+        retryCount = 0; isHealing.set(false); hasPlayedSuccessfully = false
         synchronized(availableUrls) {
             availableUrls.clear()
             if (pUrl.isNotBlank()) availableUrls.add(pUrl)
