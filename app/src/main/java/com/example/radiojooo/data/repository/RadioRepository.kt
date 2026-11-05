@@ -49,10 +49,10 @@ class RadioRepository(
     val healthComplete: SharedFlow<HealthCheckResult> = _healthComplete.asSharedFlow()
 
     private val apiClient = OkHttpClient.Builder().connectTimeout(60, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).build()
-    private val healthClient = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS).readTimeout(5, TimeUnit.SECONDS).followRedirects(true).retryOnConnectionFailure(true).build()
+    private val healthClient = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS).followRedirects(true).retryOnConnectionFailure(true).build()
     
-    // 150 محطة في نفس اللحظة
-    private val healthSemaphore = Semaphore(150)
+    // 🚀 200 محطة في نفس اللحظة
+    private val healthSemaphore = Semaphore(200)
     
     // 🔒 قفل الأمان: يمنع الفحص من البدء إلا بعد انتهاء التحميل
     private val dbMutex = Mutex()
@@ -71,7 +71,6 @@ class RadioRepository(
                         count = stationsArray.length()
                         val serverStations = parseStations(stationsArray)
                         if (serverStations.isNotEmpty()) {
-                            // الحفظ النهائي في قاعدة البيانات
                             stationDao.insertStations(serverStations)
                         }
                     }
@@ -82,7 +81,6 @@ class RadioRepository(
     }
 
     suspend fun ensureInitialDataLoaded() {
-        // 🔒 القفل الأول: نمنع أي حاجة تانية من الدخول هنا
         dbMutex.withLock {
             Log.d("RadioRepository", "بدء جلب المحطات من السيرفر... (مقفول)")
             _healthTotal.value = 0
@@ -91,7 +89,6 @@ class RadioRepository(
             fetchStationsFromServer()
             Log.d("RadioRepository", "اكتمل جلب المحطات وحفظها في قاعدة البيانات 100%")
         }
-        // بعد ما القفل يتفك، يعني التحميل خلص مية في المية
         delay(500)
         performHealthChecks()
     }
@@ -118,7 +115,7 @@ class RadioRepository(
             Log.d("RadioRepository", "بدء فحص $totalToCheck محطة...")
             var totalHealthy = 0
             var safety = 0
-            while (safety < 100 && stationDao.getUncheckedCount() > 0) {
+            while (safety < 200 && stationDao.getUncheckedCount() > 0) {
                 totalHealthy += runHealthChecks(batchSize = 200)
                 _healthChecked.value = minOf(_healthChecked.value + 200, totalToCheck)
                 safety++

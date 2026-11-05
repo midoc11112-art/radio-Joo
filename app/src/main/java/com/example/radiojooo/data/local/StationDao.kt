@@ -12,10 +12,10 @@ interface StationDao {
     @Query("SELECT * FROM stations ORDER BY popularity DESC")
     fun getAllStations(): Flow<List<StationEntity>>
 
-    // عشان المحطات متختفيش بسرعة، خليت الشرط 15 مرة فشل
+    // إخفاء المحطات التي تفشل أكثر من 20 مرة، دون حذفها نهائياً
     @Query("""
         SELECT * FROM stations 
-        WHERE failCount < 15
+        WHERE failCount < 20
            OR isFavorite = 1
         ORDER BY popularity DESC
     """)
@@ -48,7 +48,8 @@ interface StationDao {
     @Query("UPDATE stations SET lastUrlWorks = :works, failCount = :failCount, lastCheckedAt = :timestamp WHERE uuid = :uuid")
     suspend fun updateHealth(uuid: String, works: Boolean, failCount: Int, timestamp: Long)
 
-    @Query("DELETE FROM stations WHERE isFavorite = 0 AND lastUrlWorks = 0 AND failCount >= 15")
+    // حذف فقط المحطات التي فشلت أكثر من 50 مرة
+    @Query("DELETE FROM stations WHERE isFavorite = 0 AND lastUrlWorks = 0 AND failCount >= 50")
     suspend fun cleanupDeadStations()
 
     @Query("UPDATE stations SET lastUrlWorks = NULL, failCount = 0")
