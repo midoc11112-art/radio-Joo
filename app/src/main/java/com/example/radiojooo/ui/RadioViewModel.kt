@@ -73,13 +73,13 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
         initialValue = emptyList()
     )
 
-    val categoryCounts: StateFlow> = repository.allStations
-        .map { list -> calculateCounts(list) }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyMap()
-        )
+    val categoryCounts: StateFlow> = repository.allStations.map { list ->
+        calculateCounts(list)
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyMap()
+    )
 
     init {
         viewModelScope.launch {
