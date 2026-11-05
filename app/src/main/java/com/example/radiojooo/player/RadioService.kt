@@ -146,7 +146,6 @@ class RadioService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForegroundWithNotification()
         intent?.let {
-            // دعم أزرار الإشعار (action) بالإضافة لـ extra ACTION
             when {
                 it.action == RadioActionReceiver.ACTION_PLAY_PAUSE -> {
                     if (isPlaying()) pausePlayback() else resumePlayback()
@@ -237,7 +236,6 @@ class RadioService : Service() {
                 updateNotification()
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
-                // ✅ سجّل نجاح المحطة في DB → تظهر دائمًا
                 if (playbackState == Player.STATE_READY && currentStationUuid.isNotBlank()) {
                     serviceScope.launch {
                         try {
@@ -277,7 +275,6 @@ class RadioService : Service() {
             }
         } else {
             retryCount = 0
-            // ❌ فشل نهائي → سجّل المحطة كـ dead في DB → تختفي من القائمة
             if (currentStationUuid.isNotBlank()) {
                 serviceScope.launch {
                     try {

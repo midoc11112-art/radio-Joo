@@ -41,7 +41,6 @@ class RadioRepository(
     private val PROXY_BASE_URL = "https://radio-joo-proxy.midoc11112.workers.dev"
     private val STATIONS_ENDPOINT = "$PROXY_BASE_URL/stations"
 
-    // 🆕 تدفقات التقدم
     private val _healthChecked = MutableStateFlow(0)
     val healthChecked: StateFlow<Int> = _healthChecked.asStateFlow()
 
@@ -203,7 +202,6 @@ class RadioRepository(
                     fetchStationsFromServer()
                 }
 
-                // حساب العدد الكلي المتوقع فحصه
                 val uncheckedAtStart = stationDao.getUncheckedCount()
                 val staleThreshold = System.currentTimeMillis() - 24 * 60 * 60 * 1000L
                 val staleAtStart = stationDao.getStaleVerifiedStations(staleThreshold, Int.MAX_VALUE).size
@@ -220,7 +218,6 @@ class RadioRepository(
                     if (unchecked == 0) break
                     val healthyThisBatch = runHealthChecks(batchSize = 30)
                     totalHealthy += healthyThisBatch
-                    // تحديث العداد
                     val checkedSoFar = _healthChecked.value + 30
                     _healthChecked.value = minOf(checkedSoFar, totalToCheck)
                     safety++
@@ -228,16 +225,10 @@ class RadioRepository(
 
                 try { stationDao.cleanupDeadStations() } catch (_: Exception) {}
 
-                // ضبط العداد النهائي
                 _healthChecked.value = totalToCheck
 
                 Log.d("RadioRepository", "اكتمل الفحص. الإجمالي: $totalToCheck، الشغالة: $totalHealthy")
-
-                // 🆕 إطلاق حدث اكتمال الفحص
-                _healthComplete.emit(HealthCheckResult(
-                    total = totalToCheck,
-                    healthy = totalHealthy
-                ))
+                _healthComplete.emit(HealthCheckResult(total = totalToCheck, healthy = totalHealthy))
             } catch (e: Exception) {
                 Log.e("RadioRepository", "خطأ في ensureInitialDataLoaded: ${e.message}")
             }

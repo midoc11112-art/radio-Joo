@@ -17,7 +17,6 @@ abstract class AppDatabase : RoomDatabase() {
 
         private val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // Defensive: try adding each column; ignore if exists
                 try { db.execSQL("ALTER TABLE stations ADD COLUMN lastUrlWorks INTEGER") } catch (_: Exception) {}
                 try { db.execSQL("ALTER TABLE stations ADD COLUMN failCount INTEGER NOT NULL DEFAULT 0") } catch (_: Exception) {}
                 try { db.execSQL("ALTER TABLE stations ADD COLUMN lastCheckedAt INTEGER NOT NULL DEFAULT 0") } catch (_: Exception) {}

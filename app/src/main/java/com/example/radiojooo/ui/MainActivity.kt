@@ -1,6 +1,9 @@
 package com.example.radiojooo.ui
 
 import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -20,20 +23,28 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.util.UnstableApi
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.radiojooo.R
 import com.example.radiojooo.data.model.StationEntity
+import com.example.radiojooo.data.repository.HealthCheckResult
 import com.example.radiojooo.databinding.ActivityMainBinding
 import com.example.radiojooo.player.RadioService
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import java.util.Locale
 
 @UnstableApi
 class MainActivity : AppCompatActivity() {
+
+    companion object {
+        private const val HEALTH_CHANNEL_ID = "radio_joo_health_check_channel"
+        private const val HEALTH_NOTIFICATION_ID = 2001
+    }
 
     private lateinit var binding: ActivityMainBinding
     private val viewModel: RadioViewModel by viewModels()
@@ -65,8 +76,9 @@ class MainActivity : AppCompatActivity() {
         setupHeaderButtons()
         setupMiniPlayer()
         observeViewModel()
+        observeHealthCheck()
+        createHealthNotificationChannel()
 
-        // ✅ عرض شريط "جاري التحقق" فقط عند الفتح الأول (مش بعد rotation)
         if (savedInstanceState == null) {
             showVerificationIndicator()
         }
@@ -74,7 +86,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun requestAllPermissions() {
         val permissionsToRequest = mutableListOf<String>()
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
@@ -90,11 +101,9 @@ class MainActivity : AppCompatActivity() {
                 permissionsToRequest.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
             }
         }
-
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             permissionsToRequest.add(Manifest.permission.RECORD_AUDIO)
         }
-
         if (permissionsToRequest.isNotEmpty()) {
             requestPermissionLauncher.launch(permissionsToRequest.toTypedArray())
         }
@@ -117,7 +126,6 @@ class MainActivity : AppCompatActivity() {
             onItemClick = { station -> playStation(station) },
             onFavoriteClick = { station -> viewModel.toggleFavorite(station) }
         )
-
         binding.rvStations.apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
             adapter = stationAdapter
@@ -161,7 +169,6 @@ class MainActivity : AppCompatActivity() {
             viewModel.refreshData()
             Toast.makeText(this, "جاري التحديث في الخلفية...", Toast.LENGTH_SHORT).show()
         }
-
         binding.btnSleepTimerHeader.setOnClickListener {
             showSleepTimerDialog()
         }
@@ -169,10 +176,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupMiniPlayer() {
         binding.miniPlayerHeader.setOnClickListener {
-            val intent = Intent(this, PlayerActivity::class.java)
-            startActivity(intent)
+            startActivity(Intent(this, PlayerActivity::class.java))
         }
-
         binding.btnMiniPlayPause.setOnClickListener {
             val service = RadioService.getInstance() ?: return@setOnClickListener
             if (service.isPlaying()) service.pausePlayback() else service.resumePlayback()
@@ -194,41 +199,148 @@ class MainActivity : AppCompatActivity() {
         updateMiniPlayer()
     }
 
-    /**
-     * 🆕 شريط "جاري التحقق":
-     * - Fade In 200ms
-     * - Stay 1600ms
-     * - Fade Out 200ms
-     * الإجمالي = 2000ms (ثانيتان بالضبط)
-     * لا يستهلك CPU ولا يعمل I/O ولا يمنع أي تفاعل.
-     */
+    private fun observeHealthCheck() {
+        lifecycleScope.launch {
+            combine(viewModel.healthChecked, viewModel.healthTotal) { checked, total ->
+                checked to total
+            }.collectLatest { (checked, total) ->
+                if (total > 0) {
+                    updateVerificationText(checked, total)
+                    updateHealthProgressChip(checked, total)
+                }
+            }
+        }
+
+        lifecycleScope.launch {
+            viewModel.healthComplete.collect { result ->
+                hideHealthProgressChip()
+                showHealthCompleteNotification(result)
+            }
+        }
+    }
+
+    private fun updateVerificationText(checked: Int, total: Int) {
+        binding.tvVerificationText.text = if (checked >= total && total > 0) {
+            "جاري التحقق من المحطات... $total/$total"
+        } else {
+            "جاري التحقق من المحطات... $checked/$total"
+        }
+    }
+
+    private fun updateHealthProgressChip(checked: Int, total: Int) {
+        val chip = binding.healthProgressChip
+        val overlayVisible = binding.verificationIndicator.visibility == View.VISIBLE
+
+        binding.tvHealthProgress.text = "فحص المحطات... $checked/$total"
+        binding.pbHealth.progress = if (total > 0) (checked * 100 / total) else 0
+
+        val shouldShow = checked < total && !overlayVisible
+        when {
+            shouldShow && chip.visibility != View.VISIBLE -> {
+                chip.alpha = 0f
+                chip.visibility = View.VISIBLE
+                chip.animate()
+                    .alpha(1f)
+                    .setDuration(250)
+                    .setInterpolator(DecelerateInterpolator())
+                    .start()
+            }
+            !shouldShow && chip.visibility == View.VISIBLE && checked >= total -> {
+                hideHealthProgressChip()
+            }
+        }
+    }
+
+    private fun hideHealthProgressChip() {
+        val chip = binding.healthProgressChip
+        if (chip.visibility != View.VISIBLE) return
+        chip.animate()
+            .alpha(0f)
+            .setDuration(300)
+            .setInterpolator(AccelerateInterpolator())
+            .withEndAction {
+                if (!isFinishing && !isDestroyed) chip.visibility = View.GONE
+            }
+            .start()
+    }
+
+    private fun createHealthNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                HEALTH_CHANNEL_ID,
+                "فحص المحطات",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "إشعارات عند اكتمال فحص المحطات"
+                setShowBadge(true)
+                enableVibration(false)
+                setSound(null, null)
+            }
+            getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
+        }
+    }
+
+    private fun showHealthCompleteNotification(result: HealthCheckResult) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(
+                    this,
+                    "✅ اكتمل فحص ${result.total} محطة — ${result.healthy} شغالة",
+                    Toast.LENGTH_LONG
+                ).show()
+                return
+            }
+        }
+
+        val contentIntent = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val notification = NotificationCompat.Builder(this, HEALTH_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification_play)
+            .setContentTitle("✅ اكتمل فحص المحطات")
+            .setContentText("${result.total} محطة تم فحصها — ${result.healthy} شغالة")
+            .setStyle(NotificationCompat.BigTextStyle()
+                .bigText("تم فحص ${result.total} محطة بنجاح.\nالمحطات الشغالة: ${result.healthy}\nالمحطات الميتة: ${result.total - result.healthy}"))
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setAutoCancel(true)
+            .setContentIntent(contentIntent)
+            .build()
+
+        try {
+            getSystemService(NotificationManager::class.java)
+                ?.notify(HEALTH_NOTIFICATION_ID, notification)
+        } catch (_: SecurityException) {
+            Toast.makeText(
+                this,
+                "✅ اكتمل الفحص — ${result.healthy}/${result.total} شغالة",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
     private fun showVerificationIndicator() {
         val indicator = binding.verificationIndicator
-
-        // منع التكرار لو ظهر بالفعل (حماية إضافية)
         if (indicator.visibility == View.VISIBLE) return
 
-        // البدء شفافًا
         indicator.alpha = 0f
         indicator.visibility = View.VISIBLE
 
-        // 1) Fade In خلال 200ms
         indicator.animate()
             .alpha(1f)
             .setDuration(200)
             .setInterpolator(DecelerateInterpolator())
             .withEndAction {
-                // 2) بعد اكتمال الظهور، انتظر 1600ms ثم ابدأ Fade Out
                 indicator.postDelayed({
-                    // حماية إضافية: لو الـ Activity بدأ يُدمَّر، لا نكمل
                     if (isFinishing || isDestroyed) return@postDelayed
-
                     indicator.animate()
                         .alpha(0f)
                         .setDuration(200)
                         .setInterpolator(AccelerateInterpolator())
                         .withEndAction {
-                            // 3) أخيرًا: GONE (يختفي تمامًا)
                             if (!isFinishing && !isDestroyed) {
                                 indicator.visibility = View.GONE
                             }
@@ -241,7 +353,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateSleepTimerButton() {
         val timeRemaining = RadioService.getInstance()?.sleepTimeRemainingMs ?: 0L
-
         if (timeRemaining > 0) {
             val sec = (timeRemaining / 1000) % 60
             val min = (timeRemaining / (1000 * 60)) % 60
@@ -257,11 +368,9 @@ class MainActivity : AppCompatActivity() {
     private fun updateMiniPlayer() {
         val currentStation = viewModel.currentPlayingStation.value
         val service = RadioService.getInstance()
-
         if (currentStation != null || (service != null && service.currentTitle != "راديو جو PRO")) {
             binding.miniPlayerContainer.visibility = View.VISIBLE
             binding.tvMiniStationName.text = currentStation?.name ?: service?.currentTitle
-
             if (currentStation != null) {
                 binding.tvMiniCategoryBadge.text = getCategoryArabicTitle(currentStation.category)
                 binding.tvMiniBitrateBadge.text = if (currentStation.bitrate > 0) "${currentStation.bitrate} Kbps" else "32 Kbps"
@@ -273,7 +382,6 @@ class MainActivity : AppCompatActivity() {
                 binding.tvMiniCountryBadge.text = "EG"
                 binding.tvMiniServersBadge.text = "1 خادم"
             }
-
             if (service != null) {
                 binding.btnMiniPlayPause.text = if (service.isPlaying()) "إيقاف" else "تشغيل"
                 binding.tvMiniDataMb.text = String.format(Locale.US, "%.2f MB", service.totalDataMb)
@@ -301,7 +409,6 @@ class MainActivity : AppCompatActivity() {
                 binding.tvEmptyState.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
             }
         }
-
         lifecycleScope.launch {
             viewModel.categoryCounts.collectLatest { counts ->
                 binding.chipAll.text = "🔥 الكل (${counts.allCount})"
@@ -313,14 +420,12 @@ class MainActivity : AppCompatActivity() {
                 binding.chipSports.text = "⚽ الرياضة (${counts.sportsCount})"
             }
         }
-
         lifecycleScope.launch {
             viewModel.refreshResult.collectLatest { count ->
                 binding.swipeRefreshLayout.isRefreshing = false
                 Toast.makeText(this@MainActivity, "تم تحديث $count محطة بنجاح", Toast.LENGTH_SHORT).show()
             }
         }
-
         lifecycleScope.launch {
             viewModel.currentPlayingStation.collectLatest {
                 updateMiniPlayer()
@@ -333,7 +438,6 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(60, 50, 60, 30)
         }
-
         val etHours = EditText(this).apply {
             hint = "عدد الساعات (مثال: 1)"
             inputType = InputType.TYPE_CLASS_NUMBER
@@ -347,7 +451,6 @@ class MainActivity : AppCompatActivity() {
                 setStroke(3, 0xFFA78BFA.toInt())
             }
         }
-
         val etMinutes = EditText(this).apply {
             hint = "عدد الدقائق (مثال: 30)"
             inputType = InputType.TYPE_CLASS_NUMBER
@@ -361,15 +464,12 @@ class MainActivity : AppCompatActivity() {
                 setStroke(3, 0xFFA78BFA.toInt())
             }
         }
-
         val spacer = android.widget.Space(this).apply {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 30)
         }
-
         layout.addView(etHours, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         layout.addView(spacer)
         layout.addView(etMinutes, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-
         RadioService.getInstance()?.let { service ->
             if (service.sleepTimeRemainingMs > 0) {
                 val totalMins = (service.sleepTimeRemainingMs / 1000 / 60).toInt()
@@ -377,7 +477,6 @@ class MainActivity : AppCompatActivity() {
                 etMinutes.setText((totalMins % 60).toString())
             }
         }
-
         AlertDialog.Builder(this, R.style.Theme_RadioJooo)
             .setTitle("⏱️ ضبط مؤقت النوم (يدوي)")
             .setView(layout)

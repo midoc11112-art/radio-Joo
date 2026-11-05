@@ -13,13 +13,6 @@ interface StationDao {
     @Query("SELECT * FROM stations ORDER BY popularity DESC")
     fun getAllStations(): Flow<List<StationEntity>>
 
-    /**
-     * المحطات المرئية في الواجهة:
-     * - verified (lastUrlWorks = 1) وفشلت أقل من 3 مرات
-     * - unchecked (null) لكن popularity > 50 (محطات شعبية لم تُفحص بعد)
-     * - favorites دائمًا (يستخدمها المستخدم بنفسه)
-     * - أي محطة فشلت 3+ مرات مخفية نهائيًا
-     */
     @Query("""
         SELECT * FROM stations 
         WHERE (lastUrlWorks = 1 AND failCount < 3)

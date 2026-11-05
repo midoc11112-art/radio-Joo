@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.radiojooo.data.local.AppDatabase
 import com.example.radiojooo.data.model.StationEntity
+import com.example.radiojooo.data.repository.HealthCheckResult
 import com.example.radiojooo.data.repository.RadioRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -32,6 +33,10 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
     val allRawStations: StateFlow<List<StationEntity>>
     val searchQuery = MutableStateFlow("")
     val selectedCategory = MutableStateFlow("ALL")
+
+    val healthChecked: StateFlow<Int> get() = repository.healthChecked
+    val healthTotal: StateFlow<Int> get() = repository.healthTotal
+    val healthComplete: SharedFlow<HealthCheckResult> get() = repository.healthComplete
 
     private val _currentPlayingStation = MutableStateFlow<StationEntity?>(null)
     val currentPlayingStation: StateFlow<StationEntity?> = _currentPlayingStation.asStateFlow()
@@ -73,7 +78,6 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             combine(allRawStations, searchQuery, selectedCategory) { list, query, category ->
                 var filtered = list
-
                 if (category != "ALL") {
                     filtered = when (category) {
                         "FAVORITE" -> filtered.filter { it.isFavorite }
@@ -81,29 +85,18 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
                         else -> filtered.filter { it.category.equals(category, ignoreCase = true) }
                     }
                 }
-
                 if (query.isNotBlank()) {
                     val q = query.trim().lowercase()
-
                     val isGreater = q.contains("اكبر") || q.contains("أكبر") || q.contains(">")
                     val isLess = q.contains("اصغر") || q.contains("أصغر") || q.contains("<")
-
                     if (isGreater) {
                         val numStr = q.replace("اكبر", "").replace("أكبر", "").replace(">", "").trim()
                         val bitrateNum = numStr.toIntOrNull()
-                        if (bitrateNum != null) {
-                            filtered = filtered.filter { it.bitrate > bitrateNum && it.bitrate > 0 }
-                        } else {
-                            filtered = emptyList()
-                        }
+                        filtered = if (bitrateNum != null) filtered.filter { it.bitrate > bitrateNum && it.bitrate > 0 } else emptyList()
                     } else if (isLess) {
                         val numStr = q.replace("اصغر", "").replace("أصغر", "").replace("<", "").trim()
                         val bitrateNum = numStr.toIntOrNull()
-                        if (bitrateNum != null) {
-                            filtered = filtered.filter { it.bitrate in 1 until bitrateNum }
-                        } else {
-                            filtered = emptyList()
-                        }
+                        filtered = if (bitrateNum != null) filtered.filter { it.bitrate in 1 until bitrateNum } else emptyList()
                     } else if (q.toIntOrNull() != null) {
                         val bitrateNum = q.toInt()
                         filtered = filtered.filter { it.bitrate == bitrateNum }
@@ -115,7 +108,6 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                 }
-
                 filtered.sortedByDescending { it.popularity }
             }.collect {
                 filteredFlow.value = it
@@ -131,7 +123,6 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
         val news = list.count { it.category.equals("NEWS", ignoreCase = true) }
         val music = list.count { it.category.equals("MUSIC", ignoreCase = true) }
         val sports = list.count { it.category.equals("SPORTS", ignoreCase = true) }
-
         categoryCounts.value = CategoryCounts(all, fav, eg, quran, news, music, sports)
     }
 

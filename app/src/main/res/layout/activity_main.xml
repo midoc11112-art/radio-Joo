@@ -258,7 +258,6 @@
         android:visibility="gone"
         android:alpha="0" />
 
-    <!-- 🆕 شريط "جاري التحقق" — يظهر لمدة ثانيتين ثم يختفي -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/verificationIndicator"
         android:layout_width="wrap_content"
@@ -291,11 +290,58 @@
                 android:indeterminateTint="#8B5CF6" />
 
             <TextView
+                android:id="@+id/tvVerificationText"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="جاري التحقق من المحطات..."
                 android:textColor="#E2E8F0"
                 android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/healthProgressChip"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/headerLayout"
+        android:layout_centerHorizontal="true"
+        android:layout_marginTop="8dp"
+        android:clickable="false"
+        android:focusable="false"
+        android:visibility="gone"
+        android:alpha="0"
+        app:cardBackgroundColor="#CC1E293B"
+        app:cardCornerRadius="14dp"
+        app:cardElevation="6dp"
+        app:strokeColor="#38BDF8"
+        app:strokeWidth="1dp">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="7dp">
+
+            <ProgressBar
+                android:id="@+id/pbHealth"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="70dp"
+                android:layout_height="4dp"
+                android:layout_marginEnd="8dp"
+                android:max="100"
+                android:progress="0"
+                android:progressTint="#38BDF8" />
+
+            <TextView
+                android:id="@+id/tvHealthProgress"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="فحص المحطات... 0/0"
+                android:textColor="#E2E8F0"
+                android:textSize="11sp"
                 android:textStyle="bold" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>

@@ -15,7 +15,7 @@ data class StationEntity(
     val isFavorite: Boolean = false,
     val popularity: Int = 0,
     val lastUpdated: Long = 0L,
-    val lastUrlWorks: Boolean? = null,   // null = unchecked, true = verified, false = dead
+    val lastUrlWorks: Boolean? = null,
     val failCount: Int = 0,
     val lastCheckedAt: Long = 0L
 )
