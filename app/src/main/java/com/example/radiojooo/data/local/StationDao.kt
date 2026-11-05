@@ -12,12 +12,10 @@ interface StationDao {
     @Query("SELECT * FROM stations ORDER BY popularity DESC")
     fun getAllStations(): Flow<List<StationEntity>>
 
-    // استعلام حاسم: يعرض فقط المحطات التي تعمل، أو المحطات الشعبية التي لم يتم فحصها بعد
+    // تعديل جوهري: نعرض كل المحطات اللي فشلت أقل من 3 مرات، بدون شروط تعجيزية
     @Query("""
         SELECT * FROM stations 
-        WHERE (lastUrlWorks = 1 AND failCount < 3)
-           OR (lastUrlWorks IS NULL AND popularity > 50)
-           OR isFavorite = 1
+        WHERE failCount < 3 
         ORDER BY popularity DESC
     """)
     fun getVisibleStations(): Flow<List<StationEntity>>
@@ -49,6 +47,6 @@ interface StationDao {
     @Query("UPDATE stations SET lastUrlWorks = :works, failCount = :failCount, lastCheckedAt = :timestamp WHERE uuid = :uuid")
     suspend fun updateHealth(uuid: String, works: Boolean, failCount: Int, timestamp: Long)
 
-    @Query("DELETE FROM stations WHERE isFavorite = 0 AND lastUrlWorks = 0 AND failCount >= 5")
+    @Query("DELETE FROM stations WHERE isFavorite = 0 AND failCount >= 5")
     suspend fun cleanupDeadStations()
 }

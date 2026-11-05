@@ -6,9 +6,6 @@ import com.example.radiojooo.data.local.AppDatabase
 import com.example.radiojooo.data.local.StationDao
 import com.example.radiojooo.data.model.StationEntity
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,15 +13,11 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.Response
 import org.json.JSONObject
 import java.io.File
-import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 data class HealthCheckResult(val total: Int, val healthy: Int)
@@ -46,8 +39,6 @@ class RadioRepository(
     val healthComplete: SharedFlow<HealthCheckResult> = _healthComplete.asSharedFlow()
 
     private val apiClient = OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build()
-    private val healthClient = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS).readTimeout(5, TimeUnit.SECONDS).followRedirects(true).retryOnConnectionFailure(true).build()
-    private val healthSemaphore = Semaphore(10)
 
     val allStations: Flow<List<StationEntity>> = stationDao.getVisibleStations()
 
@@ -70,49 +61,6 @@ class RadioRepository(
         return@withContext stationDao.getTotalCount()
     }
 
-    suspend fun runHealthChecks(batchSize: Int = 50): Int = coroutineScope {
-        var healthyCount = 0
-        try {
-            val unchecked = stationDao.getUncheckedStations(batchSize)
-            val staleThreshold = System.currentTimeMillis() - 12 * 60 * 60 * 1000L
-            val stale = stationDao.getStaleVerifiedStations(staleThreshold, batchSize / 2)
-            val toCheck = (unchecked + stale).distinctBy { it.uuid }
-            if (toCheck.isEmpty()) return@coroutineScope 0
-
-            val results = toCheck.map { station ->
-                async(Dispatchers.IO) { healthSemaphore.withPermit { station to checkStationHealth(station.primaryUrl) } }
-            }.awaitAll()
-
-            healthyCount = results.count { it.second }
-            if (healthyCount == 0 && results.size >= 5) return@coroutineScope 0
-
-            for ((station, works) in results) {
-                val newFailCount = if (works) 0 else station.failCount + 1
-                stationDao.updateHealth(station.uuid, works, newFailCount, System.currentTimeMillis())
-            }
-        } catch (e: Exception) { Log.e("RadioRepository", "HealthCheck error: ${e.message}") }
-        return@coroutineScope healthyCount
-    }
-
-    private suspend fun checkStationHealth(url: String): Boolean = withContext(Dispatchers.IO) {
-        if (url.isBlank()) return@withContext false
-        try {
-            val request = Request.Builder().url(url)
-                .header("User-Agent", "Mozilla/5.0 (Linux; Android 13) ExoPlayer/1.6.1")
-                .header("Accept", "audio/*, */*").header("Range", "bytes=0-4096").build()
-            healthClient.newCall(request).execute().use { response -> isHealthyResponse(response) }
-        } catch (e: Exception) { false }
-    }
-
-    private fun isHealthyResponse(response: Response): Boolean {
-        if (response.code == 416) return true
-        if (!response.isSuccessful) return false
-        val contentType = (response.header("Content-Type") ?: "").lowercase()
-        if (contentType.isEmpty()) return true
-        return contentType.contains("audio") || contentType.contains("mpeg") || contentType.contains("mpegurl") || contentType.contains("octet-stream")
-    }
-
-    // ✅ الدالة اللي كانت ناقصة وسببت الخطأ
     suspend fun checkForUpdates(): Boolean = withContext(Dispatchers.IO) {
         try {
             val lastUpdate = stationDao.getLastUpdateTime() ?: 0L
@@ -129,34 +77,26 @@ class RadioRepository(
     suspend fun ensureInitialDataLoaded() {
         withContext(Dispatchers.IO) {
             try {
-                if (stationDao.getTotalCount() < 50) fetchStationsFromServer()
-                val totalToCheck = stationDao.getUncheckedCount()
-                _healthTotal.value = totalToCheck
-                _healthChecked.value = 0
-                var totalHealthy = 0; var safety = 0
-                while (safety < 40 && stationDao.getUncheckedCount() > 0) {
-                    totalHealthy += runHealthChecks(50)
-                    _healthChecked.value = minOf(_healthChecked.value + 50, totalToCheck)
-                    safety++
+                // جلب المحطات فقط بدون فحص تلقائي يخفيها
+                if (stationDao.getTotalCount() < 50) {
+                    fetchStationsFromServer()
                 }
-                stationDao.cleanupDeadStations()
-                _healthChecked.value = totalToCheck
-                _healthComplete.emit(HealthCheckResult(totalToCheck, totalHealthy))
+                // إرسال إشارة وهمية إن الفحص انتهى عشان شريط التحميل يختفي
+                _healthTotal.value = 1
+                _healthChecked.value = 1
+                _healthComplete.emit(HealthCheckResult(1, 1))
             } catch (e: Exception) { Log.e("RadioRepository", "InitError: ${e.message}") }
         }
     }
 
     suspend fun toggleFavorite(uuid: String, currentStatus: Boolean) = stationDao.updateFavoriteStatus(uuid, !currentStatus)
 
-    // ✅ دالة البروكسي اللي كانت ناقصة برضه
     fun wrapProxy(rawUrl: String): String {
         if (rawUrl.isBlank()) return ""
         if (rawUrl.contains("radio-joo-proxy")) return rawUrl
         return try {
-            PROXY_BASE_URL + "/?url=" + URLEncoder.encode(rawUrl, "UTF-8")
-        } catch (e: Exception) {
-            PROXY_BASE_URL + "/?url=" + rawUrl
-        }
+            PROXY_BASE_URL + "/?url=" + java.net.URLEncoder.encode(rawUrl, "UTF-8")
+        } catch (e: Exception) { PROXY_BASE_URL + "/?url=" + rawUrl }
     }
 
     private fun parseStations(stationsArray: org.json.JSONArray): List<StationEntity> {
