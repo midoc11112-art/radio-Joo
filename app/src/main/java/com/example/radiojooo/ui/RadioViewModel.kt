@@ -76,15 +76,17 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
 
     val categoryCounts: StateFlow> = repository.allStations
         .map { list ->
-            val counts = mutableMapOf<String, Int>()
-            counts["ALL"] = list.size
-            counts["FAVORITES"] = list.count { it.isFavorite }
-            list.forEach { station ->
+            val result = HashMap<String, Int>()
+            result["ALL"] = list.size
+            result["FAVORITES"] = list.count { it.isFavorite }
+            for (station in list) {
                 val cat = station.category.uppercase()
-                counts[cat] = (counts[cat] ?: 0) + 1
+                val count = result[cat] ?: 0
+                result[cat] = count + 1
             }
-            counts
-        }.stateIn(
+            result
+        }
+        .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = emptyMap()
