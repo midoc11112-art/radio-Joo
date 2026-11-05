@@ -44,8 +44,9 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
         allRawStations = rawFlow.asStateFlow()
 
         viewModelScope.launch { repository.allStations.collect { list -> rawFlow.value = list; updateCategoryCounts(list) } }
+        
+        // ✅ هنا بنشغل دالة واحدة بس مسؤولة عن الجلب ثم الفحص
         viewModelScope.launch(Dispatchers.IO) { repository.ensureInitialDataLoaded() }
-        viewModelScope.launch(Dispatchers.IO) { repository.checkForUpdates() }
 
         val filteredFlow = MutableStateFlow<List<StationEntity>>(emptyList())
         stations = filteredFlow.asStateFlow()

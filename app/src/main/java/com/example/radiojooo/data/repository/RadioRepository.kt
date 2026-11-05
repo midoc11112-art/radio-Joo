@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,7 +47,7 @@ class RadioRepository(
     val healthComplete: SharedFlow<HealthCheckResult> = _healthComplete.asSharedFlow()
 
     private val apiClient = OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build()
-    private val healthClient = OkHttpClient.Builder().connectTimeout(4, TimeUnit.SECONDS).readTimeout(4, TimeUnit.SECONDS).followRedirects(true).retryOnConnectionFailure(false).build()
+    private val healthClient = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS).followRedirects(true).retryOnConnectionFailure(true).build()
     private val healthSemaphore = Semaphore(6)
 
     val allStations: Flow<List<StationEntity>> = stationDao.getVisibleStations()
@@ -68,6 +69,47 @@ class RadioRepository(
             }
         } catch (e: Exception) { Log.e("RadioRepository", "Fetch error: ${e.message}") }
         return@withContext stationDao.getTotalCount()
+    }
+
+    // ✅ تم إصلاح الدالة دي: بننزل المحطات الأول، نستنى شوية، وبعدين نبدأ الفحص
+    suspend fun ensureInitialDataLoaded() {
+        withContext(Dispatchers.IO) {
+            try {
+                Log.d("RadioRepository", "بدء جلب المحطات من السيرفر...")
+                _healthTotal.value = 0
+                _healthChecked.value = 0
+                
+                // 1. ننزل المحطات الأول وخلص
+                fetchStationsFromServer()
+                Log.d("RadioRepository", "اكتمل جلب المحطات، استعداداً للفحص...")
+                
+                // 2. نستنى نص ثانية لضمان استقرار قاعدة البيانات
+                delay(500)
+
+                // 3. نبدأ الفحص
+                val uncheckedAtStart = stationDao.getUncheckedCount()
+                val staleAtStart = stationDao.getStaleVerifiedStations(System.currentTimeMillis() - 24 * 60 * 60 * 1000L, Int.MAX_VALUE).size
+                val totalToCheck = uncheckedAtStart + staleAtStart
+                _healthTotal.value = totalToCheck
+                _healthChecked.value = 0
+
+                if (totalToCheck > 0) {
+                    Log.d("RadioRepository", "بدء فحص $totalToCheck محطة...")
+                    var totalHealthy = 0
+                    var safety = 0
+                    while (safety < 50 && stationDao.getUncheckedCount() > 0) {
+                        totalHealthy += runHealthChecks(batchSize = 30)
+                        _healthChecked.value = minOf(_healthChecked.value + 30, totalToCheck)
+                        safety++
+                    }
+                    stationDao.cleanupDeadStations()
+                    _healthChecked.value = totalToCheck
+                    _healthComplete.emit(HealthCheckResult(totalToCheck, totalHealthy))
+                } else {
+                    _healthComplete.emit(HealthCheckResult(0, 0))
+                }
+            } catch (e: Exception) { Log.e("RadioRepository", "InitError: ${e.message}") }
+        }
     }
 
     suspend fun runHealthChecks(batchSize: Int = 30): Int = coroutineScope {
@@ -97,55 +139,23 @@ class RadioRepository(
     private suspend fun checkStationHealth(url: String): Boolean = withContext(Dispatchers.IO) {
         if (url.isBlank()) return@withContext false
         try {
-            val request = Request.Builder().url(url).header("User-Agent", "Mozilla/5.0").header("Range", "bytes=0-2047").build()
+            val proxiedUrl = "$PROXY_BASE_URL/?url=${URLEncoder.encode(url, "UTF-8")}"
+            val request = Request.Builder().url(proxiedUrl)
+                .header("User-Agent", "Mozilla/5.0")
+                .header("Range", "bytes=0-2047").build()
             healthClient.newCall(request).execute().use { response -> isHealthyResponse(response) }
         } catch (e: Exception) { false }
     }
 
     private fun isHealthyResponse(response: Response): Boolean {
-        if (response.code == 416) return true
+        if (response.code == 416 || response.code == 200 || response.code == 206) return true
         if (!response.isSuccessful) return false
         val contentType = (response.header("Content-Type") ?: "").lowercase()
         if (contentType.isEmpty()) return true
         return contentType.contains("audio") || contentType.contains("mpeg") || contentType.contains("mpegurl") || contentType.contains("octet-stream")
     }
 
-    suspend fun checkForUpdates(): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val lastUpdate = stationDao.getLastUpdateTime() ?: 0L
-            val twoHours = 2 * 60 * 60 * 1000L
-            if (lastUpdate == 0L || (System.currentTimeMillis() - lastUpdate) > twoHours) {
-                fetchStationsFromServer()
-                return@withContext true
-            }
-        } catch (e: Exception) { e.printStackTrace() }
-        return@withContext false
-    }
-
-    suspend fun ensureInitialDataLoaded() {
-        withContext(Dispatchers.IO) {
-            try {
-                if (stationDao.getTotalCount() < 50) fetchStationsFromServer()
-                
-                val uncheckedAtStart = stationDao.getUncheckedCount()
-                val staleAtStart = stationDao.getStaleVerifiedStations(System.currentTimeMillis() - 24 * 60 * 60 * 1000L, Int.MAX_VALUE).size
-                val totalToCheck = uncheckedAtStart + staleAtStart
-                _healthTotal.value = totalToCheck
-                _healthChecked.value = 0
-
-                var totalHealthy = 0; var safety = 0
-                while (safety < 30) {
-                    if (stationDao.getUncheckedCount() == 0) break
-                    totalHealthy += runHealthChecks(batchSize = 30)
-                    _healthChecked.value = minOf(_healthChecked.value + 30, totalToCheck)
-                    safety++
-                }
-                stationDao.cleanupDeadStations()
-                _healthChecked.value = totalToCheck
-                _healthComplete.emit(HealthCheckResult(totalToCheck, totalHealthy))
-            } catch (e: Exception) { Log.e("RadioRepository", "InitError: ${e.message}") }
-        }
-    }
+    suspend fun checkForUpdates(): Boolean = withContext(Dispatchers.IO) { false } // تم دمجها في ensureInitialDataLoaded
 
     suspend fun toggleFavorite(uuid: String, currentStatus: Boolean) = stationDao.updateFavoriteStatus(uuid, !currentStatus)
 
