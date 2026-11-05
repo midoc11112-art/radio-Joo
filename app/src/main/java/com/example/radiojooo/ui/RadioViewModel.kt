@@ -3,109 +3,161 @@ package com.example.radiojooo.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.radiojooo.data.local.AppDatabase
 import com.example.radiojooo.data.model.StationEntity
 import com.example.radiojooo.data.repository.RadioRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+
+data class CategoryCounts(
+    val allCount: Int = 0,
+    val favCount: Int = 0,
+    val egyptCount: Int = 0,
+    val quranCount: Int = 0,
+    val newsCount: Int = 0,
+    val musicCount: Int = 0,
+    val sportsCount: Int = 0
+)
 
 class RadioViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val repository = RadioRepository(application)
-
-    private val _searchQuery = MutableStateFlow("")
-    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
-
-    private val _selectedCategory = MutableStateFlow("ALL")
-    val selectedCategory: StateFlow<String> = _selectedCategory.asStateFlow()
+    private val repository: RadioRepository
+    val allRawStations: StateFlow<List<StationEntity>>
+    val searchQuery = MutableStateFlow("")
+    val selectedCategory = MutableStateFlow("ALL")
 
     private val _currentPlayingStation = MutableStateFlow<StationEntity?>(null)
     val currentPlayingStation: StateFlow<StationEntity?> = _currentPlayingStation.asStateFlow()
 
-    private val _refreshResult = MutableSharedFlow<Boolean>()
-    val refreshResult: SharedFlow<Boolean> = _refreshResult.asSharedFlow()
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    private val _isRefreshing = MutableStateFlow(false)
-    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+    private val _refreshResult = MutableSharedFlow<Int>()
+    val refreshResult: SharedFlow<Int> = _refreshResult.asSharedFlow()
 
-    val allStations: StateFlow<List<StationEntity>> = repository.allStations.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
-        initialValue = emptyList()
-    )
-
-    val stations: StateFlow<List<StationEntity>> = combine(
-        repository.allStations,
-        _searchQuery,
-        _selectedCategory
-    ) { stationsList, query, category ->
-        stationsList.filter { station ->
-            val matchesQuery = query.isEmpty() ||
-                    station.name.contains(query, ignoreCase = true) ||
-                    station.category.contains(query, ignoreCase = true) ||
-                    station.countryCode.contains(query, ignoreCase = true)
-
-            val matchesCategory = when (category.uppercase()) {
-                "ALL" -> true
-                "FAVORITES" -> station.isFavorite
-                else -> station.category.equals(category, ignoreCase = true)
-            }
-
-            matchesQuery && matchesCategory
-        }
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
-        initialValue = emptyList()
-    )
-
-    val favoriteStations: StateFlow<List<StationEntity>> = repository.favoriteStations.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
-        initialValue = emptyList()
-    )
-
-    val categoryCounts: StateFlow> = repository.allStations.map { list ->
-        calculateCounts(list)
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
-        initialValue = emptyMap()
-    )
+    val categoryCounts = MutableStateFlow(CategoryCounts())
+    val stations: StateFlow<List<StationEntity>>
 
     init {
+        val stationDao = AppDatabase.getDatabase(application).stationDao()
+        repository = RadioRepository(application, stationDao, application.cacheDir)
+
+        val rawFlow = MutableStateFlow<List<StationEntity>>(emptyList())
+        allRawStations = rawFlow.asStateFlow()
+
+        // 1. Show stations from database immediately
         viewModelScope.launch {
+            repository.allStations.collect { list ->
+                rawFlow.value = list
+                updateCategoryCounts(list)
+            }
+        }
+
+        // 2. Load initial data if database is empty
+        viewModelScope.launch(Dispatchers.IO) {
             repository.ensureInitialDataLoaded()
-            refreshData()
+        }
+
+        // 3. Check for updates
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.checkForUpdates()
+        }
+
+        val filteredFlow = MutableStateFlow<List<StationEntity>>(emptyList())
+        stations = filteredFlow.asStateFlow()
+
+        viewModelScope.launch {
+            combine(
+                allRawStations,
+                searchQuery,
+                selectedCategory
+            ) { list, query, category ->
+                var filtered = list
+
+                if (category != "ALL") {
+                    filtered = when (category) {
+                        "FAVORITE" -> filtered.filter { it.isFavorite }
+                        "EGYPT" -> filtered.filter {
+                            it.countryCode.equals("EG", ignoreCase = true) ||
+                                it.category.equals("EGYPT", ignoreCase = true)
+                        }
+                        else -> filtered.filter {
+                            it.category.equals(category, ignoreCase = true)
+                        }
+                    }
+                }
+
+                if (query.isNotBlank()) {
+                    val q = query.trim().lowercase()
+
+                    val isGreater = q.contains("اكبر") || q.contains("أكبر") || q.contains(">")
+                    val isLess = q.contains("اصغر") || q.contains("أصغر") || q.contains("<")
+
+                    if (isGreater) {
+                        val numStr = q.replace("اكبر", "")
+                            .replace("أكبر", "")
+                            .replace(">", "")
+                            .trim()
+                        val bitrateNum = numStr.toIntOrNull()
+                        if (bitrateNum != null) {
+                            filtered = filtered.filter {
+                                it.bitrate > bitrateNum && it.bitrate > 0
+                            }
+                        } else {
+                            filtered = emptyList()
+                        }
+                    } else if (isLess) {
+                        val numStr = q.replace("اصغر", "")
+                            .replace("أصغر", "")
+                            .replace("<", "")
+                            .trim()
+                        val bitrateNum = numStr.toIntOrNull()
+                        if (bitrateNum != null) {
+                            filtered = filtered.filter {
+                                it.bitrate in 1 until bitrateNum
+                            }
+                        } else {
+                            filtered = emptyList()
+                        }
+                    } else if (q.toIntOrNull() != null) {
+                        val bitrateNum = q.toInt()
+                        filtered = filtered.filter { it.bitrate == bitrateNum }
+                    } else {
+                        filtered = filtered.filter {
+                            it.name.lowercase().contains(q) ||
+                                it.category.lowercase().contains(q) ||
+                                it.countryCode.lowercase().contains(q)
+                        }
+                    }
+                }
+
+                filtered.sortedByDescending { it.popularity }
+            }.collect { result ->
+                filteredFlow.value = result
+            }
         }
     }
 
-    private fun calculateCounts(list: List<StationEntity>): Map<String, Int> {
-        val result = HashMap<String, Int>()
-        result["ALL"] = list.size
-        result["FAVORITES"] = list.count { it.isFavorite }
-        for (station in list) {
-            val cat = station.category.uppercase()
-            val count = result[cat] ?: 0
-            result[cat] = count + 1
+    private fun updateCategoryCounts(list: List<StationEntity>) {
+        val all = list.size
+        val fav = list.count { it.isFavorite }
+        val eg = list.count {
+            it.countryCode.equals("EG", ignoreCase = true) ||
+                it.category.equals("EGYPT", ignoreCase = true)
         }
-        return result
-    }
+        val quran = list.count { it.category.equals("QURAN", ignoreCase = true) }
+        val news = list.count { it.category.equals("NEWS", ignoreCase = true) }
+        val music = list.count { it.category.equals("MUSIC", ignoreCase = true) }
+        val sports = list.count { it.category.equals("SPORTS", ignoreCase = true) }
 
-    fun setSearchQuery(query: String) {
-        _searchQuery.value = query
-    }
-
-    fun setCategory(category: String) {
-        _selectedCategory.value = category
+        categoryCounts.value = CategoryCounts(all, fav, eg, quran, news, music, sports)
     }
 
     fun setCurrentStation(station: StationEntity?) {
@@ -114,26 +166,24 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleFavorite(station: StationEntity) {
         viewModelScope.launch {
-            repository.toggleFavorite(station.uuid)
-        }
-    }
-
-    fun toggleFavorite(uuid: String) {
-        viewModelScope.launch {
-            repository.toggleFavorite(uuid)
+            repository.toggleFavorite(station.uuid, station.isFavorite)
+            _currentPlayingStation.value = _currentPlayingStation.value?.let {
+                if (it.uuid == station.uuid) it.copy(isFavorite = !station.isFavorite) else it
+            }
         }
     }
 
     fun refreshData() {
-        viewModelScope.launch {
-            _isRefreshing.value = true
-            val success = repository.fetchStationsFromServer()
-            _refreshResult.emit(success)
-            _isRefreshing.value = false
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                _isLoading.value = true
+                val count = repository.fetchStationsFromServer()
+                _refreshResult.emit(count)
+                _isLoading.value = false
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _isLoading.value = false
+            }
         }
-    }
-
-    fun refreshStations() {
-        refreshData()
     }
 }
