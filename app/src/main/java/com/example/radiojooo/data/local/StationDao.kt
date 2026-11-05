@@ -12,7 +12,6 @@ interface StationDao {
     @Query("SELECT * FROM stations ORDER BY popularity DESC")
     fun getAllStations(): Flow<List<StationEntity>>
 
-    // استعلام دقيق: يعرض المحطات التي تعمل، أو الشعبية غير المفحوصة، أو المفضلة
     @Query("""
         SELECT * FROM stations 
         WHERE (lastUrlWorks = 1 AND failCount < 3)
