@@ -18,11 +18,11 @@ import java.util.concurrent.TimeUnit
 
 class RadioRepository(
     private val context: Context,
-    stationDao: StationDao? = null,
+    stationDaoParam: StationDao? = null,
     cacheDir: File? = null
 ) {
 
-    private val stationDao: StationDao = stationDao
+    private val stationDao: StationDao = stationDaoParam
         ?: AppDatabase.getDatabase(context).stationDao()
 
     private val PROXY_BASE_URL = "https://radio-joo-proxy.midoc11112.workers.dev"
