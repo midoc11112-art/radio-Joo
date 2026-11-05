@@ -54,10 +54,10 @@ class RadioRepository(
 
     val allStations: Flow<List<StationEntity>> = stationDao.getVisibleStations()
 
-    // 🧠 التعافي الذكي
+    // ًں§  ط§ظ„طھط¹ط§ظپظٹ ط§ظ„ط°ظƒظٹ
     suspend fun neuralHeal(station: StationEntity): String? = withContext(Dispatchers.IO) {
         try {
-            Log.d("NeuralHeal", "بدء عملية التعافي للمحطة: ${station.name}")
+            Log.d("NeuralHeal", "ط¨ط¯ط، ط¹ظ…ظ„ظٹط© ط§ظ„طھط¹ط§ظپظٹ ظ„ظ„ظ…ط­ط·ط©: ${station.name}")
             val url = "$PROXY_BASE_URL/heal?uuid=${URLEncoder.encode(station.uuid, "UTF-8")}&name=${URLEncoder.encode(station.name, "UTF-8")}&country=${station.countryCode}&category=${station.category}&oldUrl=${URLEncoder.encode(station.primaryUrl, "UTF-8")}"
             val req = Request.Builder().url(url).build()
             apiClient.newCall(req).execute().use { res ->
@@ -67,25 +67,25 @@ class RadioRepository(
                     if (json.optBoolean("success", false)) {
                         val newUrl = json.optString("newUrl")
                         val confidence = json.optDouble("confidence", 0.0)
-                        Log.d("NeuralHeal", "✅ نجح التعافي: $newUrl (ثقة: $confidence)")
+                        Log.d("NeuralHeal", "âœ… ظ†ط¬ط­ ط§ظ„طھط¹ط§ظپظٹ: $newUrl (ط«ظ‚ط©: $confidence)")
                         stationDao.updateStationUrl(station.uuid, newUrl)
                         return@withContext newUrl
                     }
                 }
             }
-        } catch (e: Exception) { Log.e("NeuralHeal", "فشل: ${e.message}") }
+        } catch (e: Exception) { Log.e("NeuralHeal", "ظپط´ظ„: ${e.message}") }
         return@withContext null
     }
 
-    // 🎓 إرسال تقرير النجاح/الفشل للتعلم
-    suspend fun sendFeedback(uuid: String, url: String, success: Boolean) = withContext(Dispatchers.IO) {
+    // ًںژ“ ط¥ط±ط³ط§ظ„ طھظ‚ط±ظٹط± ط§ظ„ظ†ط¬ط§ط­/ط§ظ„ظپط´ظ„ ظ„ظ„طھط¹ظ„ظ…
+    suspend fun sendFeedback(uuid: String, url: String, success: Boolean, errorType: String = "none") = withContext(Dispatchers.IO) {
         try {
             val fbUrl = "$PROXY_BASE_URL/ai/feedback?uuid=${URLEncoder.encode(uuid, "UTF-8")}&url=${URLEncoder.encode(url, "UTF-8")}&success=$success"
             apiClient.newCall(Request.Builder().url(fbUrl).build()).execute().close()
         } catch (_: Exception) {}
     }
 
-    // 🔮 التنبؤ بالمحطات المعرضة للخطر
+    // ًں”® ط§ظ„طھظ†ط¨ط¤ ط¨ط§ظ„ظ…ط­ط·ط§طھ ط§ظ„ظ…ط¹ط±ط¶ط© ظ„ظ„ط®ط·ط±
     suspend fun predictRisks(): List<String> = withContext(Dispatchers.IO) {
         try {
             val all = stationDao.getVisibleStationsSnapshot()
@@ -134,7 +134,7 @@ class RadioRepository(
         }
         delay(500)
         performHealthChecks()
-        // 🧠 بعد الفحص، نشغل التنبؤ والفحص الاستباقي للمحطات عالية المخاطر
+        // ًں§  ط¨ط¹ط¯ ط§ظ„ظپط­طµطŒ ظ†ط´ط؛ظ„ ط§ظ„طھظ†ط¨ط¤ ظˆط§ظ„ظپط­طµ ط§ظ„ط§ط³طھط¨ط§ظ‚ظٹ ظ„ظ„ظ…ط­ط·ط§طھ ط¹ط§ظ„ظٹط© ط§ظ„ظ…ط®ط§ط·ط±
         proactiveHeal()
     }
 
@@ -147,13 +147,13 @@ class RadioRepository(
         performHealthChecks()
     }
 
-    // 🎯 التعافي الاستباقي للمحطات المعرضة للخطر
+    // ًںژ¯ ط§ظ„طھط¹ط§ظپظٹ ط§ظ„ط§ط³طھط¨ط§ظ‚ظٹ ظ„ظ„ظ…ط­ط·ط§طھ ط§ظ„ظ…ط¹ط±ط¶ط© ظ„ظ„ط®ط·ط±
     private suspend fun proactiveHeal() = withContext(Dispatchers.IO) {
         val riskyUuids = predictRisks()
         for (uuid in riskyUuids.take(5)) {
             val station = stationDao.getStationById(uuid) ?: continue
-            if (station.failCount > 2) continue // مهو مش خطير لسه
-            Log.d("ProactiveHeal", "تعافٍ استباقي: ${station.name}")
+            if (station.failCount > 2) continue // ظ…ظ‡ظˆ ظ…ط´ ط®ط·ظٹط± ظ„ط³ظ‡
+            Log.d("ProactiveHeal", "طھط¹ط§ظپظچ ط§ط³طھط¨ط§ظ‚ظٹ: ${station.name}")
             neuralHeal(station)
         }
     }
@@ -227,8 +227,8 @@ class RadioRepository(
     }
 }
 
-// Extension لـ StationDao (في نفس الملف كـ top-level)
+// Extension ظ„ظ€ StationDao (ظپظٹ ظ†ظپط³ ط§ظ„ظ…ظ„ظپ ظƒظ€ top-level)
 suspend fun StationDao.getVisibleStationsSnapshot(): List<StationEntity> {
-    // نحتاج دالة snapshot - سأضيفها في DAO
+    // ظ†ط­طھط§ط¬ ط¯ط§ظ„ط© snapshot - ط³ط£ط¶ظٹظپظ‡ط§ ظپظٹ DAO
     return getAllStationsSnapshot()
 }
