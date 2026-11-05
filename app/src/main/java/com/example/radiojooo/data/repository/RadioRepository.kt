@@ -12,10 +12,11 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 
-class RadioRepository(context: Context) {
-
-    private val db = AppDatabase.getDatabase(context)
-    private val stationDao: StationDao = db.stationDao()
+class RadioRepository(
+    private val context: Context,
+    private val stationDao: StationDao
+) {
+    constructor(context: Context) : this(context, AppDatabase.getDatabase(context).stationDao())
 
     val allStations: Flow<List<StationEntity>> = stationDao.getAllStations()
     val favoriteStations: Flow<List<StationEntity>> = stationDao.getFavoriteStations()
@@ -103,13 +104,21 @@ class RadioRepository(context: Context) {
         }
     }
 
+    suspend fun checkForUpdates(): Boolean {
+        return fetchStationsFromServer()
+    }
+
     suspend fun toggleFavorite(uuid: String) {
         withContext(Dispatchers.IO) {
             val station = stationDao.getStationByUuid(uuid)
-            station?.let {
-                stationDao.updateFavoriteStatus(uuid, !it.isFavorite)
+            if (station != null) {
+                stationDao.updateFavoriteStatus(uuid, !station.isFavorite)
             }
         }
+    }
+
+    suspend fun toggleFavorite(uuid: String, station: StationEntity? = null) {
+        toggleFavorite(uuid)
     }
 
     suspend fun getStationByUuid(uuid: String): StationEntity? {
