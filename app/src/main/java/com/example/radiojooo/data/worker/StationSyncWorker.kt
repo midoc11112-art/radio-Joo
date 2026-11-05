@@ -6,21 +6,20 @@ import androidx.work.WorkerParameters
 import com.example.radiojooo.data.repository.RadioRepository
 
 class StationSyncWorker(
-    context: Context,
+    appContext: Context,
     params: WorkerParameters
-) : CoroutineWorker(context, params) {
+) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
         return try {
             val repository = RadioRepository(applicationContext)
-            val updated = repository.checkForUpdates()
-            if (updated) {
-                Result.success()
-            } else {
-                Result.retry()
-            }
+            // 1. جلب المحطات الجديدة
+            repository.fetchStationsFromServer()
+            // 2. فحص صحة 30 محطة (غير المفحوصة + القديمة)
+            repository.runHealthChecks(batchSize = 30)
+            Result.success()
         } catch (e: Exception) {
-            Result.failure()
+            Result.retry()
         }
     }
 }
