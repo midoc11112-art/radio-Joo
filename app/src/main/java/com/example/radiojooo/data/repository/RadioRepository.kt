@@ -1,4 +1,4 @@
-﻿package com.example.radiojooo.data.repository
+package com.example.radiojooo.data.repository
 
 import android.content.Context
 import android.util.Log
@@ -46,8 +46,18 @@ class RadioRepository(
     private val _healthComplete = MutableSharedFlow<HealthCheckResult>(replay = 1, extraBufferCapacity = 1)
     val healthComplete: SharedFlow<HealthCheckResult> = _healthComplete.asSharedFlow()
 
-    private val apiClient = OkHttpClient.Builder().connectTimeout(60, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).build()
-    private val healthClient = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS).followRedirects(true).build()
+    private val apiClient = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
+        .build()
+
+    private val healthClient = OkHttpClient.Builder()
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .build()
+
     private val healthSemaphore = Semaphore(200)
     private val dbMutex = Mutex()
 
@@ -56,35 +66,40 @@ class RadioRepository(
     suspend fun neuralHeal(station: StationEntity): String? = withContext(Dispatchers.IO) {
         try {
             Log.d("HealAI", "بدء التعافي: ${station.name}")
-            val url = "$PROXY_BASE_URL/heal?uuid=${URLEncoder.encode(station.uuid, "UTF-8")}&name=${URLEncoder.encode(station.name, "UTF-8")}&country=${station.countryCode}&category=${station.category}"
+            val url = "$PROXY_BASE_URL/heal?uuid=${URLEncoder.encode(station.uuid, "UTF-8")}" +
+                    "&name=${URLEncoder.encode(station.name, "UTF-8")}" +
+                    "&country=${URLEncoder.encode(station.countryCode, "UTF-8")}" +
+                    "&category=${URLEncoder.encode(station.category, "UTF-8")}"
             apiClient.newCall(Request.Builder().url(url).build()).execute().use { res ->
                 if (res.isSuccessful) {
                     val body = res.body?.string() ?: return@withContext null
                     val json = JSONObject(body)
                     if (json.optBoolean("success", false)) {
                         val newUrl = json.optString("newUrl")
-                        Log.d("HealAI", "✅ تعافي: $newUrl")
-                        stationDao.updateStationUrl(station.uuid, newUrl)
-                        return@withContext newUrl
+                        if (newUrl.isNotBlank() && newUrl.startsWith("http")) {
+                            Log.d("HealAI", "✅ تعافي: $newUrl")
+                            runCatching { stationDao.updateStationUrl(station.uuid, newUrl) }
+                            return@withContext newUrl
+                        }
                     }
                 }
             }
-        } catch (e: Exception) { Log.e("HealAI", "فشل: ${e.message}") }
+        } catch (t: Throwable) { Log.e("HealAI", "فشل: ${t.message}") }
         return@withContext null
     }
 
     suspend fun sendFeedback(
-        uuid: String, 
-        source: String, 
-        success: Boolean, 
-        errorType: String = "none", 
-        country: String = "", 
-        category: String = ""
+        uuid: String, source: String, success: Boolean,
+        errorType: String = "none", country: String = "", category: String = ""
     ) = withContext(Dispatchers.IO) {
         try {
-            val fbUrl = "$PROXY_BASE_URL/feedback?uuid=${URLEncoder.encode(uuid, "UTF-8")}&source=${URLEncoder.encode(source, "UTF-8")}&success=$success&error=${URLEncoder.encode(errorType, "UTF-8")}&country=${URLEncoder.encode(country, "UTF-8")}&category=${URLEncoder.encode(category, "UTF-8")}"
+            val fbUrl = "$PROXY_BASE_URL/feedback?uuid=${URLEncoder.encode(uuid, "UTF-8")}" +
+                    "&source=${URLEncoder.encode(source, "UTF-8")}&success=$success" +
+                    "&error=${URLEncoder.encode(errorType, "UTF-8")}" +
+                    "&country=${URLEncoder.encode(country, "UTF-8")}" +
+                    "&category=${URLEncoder.encode(category, "UTF-8")}"
             apiClient.newCall(Request.Builder().url(fbUrl).build()).execute().close()
-        } catch (_: Exception) {}
+        } catch (_: Throwable) {}
     }
 
     suspend fun fetchStationsFromServer(): Int = withContext(Dispatchers.IO) {
@@ -99,26 +114,30 @@ class RadioRepository(
                     if (stations.isNotEmpty()) stationDao.insertStations(stations)
                 }
             }
-        } catch (e: Exception) { Log.e("Repo", "Fetch: ${e.message}") }
+        } catch (t: Throwable) { Log.e("RadioRepository", "Fetch: ${t.message}") }
         return@withContext stationDao.getTotalCount()
     }
 
     suspend fun ensureInitialDataLoaded() {
-        dbMutex.withLock {
-            _healthTotal.value = 0; _healthChecked.value = 0
-            fetchStationsFromServer()
-        }
-        delay(500)
-        performHealthChecks()
+        try {
+            dbMutex.withLock {
+                _healthTotal.value = 0; _healthChecked.value = 0
+                fetchStationsFromServer()
+            }
+            delay(500)
+            performHealthChecks()
+        } catch (t: Throwable) { Log.e("RadioRepository", "Init: ${t.message}") }
     }
 
     suspend fun forceRefreshAll() {
-        dbMutex.withLock {
-            stationDao.resetAllHealthStatus()
-            fetchStationsFromServer()
-        }
-        delay(500)
-        performHealthChecks()
+        try {
+            dbMutex.withLock {
+                stationDao.resetAllHealthStatus()
+                fetchStationsFromServer()
+            }
+            delay(500)
+            performHealthChecks()
+        } catch (t: Throwable) { Log.e("RadioRepository", "Refresh: ${t.message}") }
     }
 
     private suspend fun performHealthChecks() {
@@ -132,10 +151,12 @@ class RadioRepository(
                 _healthChecked.value = minOf(_healthChecked.value + 200, total)
                 safety++
             }
-            stationDao.cleanupDeadStations()
+            runCatching { stationDao.cleanupDeadStations() }
             _healthChecked.value = total
             _healthComplete.emit(HealthCheckResult(total, healthy))
-        } else { _healthComplete.emit(HealthCheckResult(0, 0)) }
+        } else {
+            _healthComplete.emit(HealthCheckResult(0, 0))
+        }
     }
 
     suspend fun runHealthChecks(batchSize: Int = 200): Int = coroutineScope {
@@ -143,19 +164,29 @@ class RadioRepository(
         try {
             val stations = stationDao.getUncheckedStations(batchSize)
             if (stations.isEmpty()) return@coroutineScope 0
-            val results = stations.map { s -> async(Dispatchers.IO) { healthSemaphore.withPermit { s to checkStationHealth(s.primaryUrl) } } }.awaitAll()
+            val results = stations.map { s ->
+                async(Dispatchers.IO) {
+                    healthSemaphore.withPermit {
+                        s to checkStationHealth(s.primaryUrl)
+                    }
+                }
+            }.awaitAll()
             healthy = results.count { it.second }
-            for ((station, ok) in results) { stationDao.updateHealth(station.uuid, ok, if (ok) 0 else station.failCount + 1, System.currentTimeMillis()) }
-            stationDao.cleanupDeadStations()
-        } catch (e: Exception) { Log.e("Repo", "HealthCheck: ${e.message}") }
+            for ((station, ok) in results) {
+                stationDao.updateHealth(station.uuid, ok, if (ok) 0 else station.failCount + 1, System.currentTimeMillis())
+            }
+            runCatching { stationDao.cleanupDeadStations() }
+        } catch (t: Throwable) { Log.e("RadioRepository", "Health: ${t.message}") }
         return@coroutineScope healthy
     }
 
     private suspend fun checkStationHealth(url: String): Boolean = withContext(Dispatchers.IO) {
         if (url.isBlank()) return@withContext false
         try {
-            healthClient.newCall(Request.Builder().url("$PROXY_BASE_URL/health-check?url=${URLEncoder.encode(url, "UTF-8")}").build()).execute().use { it.isSuccessful }
-        } catch (e: Exception) { false }
+            healthClient.newCall(Request.Builder()
+                .url("$PROXY_BASE_URL/health-check?url=${URLEncoder.encode(url, "UTF-8")}")
+                .build()).execute().use { it.isSuccessful }
+        } catch (t: Throwable) { false }
     }
 
     suspend fun toggleFavorite(uuid: String, currentStatus: Boolean) = stationDao.updateFavoriteStatus(uuid, !currentStatus)
@@ -163,7 +194,7 @@ class RadioRepository(
     fun wrapProxy(rawUrl: String): String {
         if (rawUrl.isBlank()) return ""
         if (rawUrl.contains("radio-joo-proxy")) return rawUrl
-        return try { "$PROXY_BASE_URL/?url=" + URLEncoder.encode(rawUrl, "UTF-8") } catch (e: Exception) { "$PROXY_BASE_URL/?url=" + rawUrl }
+        return try { "$PROXY_BASE_URL/?url=" + URLEncoder.encode(rawUrl, "UTF-8") } catch (t: Throwable) { "$PROXY_BASE_URL/?url=" + rawUrl }
     }
 
     private fun parseStations(arr: org.json.JSONArray): List<StationEntity> {
@@ -173,11 +204,18 @@ class RadioRepository(
                 val o = arr.getJSONObject(i)
                 val uuid = o.optString("uuid"); val url = o.optString("primaryUrl")
                 if (uuid.isNotBlank() && url.isNotBlank()) {
-                    list.add(StationEntity(uuid=uuid, name=o.optString("name"), primaryUrl=url, fallbackUrl=o.optString("fallbackUrl",""), category=o.optString("category","MUSIC"), countryCode=o.optString("countryCode",""), bitrate=o.optInt("bitrate",64), popularity=o.optInt("popularity",0), lastUpdated=System.currentTimeMillis()))
+                    list.add(StationEntity(
+                        uuid = uuid, name = o.optString("name"),
+                        primaryUrl = url, fallbackUrl = o.optString("fallbackUrl", ""),
+                        category = o.optString("category", "MUSIC"),
+                        countryCode = o.optString("countryCode", ""),
+                        bitrate = o.optInt("bitrate", 64),
+                        popularity = o.optInt("popularity", 0),
+                        lastUpdated = System.currentTimeMillis()
+                    ))
                 }
-            } catch (e: Exception) {}
+            } catch (t: Throwable) {}
         }
         return list
     }
 }
-
