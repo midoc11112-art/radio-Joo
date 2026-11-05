@@ -116,7 +116,7 @@ class RadioService : Service() {
     var sleepTimeRemainingMs = 0L
         private set
     private var retryCount = 0
-    private val maxRetries = 5 // زيادة عدد المحاولات
+    private val maxRetries = 5
     private val statsHandler = Handler(Looper.getMainLooper())
     private val statsRunnable = object : Runnable {
         override fun run() {
@@ -191,24 +191,28 @@ class RadioService : Service() {
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters()
                 .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
-                // ✅ إزالة القيد على الـ Bitrate لضمان تشغيل كل المحطات
+                // ✅ تقييد أقصى بتريت صوتي إلى 48 kbps (توفير جذري)
+                .setMaxAudioBitrate(48_000)
+                // ✅ إجبار المشغل على اختيار أقل مسار صوتي متاح
+                .setForceLowestBitrate(true)
+                // ✅ تعطيل القدرة على اختيار مسارات أعلى
+                .setAllowVideoMixedMimeTypeAdaptiveness(false)
                 .build()
         }
-        // ✅ زيادة الـ Buffer لتحمل تقلبات الشبكة
+        // ✅ زيادة الـ Buffer لتحمل تقلبات الشبكة دون إعادة تحميل
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                15000, // minBufferMs (15 ثانية)
-                60000, // maxBufferMs (60 ثانية)
-                2500,  // bufferForPlaybackMs
-                5000   // bufferForPlaybackAfterRebufferMs
+                15000,
+                60000,
+                2500,
+                5000
             )
-            .setTargetBufferBytes(-1) // استخدام الافتراضي
+            .setTargetBufferBytes(-1)
             .build()
             
-        // ✅ إعدادات مصدر البيانات ليكون أكثر تسامحاً
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(30000) // 30 ثانية
-            .setReadTimeoutMs(30000) // 30 ثانية
+            .setConnectTimeoutMs(30000)
+            .setReadTimeoutMs(30000)
             .setAllowCrossProtocolRedirects(true)
             .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
             .setDefaultRequestProperties(mapOf(
@@ -230,8 +234,7 @@ class RadioService : Service() {
                     .build(),
                 true
             )
-            // ✅ تعطيل معالجة فصل السماعة (لأنها أحياناً بتسبب مشاكل)
-            .setHandleAudioBecomingNoisy(false) 
+            .setHandleAudioBecomingNoisy(false)
             .build()
             
         player.setWakeMode(C.WAKE_MODE_NETWORK)
@@ -264,7 +267,6 @@ class RadioService : Service() {
     private fun handlePlaybackError(error: PlaybackException) {
         retryCount++
         if (retryCount <= maxRetries) {
-            // محاولة إعادة التشغيل بعد فترة
             statsHandler.postDelayed({
                 if (availableUrls.isNotEmpty()) {
                     startStream(availableUrls.getOrNull(currentUrlIndex) ?: availableUrls[0], useProxy = true)
@@ -409,7 +411,7 @@ class RadioService : Service() {
             player.clearMediaItems()
             isUsingProxy = useProxy
             val finalUrl = if (useProxy) {
-                cloudflareProxyBase + URLEncoder.encode(streamUrl, "UTF-8") + "&bitrate=48"
+                cloudflareProxyBase + URLEncoder.encode(streamUrl, "UTF-8") + "&bitrate=32"
             } else {
                 streamUrl
             }
@@ -417,6 +419,7 @@ class RadioService : Service() {
             val mimeType = when {
                 streamUrl.contains(".m3u8", ignoreCase = true) -> MimeTypes.APPLICATION_M3U8
                 streamUrl.contains(".aac", ignoreCase = true) -> MimeTypes.AUDIO_AAC
+                streamUrl.contains(".opus", ignoreCase = true) -> MimeTypes.AUDIO_OPUS
                 else -> MimeTypes.AUDIO_MPEG
             }
             val metadata = MediaMetadata.Builder()
@@ -429,7 +432,6 @@ class RadioService : Service() {
                 .setMediaMetadata(metadata)
                 .build()
                 
-            // ✅ استخدام المصدر المباشر بدون FilteringMediaSource
             val mediaSource = mediaSourceFactory.createMediaSource(mediaItem)
             
             player.setMediaSource(mediaSource)
