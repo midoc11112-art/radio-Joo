@@ -7,261 +7,540 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.media.MediaScannerConnection
+import android.net.TrafficStats
+import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Binder
 import android.os.Build
+import android.os.CountDownTimer
+import android.os.Environment
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.FilteringMediaSource
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import com.example.radiojooo.R
-import com.example.radiojooo.data.model.StationEntity
-import com.example.radiojooo.data.repository.RadioRepository
+import com.example.radiojooo.data.local.AppDatabase
 import com.example.radiojooo.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import java.io.File
+import java.io.FileOutputStream
+import java.net.URL
 import java.net.URLEncoder
+import java.util.Locale
 
 class RadioService : Service() {
 
-    private val binder = LocalBinder()
-    private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private lateinit var repository: RadioRepository
-    private lateinit var exoPlayer: ExoPlayer
+    companion object {
+        private var instance: RadioService? = null
+        private const val CHANNEL_ID = "radio_joo_service_channel"
+        private const val NOTIFICATION_ID = 1001
 
+        fun getInstance(): RadioService? = instance
+
+        fun requestPlayStation(
+            context: Context,
+            title: String,
+            uuid: String,
+            pUrl: String,
+            fUrl: String,
+            bitrate: Int = 0,
+            category: String = "",
+            country: String = ""
+        ) {
+            val intent = Intent(context, RadioService::class.java).apply {
+                putExtra("ACTION", "PLAY_STATION")
+                putExtra("TITLE", title)
+                putExtra("UUID", uuid)
+                putExtra("PRIMARY_URL", pUrl)
+                putExtra("FALLBACK_URL", fUrl)
+                putExtra("BITRATE", bitrate)
+                putExtra("CATEGORY", category)
+                putExtra("COUNTRY", country)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        }
+    }
+
+    private val binder = LocalBinder()
+    private val cloudflareProxyBase = "https://radio-joo-proxy.midoc11112.workers.dev/?url="
+    private var isUsingProxy = false
+    private lateinit var player: ExoPlayer
+    private lateinit var trackSelector: DefaultTrackSelector
+    private lateinit var mediaSourceFactory: DefaultMediaSourceFactory
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
-
-    private val _currentStation = MutableStateFlow<StationEntity?>(null)
-    val currentStation: StateFlow<StationEntity?> = _currentStation.asStateFlow()
-
-    private val _isPlaying = MutableStateFlow(false)
-    val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
-
-    private var isUsingFallback = false
+    private var isAppInForeground = true
+    private var availableUrls = mutableListOf<String>()
+    private var currentUrlIndex = 0
+    var currentTitle: String = "راديو جو PRO"
+    var currentBitrate: Int = 0
+    var currentCategory: String = ""
+    var currentCountry: String = ""
+    var currentStationUuid: String = ""
+    var isRecording = false
+        private set
+    private var recordingJob: Job? = null
+    private val serviceScope = CoroutineScope(Dispatchers.IO)
+    private var lastRxBytes = 0L
+    private var totalSessionBytes = 0L
+    var currentSpeedKbps = 0.0
+    var totalDataMb = 0.0
+    private var stationStartTimeMs = 0L
+    private var sleepTimer: CountDownTimer? = null
+    var sleepTimeRemainingMs = 0L
+        private set
+    private var retryCount = 0
+    private val maxRetries = 3
+    private val statsHandler = Handler(Looper.getMainLooper())
+    private val statsRunnable = object : Runnable {
+        override fun run() {
+            if (isAppInForeground) {
+                calculateDataUsage()
+                statsHandler.postDelayed(this, 1000)
+            }
+        }
+    }
 
     inner class LocalBinder : Binder() {
         fun getService(): RadioService = this@RadioService
     }
 
+    override fun onBind(intent: Intent?): IBinder = binder
+
     override fun onCreate() {
         super.onCreate()
-        repository = RadioRepository(applicationContext)
-        initLocks()
-        initPlayer()
+        instance = this
         createNotificationChannel()
-    }
-
-    private fun initLocks() {
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "RadioJoo::WakeLock")
-        wakeLock?.setReferenceCounted(false)
-
-        val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-        wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "RadioJoo::WifiLock")
-        wifiLock?.setReferenceCounted(false)
-    }
-
-    private fun acquireLocks() {
-        if (wakeLock?.isHeld == false) wakeLock?.acquire(10 * 60 * 1000L)
-        if (wifiLock?.isHeld == false) wifiLock?.acquire()
-    }
-
-    private fun releaseLocks() {
-        if (wakeLock?.isHeld == true) wakeLock?.release()
-        if (wifiLock?.isHeld == true) wifiLock?.release()
-    }
-
-    private fun initPlayer() {
-        val audioAttributes = AudioAttributes.Builder()
-            .setUsage(C.USAGE_MEDIA)
-            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-            .build()
-
-        exoPlayer = ExoPlayer.Builder(this)
-            .setAudioAttributes(audioAttributes, true)
-            .setHandleAudioBecomingNoisy(true)
-            .build()
-
-        exoPlayer.addListener(object : Player.Listener {
-            override fun onIsPlayingChanged(isPlayingNow: Boolean) {
-                _isPlaying.value = isPlayingNow
-                if (isPlayingNow) {
-                    acquireLocks()
-                } else {
-                    releaseLocks()
-                }
-                updateNotification()
-            }
-
-            override fun onPlayerError(error: PlaybackException) {
-                val current = _currentStation.value
-                if (current != null && !isUsingFallback && !current.fallbackUrl.isNull_Empty()) {
-                    isUsingFallback = true
-                    playUrl(current.fallbackUrl!!)
-                } else {
-                    _isPlaying.value = false
-                    releaseLocks()
-                    updateNotification()
-                }
-            }
-        })
-    }
-
-    fun playStation(station: StationEntity) {
-        _currentStation.value = station
-        isUsingFallback = false
-        val targetUrl = getProxyUrl(station.primaryUrl)
-        playUrl(targetUrl)
-        startForeground(NOTIFICATION_ID, buildNotification())
-    }
-
-    private fun playUrl(url: String) {
-        val mediaItem = MediaItem.fromUri(getProxyUrl(url))
-        exoPlayer.setMediaItem(mediaItem)
-        exoPlayer.prepare()
-        exoPlayer.play()
-    }
-
-    fun togglePlayPause() {
-        if (exoPlayer.isPlaying) {
-            exoPlayer.pause()
-        } else {
-            if (exoPlayer.playbackState == Player.STATE_ENDED) {
-                exoPlayer.seekTo(0)
-            }
-            exoPlayer.play()
-        }
-        updateNotification()
-    }
-
-    fun stopPlayer() {
-        exoPlayer.stop()
-        _isPlaying.value = false
-        releaseLocks()
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
-    }
-
-    private fun getProxyUrl(rawUrl: String): String {
-        if (rawUrl.startsWith("https://radio-joo-proxy.midoc11112.workers.dev")) return rawUrl
-        return try {
-            "https://radio-joo-proxy.midoc11112.workers.dev/?url=" + URLEncoder.encode(rawUrl, "UTF-8")
-        } catch (e: Exception) {
-            rawUrl
-        }
-    }
-
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Radio Joo Service",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "تشغيل إذاعات تطبيق Radio Joo"
-                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-            }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
-        }
-    }
-
-    private fun buildNotification(): Notification {
-        val station = _currentStation.value
-        val title = station?.name ?: "Radio Joo"
-        val content = station?.category ?: "بث مباشر"
-
-        val intent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val playPauseAction = if (_isPlaying.value) {
-            NotificationCompat.Action(
-                R.drawable.ic_notification_pause, "إيقاف",
-                getPendingIntent(ACTION_PLAY_PAUSE)
-            )
-        } else {
-            NotificationCompat.Action(
-                R.drawable.ic_notification_play, "تشغيل",
-                getPendingIntent(ACTION_PLAY_PAUSE)
-            )
-        }
-
-        val stopAction = NotificationCompat.Action(
-            R.drawable.ic_notification_close, "إغلاق",
-            getPendingIntent(ACTION_STOP)
-        )
-
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(title)
-            .setContentText(content)
-            .setSmallIcon(R.drawable.ic_radio_joo)
-            .setContentIntent(pendingIntent)
-            .addAction(playPauseAction)
-            .addAction(stopAction)
-            .setStyle(MediaStyle().setShowActionsInCompactView(0, 1))
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setOngoing(_isPlaying.value)
-            .build()
-    }
-
-    private fun updateNotification() {
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(NOTIFICATION_ID, buildNotification())
-    }
-
-    private fun getPendingIntent(action: String): PendingIntent {
-        val intent = Intent(this, RadioActionReceiver::class.java).apply {
-            this.action = action
-            setPackage(packageName)
-        }
-        return PendingIntent.getBroadcast(
-            this, action.hashCode(), intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+        acquireLocks()
+        initializePlayer()
+        statsHandler.post(statsRunnable)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        intent?.action?.let { action ->
-            when (action) {
-                ACTION_PLAY_PAUSE -> togglePlayPause()
-                ACTION_STOP -> stopPlayer()
+        startForegroundWithNotification()
+        intent?.let {
+            when (it.getStringExtra("ACTION")) {
+                "PLAY_STATION" -> {
+                    val title = it.getStringExtra("TITLE") ?: "راديو جو PRO"
+                    val uuid = it.getStringExtra("UUID") ?: ""
+                    val pUrl = it.getStringExtra("PRIMARY_URL") ?: ""
+                    val fUrl = it.getStringExtra("FALLBACK_URL") ?: ""
+                    val bitrate = it.getIntExtra("BITRATE", 0)
+                    val category = it.getStringExtra("CATEGORY") ?: ""
+                    val country = it.getStringExtra("COUNTRY") ?: ""
+                    playStationInternal(title, uuid, pUrl, fUrl, bitrate, category, country)
+                }
             }
         }
         return START_STICKY
     }
 
-    override fun onBind(intent: Intent?): IBinder = binder
-
     override fun onDestroy() {
+        sleepTimer?.cancel()
+        sleepTimer = null
+        stopRecording()
         releaseLocks()
-        exoPlayer.release()
-        serviceScope.cancel()
+        statsHandler.removeCallbacks(statsRunnable)
+        try {
+            if (::player.isInitialized) player.release()
+        } catch (_: Exception) {}
+        instance = null
         super.onDestroy()
     }
 
-    private fun String?.isNull_Empty(): Boolean = this == null || this.trim().isEmpty()
+    override fun onTaskRemoved(rootIntent: Intent?) {}
 
-    companion object {
-        const val CHANNEL_ID = "radio_joo_playback_channel"
-        const val NOTIFICATION_ID = 1001
-        const val ACTION_PLAY_PAUSE = "com.example.radiojooo.ACTION_PLAY_PAUSE"
-        const val ACTION_STOP = "com.example.radiojooo.ACTION_STOP"
+    private fun initializePlayer() {
+        val renderersFactory = DefaultRenderersFactory(this).apply {
+            setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
+        }
+        trackSelector = DefaultTrackSelector(this).apply {
+            parameters = buildUponParameters()
+                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
+                .setMaxVideoSize(1, 1)
+                .setForceHighestSupportedBitrate(false)
+                .setMaxAudioBitrate(48000)
+                .build()
+        }
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(3000, 8000, 500, 1000)
+            .setTargetBufferBytes(128 * 1024)
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .setBackBuffer(0, false)
+            .build()
+        val dataSourceFactory = DefaultHttpDataSource.Factory()
+            .setConnectTimeoutMs(15000)
+            .setReadTimeoutMs(15000)
+            .setAllowCrossProtocolRedirects(true)
+            .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .setDefaultRequestProperties(mapOf(
+                "Accept" to "audio/*",
+                "Icy-MetaData" to "0"
+            ))
+        mediaSourceFactory = DefaultMediaSourceFactory(this)
+            .setDataSourceFactory(dataSourceFactory)
+        player = ExoPlayer.Builder(this, renderersFactory)
+            .setTrackSelector(trackSelector)
+            .setLoadControl(loadControl)
+            .setMediaSourceFactory(mediaSourceFactory)
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                    .setUsage(C.USAGE_MEDIA)
+                    .build(),
+                true
+            )
+            .setHandleAudioBecomingNoisy(true)
+            .build()
+        player.setWakeMode(C.WAKE_MODE_NETWORK)
+        player.addListener(object : Player.Listener {
+            override fun onPlayerError(error: PlaybackException) {
+                handlePlaybackError(error)
+            }
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                updateNotification()
+            }
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_READY && currentStationUuid.isNotBlank()) {
+                    serviceScope.launch {
+                        try {
+                            AppDatabase.getDatabase(applicationContext).stationDao()
+                                .updateHealth(currentStationUuid, works = true, failCount = 0)
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
+        })
+    }
+
+    private fun handlePlaybackError(error: PlaybackException) {
+        if (currentStationUuid.isNotBlank()) {
+            serviceScope.launch {
+                try {
+                    val dao = AppDatabase.getDatabase(applicationContext).stationDao()
+                    val st = dao.getStationById(currentStationUuid)
+                    if (st != null) dao.updateHealth(currentStationUuid, works = false, failCount = st.failCount + 1)
+                } catch (_: Exception) {}
+            }
+        }
+        retryCount++
+        if (retryCount <= maxRetries) {
+            when {
+                !isUsingProxy -> {
+                    statsHandler.postDelayed({
+                        val currentUrl = availableUrls.getOrNull(currentUrlIndex) ?: return@postDelayed
+                        startStream(currentUrl, useProxy = true)
+                    }, 2000)
+                }
+                availableUrls.size > 1 -> {
+                    statsHandler.postDelayed({ tryNextMirrorServer() }, 3000)
+                }
+                else -> {
+                    statsHandler.postDelayed({
+                        val currentUrl = availableUrls.getOrNull(currentUrlIndex) ?: return@postDelayed
+                        val normalizedUrl = normalizeUrl(currentUrl)
+                        if (normalizedUrl != currentUrl) startStream(normalizedUrl, useProxy = true)
+                    }, 4000)
+                }
+            }
+        } else {
+            retryCount = 0
+        }
+    }
+
+    private fun normalizeUrl(url: String): String {
+        var normalized = url.trim()
+        if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) {
+            normalized = "https://$normalized"
+        }
+        normalized = normalized.replace(" ", "%20")
+        normalized = normalized.replace(":///", "://")
+        return normalized
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID, "راديو جو", NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "التحكم في بث الراديو المباشر"
+                setShowBadge(false)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                enableLights(false)
+                enableVibration(false)
+                setSound(null, null)
+            }
+            getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
+        }
+    }
+
+    fun updateNotification() {
+        val notification = buildNotification()
+        getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, notification)
+    }
+
+    private fun getLargeIcon(): Bitmap? {
+        return try { BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher) } catch (e: Exception) { null }
+    }
+
+    private fun getCategoryArabicName(category: String): String {
+        return when (category.uppercase()) {
+            "QURAN" -> "القرآن الكريم"
+            "NEWS" -> "الأخبار"
+            "MUSIC" -> "الموسيقى"
+            "SPORTS" -> "الرياضة"
+            "EGYPT" -> "مصر"
+            else -> "عام"
+        }
+    }
+
+    private fun buildNotification(): Notification {
+        val contentIntent = PendingIntent.getActivity(
+            this, 0, Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val stopIntent = Intent(RadioActionReceiver.ACTION_STOP).apply { setPackage(packageName) }
+        val stopPendingIntent = PendingIntent.getBroadcast(this, 1, stopIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val playPauseIntent = Intent(RadioActionReceiver.ACTION_PLAY_PAUSE).apply { setPackage(packageName) }
+        val playPausePendingIntent = PendingIntent.getBroadcast(this, 0, playPauseIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val playPauseIcon = if (player.isPlaying) R.drawable.ic_notification_pause else R.drawable.ic_notification_play
+        val playPauseText = if (player.isPlaying) "إيقاف" else "تشغيل"
+        val largeIcon = getLargeIcon()
+        val subTextParts = mutableListOf<String>()
+        if (currentBitrate > 0) subTextParts.add(currentBitrate.toString() + " Kbps")
+        if (currentCategory.isNotBlank()) subTextParts.add(getCategoryArabicName(currentCategory))
+        if (currentCountry.isNotBlank()) subTextParts.add(currentCountry)
+        val subText = if (subTextParts.isNotEmpty()) subTextParts.joinToString(" • ") else "راديو جو"
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(currentTitle)
+            .setContentText(subText)
+            .setSmallIcon(R.drawable.ic_notification_play)
+            .setLargeIcon(largeIcon)
+            .setContentIntent(contentIntent)
+            .setOngoing(true)
+            .setShowWhen(false)
+            .setOnlyAlertOnce(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
+            .setColor(0xFF1976D2.toInt())
+            .setColorized(true)
+            .addAction(R.drawable.ic_notification_close, "خروج", stopPendingIntent)
+            .addAction(playPauseIcon, playPauseText, playPausePendingIntent)
+            .setStyle(MediaStyle().setShowActionsInCompactView(0, 1))
+            .build()
+    }
+
+    private fun startForegroundWithNotification() {
+        val notification = buildNotification()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
+    private fun playStationInternal(title: String, uuid: String, pUrl: String, fUrl: String, bitrate: Int = 0, category: String = "", country: String = "") {
+        stopRecording()
+        currentTitle = title
+        currentStationUuid = uuid
+        currentBitrate = bitrate
+        currentCategory = category
+        currentCountry = country
+        retryCount = 0
+        availableUrls.clear()
+        if (pUrl.isNotBlank()) availableUrls.add(normalizeUrl(pUrl))
+        if (fUrl.isNotBlank()) availableUrls.addAll(fUrl.split(",").map { normalizeUrl(it.trim()) }.filter { it.isNotBlank() })
+        currentUrlIndex = 0
+        totalSessionBytes = 0L
+        lastRxBytes = TrafficStats.getUidRxBytes(android.os.Process.myUid())
+        stationStartTimeMs = System.currentTimeMillis()
+        if (availableUrls.isNotEmpty()) startStream(availableUrls[0], useProxy = true)
+        updateNotification()
+    }
+
+    private fun startStream(streamUrl: String, useProxy: Boolean = false) {
+        try {
+            player.stop()
+            player.clearMediaItems()
+            isUsingProxy = useProxy
+            val finalUrl = if (useProxy) {
+                cloudflareProxyBase + URLEncoder.encode(streamUrl, "UTF-8") + "&bitrate=48"
+            } else {
+                streamUrl
+            }
+            val uri = Uri.parse(finalUrl)
+            val mimeType = when {
+                streamUrl.contains(".m3u8", ignoreCase = true) -> MimeTypes.APPLICATION_M3U8
+                streamUrl.contains(".aac", ignoreCase = true) -> MimeTypes.AUDIO_AAC
+                else -> MimeTypes.AUDIO_MPEG
+            }
+            val metadata = MediaMetadata.Builder()
+                .setTitle(currentTitle)
+                .setArtist(currentCountry)
+                .build()
+            val mediaItem = MediaItem.Builder()
+                .setUri(uri)
+                .setMimeType(mimeType)
+                .setMediaMetadata(metadata)
+                .build()
+            val mediaSource = mediaSourceFactory.createMediaSource(mediaItem)
+            val filteredSource = FilteringMediaSource(mediaSource, C.TRACK_TYPE_AUDIO)
+            player.setMediaSource(filteredSource)
+            player.prepare()
+            player.playWhenReady = true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            handlePlaybackError(PlaybackException("Stream error", e, PlaybackException.ERROR_CODE_UNSPECIFIED))
+        }
+    }
+
+    private fun getProxiedUrl(rawUrl: String): String {
+        if (rawUrl.isBlank()) return rawUrl
+        if (rawUrl.contains("radio-joo-proxy.midoc11112.workers.dev")) return rawUrl
+        return try { cloudflareProxyBase + URLEncoder.encode(rawUrl, "UTF-8") } catch (e: Exception) { cloudflareProxyBase + Uri.encode(rawUrl) }
+    }
+
+    private fun tryNextMirrorServer() {
+        if (availableUrls.isEmpty()) return
+        if (availableUrls.size == 1) {
+            statsHandler.postDelayed({ if (availableUrls.isNotEmpty()) startStream(availableUrls[0], useProxy = true) }, 4000)
+            return
+        }
+        currentUrlIndex = (currentUrlIndex + 1) % availableUrls.size
+        statsHandler.postDelayed({ if (availableUrls.isNotEmpty()) startStream(availableUrls[currentUrlIndex], useProxy = true) }, 1500)
+    }
+
+    fun setAppForegroundState(inForeground: Boolean) {
+        isAppInForeground = inForeground
+        if (inForeground) statsHandler.post(statsRunnable) else statsHandler.removeCallbacks(statsRunnable)
+    }
+
+    fun pausePlayback() { if (::player.isInitialized) player.pause() }
+    fun resumePlayback() { if (::player.isInitialized) player.play() }
+    fun isPlaying(): Boolean = ::player.isInitialized && player.isPlaying
+    fun closeApp() { stopAndExitApp() }
+
+    private fun acquireLocks() {
+        try {
+            val pm = getSystemService(POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "RadioJoo::ServiceWakeLock")
+            wakeLock?.acquire(10 * 60 * 60 * 1000L)
+            val wm = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
+            wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "RadioJoo::ServiceWifiLock")
+            wifiLock?.acquire()
+        } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    private fun releaseLocks() {
+        try {
+            if (wakeLock?.isHeld == true) wakeLock?.release()
+            if (wifiLock?.isHeld == true) wifiLock?.release()
+        } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    fun getRecordingsFolder(): File {
+        val folder = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "RadioJoo")
+        if (!folder.exists()) folder.mkdirs()
+        return folder
+    }
+
+    fun toggleRecording(): Boolean {
+        if (isRecording) stopRecording() else startRecording()
+        return isRecording
+    }
+
+    private fun startRecording() {
+        if (availableUrls.isEmpty()) return
+        isRecording = true
+        val currentUrl = availableUrls.getOrNull(currentUrlIndex) ?: return
+        val finalUrl = if (isUsingProxy) getProxiedUrl(currentUrl) else currentUrl
+        recordingJob = serviceScope.launch {
+            try {
+                val dir = getRecordingsFolder()
+                val safeTitle = currentTitle.replace(Regex("[^a-zA-Z0-9_ -]"), "_")
+                val file = File(dir, "Rec_" + safeTitle + "_" + System.currentTimeMillis() + ".mp3")
+                val connection = URL(finalUrl).openConnection().apply {
+                    connectTimeout = 10000; readTimeout = 10000
+                    setRequestProperty("User-Agent", "Mozilla/5.0")
+                }
+                connection.getInputStream().use { input ->
+                    FileOutputStream(file).use { output ->
+                        val buffer = ByteArray(4096)
+                        var bytesRead = 0
+                        while (isRecording && input.read(buffer).also { bytesRead = it } != -1) output.write(buffer, 0, bytesRead)
+                    }
+                }
+                MediaScannerConnection.scanFile(applicationContext, arrayOf(file.absolutePath), arrayOf("audio/mpeg"), null)
+            } catch (e: Exception) { e.printStackTrace(); isRecording = false }
+        }
+    }
+
+    private fun stopRecording() { isRecording = false; recordingJob?.cancel(); recordingJob = null }
+
+    fun startSleepTimer(minutes: Int) {
+        sleepTimer?.cancel()
+        if (minutes <= 0) { sleepTimeRemainingMs = 0L; return }
+        val totalMs = minutes * 60 * 1000L
+        sleepTimer = object : CountDownTimer(totalMs, 1000) {
+            override fun onTick(millisUntilFinished: Long) { sleepTimeRemainingMs = millisUntilFinished }
+            override fun onFinish() { sleepTimeRemainingMs = 0L; stopAndExitApp() }
+        }.start()
+    }
+
+    private fun stopAndExitApp() {
+        sleepTimer?.cancel(); sleepTimer = null; stopRecording()
+        statsHandler.removeCallbacks(statsRunnable)
+        try { if (::player.isInitialized) player.stop() } catch (e: Exception) { e.printStackTrace() }
+        releaseLocks()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    fun getListeningDurationFormatted(): String {
+        if (!::player.isInitialized || !player.isPlaying || stationStartTimeMs == 0L) return "00:00:00"
+        val diffSec = (System.currentTimeMillis() - stationStartTimeMs) / 1000
+        return String.format(Locale.US, "%02d:%02d:%02d", diffSec / 3600, (diffSec % 3600) / 60, diffSec % 60)
+    }
+
+    private fun calculateDataUsage() {
+        if (::player.isInitialized && player.isPlaying) {
+            val currentRx = TrafficStats.getUidRxBytes(android.os.Process.myUid())
+            if (lastRxBytes != 0L && currentRx > lastRxBytes) {
+                val bytesThisSecond = currentRx - lastRxBytes
+                totalSessionBytes += bytesThisSecond
+                currentSpeedKbps = bytesThisSecond / 1024.0
+                totalDataMb = totalSessionBytes / (1024.0 * 1024.0)
+            }
+            lastRxBytes = currentRx
+        } else { currentSpeedKbps = 0.0 }
     }
 }
