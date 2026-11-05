@@ -12,11 +12,7 @@ interface StationDao {
     @Query("SELECT * FROM stations ORDER BY popularity DESC")
     fun getAllStations(): Flow<List<StationEntity>>
 
-    // 🔑 الاستعلام الحاسم:
-    // 1. المحطات التي تم التحقق من أنها تعمل (lastUrlWorks = 1) وفشلت أقل من 3 مرات.
-    // 2. المحطات الشعبية التي لم يتم فحصها بعد (lastUrlWorks IS NULL AND popularity > 50).
-    // 3. المحطات المفضلة (isFavorite = 1).
-    // أي محطة فشلت 3 مرات أو أكثر يتم استبعادها تلقائيًا.
+    // استعلام دقيق: يعرض المحطات التي تعمل، أو الشعبية غير المفحوصة، أو المفضلة
     @Query("""
         SELECT * FROM stations 
         WHERE (lastUrlWorks = 1 AND failCount < 3)
