@@ -11,6 +11,8 @@ import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
 import android.view.View
+import android.view.animation.AccelerateInterpolator
+import android.view.animation.DecelerateInterpolator
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.Toast
@@ -63,6 +65,11 @@ class MainActivity : AppCompatActivity() {
         setupHeaderButtons()
         setupMiniPlayer()
         observeViewModel()
+
+        // ✅ عرض شريط "جاري التحقق" فقط عند الفتح الأول (مش بعد rotation)
+        if (savedInstanceState == null) {
+            showVerificationIndicator()
+        }
     }
 
     private fun requestAllPermissions() {
@@ -185,6 +192,51 @@ class MainActivity : AppCompatActivity() {
             country = station.countryCode
         )
         updateMiniPlayer()
+    }
+
+    /**
+     * 🆕 شريط "جاري التحقق":
+     * - Fade In 200ms
+     * - Stay 1600ms
+     * - Fade Out 200ms
+     * الإجمالي = 2000ms (ثانيتان بالضبط)
+     * لا يستهلك CPU ولا يعمل I/O ولا يمنع أي تفاعل.
+     */
+    private fun showVerificationIndicator() {
+        val indicator = binding.verificationIndicator
+
+        // منع التكرار لو ظهر بالفعل (حماية إضافية)
+        if (indicator.visibility == View.VISIBLE) return
+
+        // البدء شفافًا
+        indicator.alpha = 0f
+        indicator.visibility = View.VISIBLE
+
+        // 1) Fade In خلال 200ms
+        indicator.animate()
+            .alpha(1f)
+            .setDuration(200)
+            .setInterpolator(DecelerateInterpolator())
+            .withEndAction {
+                // 2) بعد اكتمال الظهور، انتظر 1600ms ثم ابدأ Fade Out
+                indicator.postDelayed({
+                    // حماية إضافية: لو الـ Activity بدأ يُدمَّر، لا نكمل
+                    if (isFinishing || isDestroyed) return@postDelayed
+
+                    indicator.animate()
+                        .alpha(0f)
+                        .setDuration(200)
+                        .setInterpolator(AccelerateInterpolator())
+                        .withEndAction {
+                            // 3) أخيرًا: GONE (يختفي تمامًا)
+                            if (!isFinishing && !isDestroyed) {
+                                indicator.visibility = View.GONE
+                            }
+                        }
+                        .start()
+                }, 1600L)
+            }
+            .start()
     }
 
     private fun updateSleepTimerButton() {
