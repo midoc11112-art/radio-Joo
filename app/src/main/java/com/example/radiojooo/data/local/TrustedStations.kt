@@ -139,8 +139,41 @@ object TrustedStations {
                 popularity = 989,
                 lastUpdated = now
             ),
+            StationEntity(
+                uuid = "eg_shabab_ryada",
+                name = "إذاعة الشباب والرياضة 108.0",
+                primaryUrl = "https://stream.zeno.fm/0787d89z1heuv",
+                fallbackUrl = "",
+                category = "SPORTS",
+                countryCode = "EG",
+                bitrate = 128,
+                popularity = 988,
+                lastUpdated = now
+            ),
+            StationEntity(
+                uuid = "eg_radio_agani",
+                name = "إذاعة الأغاني المصرية 105.8",
+                primaryUrl = "https://stream.zeno.fm/zsgrfxg71s8uv",
+                fallbackUrl = "",
+                category = "EGYPT",
+                countryCode = "EG",
+                bitrate = 128,
+                popularity = 987,
+                lastUpdated = now
+            ),
+            StationEntity(
+                uuid = "eg_mix_fm",
+                name = "ميكس إف إم 87.8 Mix FM مصر",
+                primaryUrl = "https://stream-29.zeno.fm/na3vpvn10qruv",
+                fallbackUrl = "",
+                category = "EGYPT",
+                countryCode = "EG",
+                bitrate = 128,
+                popularity = 986,
+                lastUpdated = now
+            ),
 
-            // --- المحطات الإخبارية والتوك شو ---
+            // --- الإذاعات الإخبارية والتوك شو الدولية والعربية ---
             StationEntity(
                 uuid = "news_aljazeera_voice",
                 name = "صوت الجزيرة الإخبارية Al Jazeera",
@@ -197,6 +230,17 @@ object TrustedStations {
                 lastUpdated = now
             ),
             StationEntity(
+                uuid = "news_asharq_news",
+                name = "الشرق للأخبار Asharq News Bloomberg",
+                primaryUrl = "https://l3.itworkscdn.net/alarabyradiolive/alarabyradio_audio/icecast.audio",
+                fallbackUrl = "",
+                category = "NEWS",
+                countryCode = "SA",
+                bitrate = 128,
+                popularity = 995,
+                lastUpdated = now
+            ),
+            StationEntity(
                 uuid = "news_bbc_arabic",
                 name = "بي بي سي عربي BBC Arabic Radio",
                 primaryUrl = "http://bbcwssc.ic.llnwd.net/stream/bbcwssc_mp1_ws-araba",
@@ -207,8 +251,30 @@ object TrustedStations {
                 popularity = 994,
                 lastUpdated = now
             ),
+            StationEntity(
+                uuid = "news_radio_sawa",
+                name = "راديو سوا Radio Sawa",
+                primaryUrl = "https://stream.zeno.fm/wvqgc9kb1d0uv",
+                fallbackUrl = "",
+                category = "NEWS",
+                countryCode = "US",
+                bitrate = 128,
+                popularity = 993,
+                lastUpdated = now
+            ),
+            StationEntity(
+                uuid = "news_france24_arabic",
+                name = "فرانس 24 عربي France 24 Audio",
+                primaryUrl = "https://replaynewsar.ice.infomaniak.ch/replaynewsar-128.mp3",
+                fallbackUrl = "",
+                category = "NEWS",
+                countryCode = "FR",
+                bitrate = 128,
+                popularity = 992,
+                lastUpdated = now
+            ),
 
-            // --- إذاعات القرآن التخصصية والموسيقى ---
+            // --- إذاعات القرآن الكريم والتلاوات المتخصصة ---
             StationEntity(
                 uuid = "quran_saudi",
                 name = "إذاعة القرآن الكريم - مكة المكرمة",
@@ -243,6 +309,52 @@ object TrustedStations {
                 lastUpdated = now
             ),
             StationEntity(
+                uuid = "quran_hussary",
+                name = "الشيخ محمود خليل الحصري",
+                primaryUrl = "https://serverkw.quran-uni.com:8018/;",
+                fallbackUrl = "https://qurango.net/radio/mahmoud_khalil_alhussary",
+                category = "QURAN",
+                countryCode = "EG",
+                bitrate = 128,
+                popularity = 992,
+                lastUpdated = now
+            ),
+            StationEntity(
+                uuid = "quran_mustafa_ismail",
+                name = "الشيخ مصطفى إسماعيل",
+                primaryUrl = "https://serverkw.quran-uni.com:8224/;",
+                fallbackUrl = "https://qurango.net/radio/mustafa_ismail",
+                category = "QURAN",
+                countryCode = "EG",
+                bitrate = 128,
+                popularity = 991,
+                lastUpdated = now
+            ),
+            StationEntity(
+                uuid = "quran_afasy",
+                name = "الشيخ مشاري بن راشد العفاسي",
+                primaryUrl = "https://radio.mp3islam.com/listen/mishary/radio.mp3",
+                fallbackUrl = "https://radio.xecod.com/station/alafasi",
+                category = "QURAN",
+                countryCode = "KW",
+                bitrate = 128,
+                popularity = 990,
+                lastUpdated = now
+            ),
+            StationEntity(
+                uuid = "quran_sudais",
+                name = "الشيخ عبدالرحمن السديس",
+                primaryUrl = "https://radio.mp3islam.com/listen/sudais/radio.mp3",
+                fallbackUrl = "",
+                category = "QURAN",
+                countryCode = "SA",
+                bitrate = 128,
+                popularity = 989,
+                lastUpdated = now
+            ),
+
+            // --- الموسيقى والفن الأصيل ---
+            StationEntity(
                 uuid = "music_om_kalthoum",
                 name = "إذاعة كوكب الشرق أم كلثوم",
                 primaryUrl = "https://stream.zeno.fm/zsgrfxg71s8uv",
@@ -251,6 +363,17 @@ object TrustedStations {
                 countryCode = "EG",
                 bitrate = 128,
                 popularity = 990,
+                lastUpdated = now
+            ),
+            StationEntity(
+                uuid = "music_halim",
+                name = "إذاعة العندليب عبدالحليم حافظ",
+                primaryUrl = "https://stream.zeno.fm/8a4eqkd0pnhvv",
+                fallbackUrl = "",
+                category = "MUSIC",
+                countryCode = "EG",
+                bitrate = 128,
+                popularity = 989,
                 lastUpdated = now
             ),
             StationEntity(
@@ -273,6 +396,17 @@ object TrustedStations {
                 countryCode = "EG",
                 bitrate = 128,
                 popularity = 987,
+                lastUpdated = now
+            ),
+            StationEntity(
+                uuid = "music_90s_egypt",
+                name = "تسعينات إف إم Tes3enat FM مصر",
+                primaryUrl = "http://178.33.135.244:20095/;",
+                fallbackUrl = "",
+                category = "MUSIC",
+                countryCode = "EG",
+                bitrate = 128,
+                popularity = 986,
                 lastUpdated = now
             )
         )
