@@ -73,9 +73,17 @@ class RadioRepository(
         return@withContext null
     }
 
-    suspend fun sendFeedback(uuid: String, source: String, success: Boolean) = withContext(Dispatchers.IO) {
+    suspend fun sendFeedback(
+        uuid: String, 
+        source: String, 
+        success: Boolean, 
+        errorType: String = "none", 
+        country: String = "", 
+        category: String = ""
+    ) = withContext(Dispatchers.IO) {
         try {
-            apiClient.newCall(Request.Builder().url("$PROXY_BASE_URL/feedback?uuid=$uuid&source=$source&success=$success").build()).execute().close()
+            val fbUrl = "$PROXY_BASE_URL/feedback?uuid=${URLEncoder.encode(uuid, "UTF-8")}&source=${URLEncoder.encode(source, "UTF-8")}&success=$success&error=${URLEncoder.encode(errorType, "UTF-8")}&country=${URLEncoder.encode(country, "UTF-8")}&category=${URLEncoder.encode(category, "UTF-8")}"
+            apiClient.newCall(Request.Builder().url(fbUrl).build()).execute().close()
         } catch (_: Exception) {}
     }
 
@@ -172,3 +180,4 @@ class RadioRepository(
         return list
     }
 }
+
