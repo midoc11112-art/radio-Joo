@@ -35,12 +35,11 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
 
-    val allStations: StateFlow<List<StationEntity>> = repository.allStations
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
+    val allStations: StateFlow<List<StationEntity>> = repository.allStations.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
 
     val stations: StateFlow<List<StationEntity>> = combine(
         repository.allStations,
@@ -67,30 +66,27 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
         initialValue = emptyList()
     )
 
-    val favoriteStations: StateFlow<List<StationEntity>> = repository.favoriteStations
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
+    val favoriteStations: StateFlow<List<StationEntity>> = repository.favoriteStations.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
 
-    val categoryCounts: StateFlow> = repository.allStations
-        .map { list ->
-            val result = HashMap<String, Int>()
-            result["ALL"] = list.size
-            result["FAVORITES"] = list.count { it.isFavorite }
-            for (station in list) {
-                val cat = station.category.uppercase()
-                val count = result[cat] ?: 0
-                result[cat] = count + 1
-            }
-            result
+    val categoryCounts: StateFlow> = repository.allStations.map { list ->
+        val result = HashMap<String, Int>()
+        result["ALL"] = list.size
+        result["FAVORITES"] = list.count { it.isFavorite }
+        for (station in list) {
+            val cat = station.category.uppercase()
+            val count = result[cat] ?: 0
+            result[cat] = count + 1
         }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyMap()
-        )
+        result
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyMap()
+    )
 
     init {
         viewModelScope.launch {
