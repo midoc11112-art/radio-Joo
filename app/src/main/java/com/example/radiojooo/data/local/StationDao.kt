@@ -1,4 +1,4 @@
-package com.example.radiojooo.data.local
+﻿package com.example.radiojooo.data.local
 
 import androidx.room.Dao
 import androidx.room.Insert
@@ -17,7 +17,7 @@ interface StationDao {
 
     @Query("""
         SELECT * FROM stations 
-        WHERE failCount < 20 OR isFavorite = 1
+        WHERE failCount < 3 OR isFavorite = 1
         ORDER BY popularity DESC
     """)
     fun getVisibleStations(): Flow<List<StationEntity>>
@@ -52,7 +52,7 @@ interface StationDao {
     @Query("UPDATE stations SET primaryUrl = :newUrl, failCount = 0, lastUrlWorks = 1, lastCheckedAt = :ts WHERE uuid = :uuid")
     suspend fun updateStationUrl(uuid: String, newUrl: String, ts: Long = System.currentTimeMillis())
 
-    @Query("DELETE FROM stations WHERE isFavorite = 0 AND lastUrlWorks = 0 AND failCount >= 50")
+    @Query("DELETE FROM stations WHERE isFavorite = 0 AND lastUrlWorks = 0 AND failCount >= 3")
     suspend fun cleanupDeadStations()
 
     @Query("UPDATE stations SET lastUrlWorks = NULL, failCount = 0")

@@ -1,4 +1,4 @@
-package com.example.radiojooo.data.repository
+﻿package com.example.radiojooo.data.repository
 
 import android.content.Context
 import android.util.Log
@@ -24,7 +24,6 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.net.URLEncoder
@@ -54,66 +53,36 @@ class RadioRepository(
 
     val allStations: Flow<List<StationEntity>> = stationDao.getVisibleStations()
 
-    // ًں§  ط§ظ„طھط¹ط§ظپظٹ ط§ظ„ط°ظƒظٹ
     suspend fun neuralHeal(station: StationEntity): String? = withContext(Dispatchers.IO) {
         try {
-            Log.d("NeuralHeal", "ط¨ط¯ط، ط¹ظ…ظ„ظٹط© ط§ظ„طھط¹ط§ظپظٹ ظ„ظ„ظ…ط­ط·ط©: ${station.name}")
-            val url = "$PROXY_BASE_URL/heal?uuid=${URLEncoder.encode(station.uuid, "UTF-8")}&name=${URLEncoder.encode(station.name, "UTF-8")}&country=${station.countryCode}&category=${station.category}&oldUrl=${URLEncoder.encode(station.primaryUrl, "UTF-8")}"
-            val req = Request.Builder().url(url).build()
-            apiClient.newCall(req).execute().use { res ->
+            Log.d("HealAI", "بدء التعافي: ${station.name}")
+            val url = "$PROXY_BASE_URL/heal?uuid=${URLEncoder.encode(station.uuid, "UTF-8")}&name=${URLEncoder.encode(station.name, "UTF-8")}&country=${station.countryCode}&category=${station.category}"
+            apiClient.newCall(Request.Builder().url(url).build()).execute().use { res ->
                 if (res.isSuccessful) {
                     val body = res.body?.string() ?: return@withContext null
                     val json = JSONObject(body)
                     if (json.optBoolean("success", false)) {
                         val newUrl = json.optString("newUrl")
-                        val confidence = json.optDouble("confidence", 0.0)
-                        Log.d("NeuralHeal", "âœ… ظ†ط¬ط­ ط§ظ„طھط¹ط§ظپظٹ: $newUrl (ط«ظ‚ط©: $confidence)")
+                        Log.d("HealAI", "✅ تعافي: $newUrl")
                         stationDao.updateStationUrl(station.uuid, newUrl)
                         return@withContext newUrl
                     }
                 }
             }
-        } catch (e: Exception) { Log.e("NeuralHeal", "ظپط´ظ„: ${e.message}") }
+        } catch (e: Exception) { Log.e("HealAI", "فشل: ${e.message}") }
         return@withContext null
     }
 
-    // ًںژ“ ط¥ط±ط³ط§ظ„ طھظ‚ط±ظٹط± ط§ظ„ظ†ط¬ط§ط­/ط§ظ„ظپط´ظ„ ظ„ظ„طھط¹ظ„ظ…
-    suspend fun sendFeedback(uuid: String, url: String, success: Boolean, errorType: String = "none") = withContext(Dispatchers.IO) {
+    suspend fun sendFeedback(uuid: String, source: String, success: Boolean) = withContext(Dispatchers.IO) {
         try {
-            val fbUrl = "$PROXY_BASE_URL/ai/feedback?uuid=${URLEncoder.encode(uuid, "UTF-8")}&url=${URLEncoder.encode(url, "UTF-8")}&success=$success"
-            apiClient.newCall(Request.Builder().url(fbUrl).build()).execute().close()
+            apiClient.newCall(Request.Builder().url("$PROXY_BASE_URL/feedback?uuid=$uuid&source=$source&success=$success").build()).execute().close()
         } catch (_: Exception) {}
-    }
-
-    // ًں”® ط§ظ„طھظ†ط¨ط¤ ط¨ط§ظ„ظ…ط­ط·ط§طھ ط§ظ„ظ…ط¹ط±ط¶ط© ظ„ظ„ط®ط·ط±
-    suspend fun predictRisks(): List<String> = withContext(Dispatchers.IO) {
-        try {
-            val all = stationDao.getVisibleStationsSnapshot()
-            if (all.isEmpty()) return@withContext emptyList()
-            val json = JSONArray().apply {
-                all.take(50).forEach { put(JSONObject().apply { put("uuid", it.uuid); put("name", it.name); }) }
-            }
-            val url = "$PROXY_BASE_URL/ai/predict?stations=${URLEncoder.encode(json.toString(), "UTF-8")}"
-            apiClient.newCall(Request.Builder().url(url).build()).execute().use { res ->
-                if (res.isSuccessful) {
-                    val body = res.body?.string() ?: return@withContext emptyList()
-                    val predictions = JSONObject(body).optJSONArray("predictions") ?: return@withContext emptyList()
-                    val risky = mutableListOf<String>()
-                    for (i in 0 until predictions.length()) {
-                        risky.add(predictions.getJSONObject(i).optString("uuid"))
-                    }
-                    return@withContext risky
-                }
-            }
-        } catch (e: Exception) { Log.e("Predict", e.message ?: "") }
-        return@withContext emptyList()
     }
 
     suspend fun fetchStationsFromServer(): Int = withContext(Dispatchers.IO) {
         var count = 0
         try {
-            val req = Request.Builder().url("$PROXY_BASE_URL/stations").build()
-            apiClient.newCall(req).execute().use { response ->
+            apiClient.newCall(Request.Builder().url("$PROXY_BASE_URL/stations").build()).execute().use { response ->
                 if (response.isSuccessful) {
                     val json = JSONObject(response.body?.string() ?: "")
                     val arr = json.getJSONArray("stations")
@@ -122,20 +91,17 @@ class RadioRepository(
                     if (stations.isNotEmpty()) stationDao.insertStations(stations)
                 }
             }
-        } catch (e: Exception) { Log.e("RadioRepository", "Fetch error: ${e.message}") }
+        } catch (e: Exception) { Log.e("Repo", "Fetch: ${e.message}") }
         return@withContext stationDao.getTotalCount()
     }
 
     suspend fun ensureInitialDataLoaded() {
         dbMutex.withLock {
-            _healthTotal.value = 0
-            _healthChecked.value = 0
+            _healthTotal.value = 0; _healthChecked.value = 0
             fetchStationsFromServer()
         }
         delay(500)
         performHealthChecks()
-        // ًں§  ط¨ط¹ط¯ ط§ظ„ظپط­طµطŒ ظ†ط´ط؛ظ„ ط§ظ„طھظ†ط¨ط¤ ظˆط§ظ„ظپط­طµ ط§ظ„ط§ط³طھط¨ط§ظ‚ظٹ ظ„ظ„ظ…ط­ط·ط§طھ ط¹ط§ظ„ظٹط© ط§ظ„ظ…ط®ط§ط·ط±
-        proactiveHeal()
     }
 
     suspend fun forceRefreshAll() {
@@ -147,25 +113,12 @@ class RadioRepository(
         performHealthChecks()
     }
 
-    // ًںژ¯ ط§ظ„طھط¹ط§ظپظٹ ط§ظ„ط§ط³طھط¨ط§ظ‚ظٹ ظ„ظ„ظ…ط­ط·ط§طھ ط§ظ„ظ…ط¹ط±ط¶ط© ظ„ظ„ط®ط·ط±
-    private suspend fun proactiveHeal() = withContext(Dispatchers.IO) {
-        val riskyUuids = predictRisks()
-        for (uuid in riskyUuids.take(5)) {
-            val station = stationDao.getStationById(uuid) ?: continue
-            if (station.failCount > 2) continue // ظ…ظ‡ظˆ ظ…ط´ ط®ط·ظٹط± ظ„ط³ظ‡
-            Log.d("ProactiveHeal", "طھط¹ط§ظپظچ ط§ط³طھط¨ط§ظ‚ظٹ: ${station.name}")
-            neuralHeal(station)
-        }
-    }
-
     private suspend fun performHealthChecks() {
-        val unchecked = stationDao.getUncheckedCount()
-        val total = unchecked
+        val total = stationDao.getUncheckedCount()
         _healthTotal.value = total
         _healthChecked.value = 0
         if (total > 0) {
-            var healthy = 0
-            var safety = 0
+            var healthy = 0; var safety = 0
             while (safety < 200 && stationDao.getUncheckedCount() > 0) {
                 healthy += runHealthChecks(200)
                 _healthChecked.value = minOf(_healthChecked.value + 200, total)
@@ -174,9 +127,7 @@ class RadioRepository(
             stationDao.cleanupDeadStations()
             _healthChecked.value = total
             _healthComplete.emit(HealthCheckResult(total, healthy))
-        } else {
-            _healthComplete.emit(HealthCheckResult(0, 0))
-        }
+        } else { _healthComplete.emit(HealthCheckResult(0, 0)) }
     }
 
     suspend fun runHealthChecks(batchSize: Int = 200): Int = coroutineScope {
@@ -184,23 +135,18 @@ class RadioRepository(
         try {
             val stations = stationDao.getUncheckedStations(batchSize)
             if (stations.isEmpty()) return@coroutineScope 0
-            val results = stations.map { s ->
-                async(Dispatchers.IO) { healthSemaphore.withPermit { s to checkStationHealth(s.primaryUrl) } }
-            }.awaitAll()
+            val results = stations.map { s -> async(Dispatchers.IO) { healthSemaphore.withPermit { s to checkStationHealth(s.primaryUrl) } } }.awaitAll()
             healthy = results.count { it.second }
-            for ((station, ok) in results) {
-                stationDao.updateHealth(station.uuid, ok, if (ok) 0 else station.failCount + 1, System.currentTimeMillis())
-            }
+            for ((station, ok) in results) { stationDao.updateHealth(station.uuid, ok, if (ok) 0 else station.failCount + 1, System.currentTimeMillis()) }
             stationDao.cleanupDeadStations()
-        } catch (e: Exception) { Log.e("RadioRepository", "HealthCheck: ${e.message}") }
+        } catch (e: Exception) { Log.e("Repo", "HealthCheck: ${e.message}") }
         return@coroutineScope healthy
     }
 
     private suspend fun checkStationHealth(url: String): Boolean = withContext(Dispatchers.IO) {
         if (url.isBlank()) return@withContext false
         try {
-            val healthUrl = "$PROXY_BASE_URL/health-check?url=${URLEncoder.encode(url, "UTF-8")}"
-            healthClient.newCall(Request.Builder().url(healthUrl).build()).execute().use { it.isSuccessful }
+            healthClient.newCall(Request.Builder().url("$PROXY_BASE_URL/health-check?url=${URLEncoder.encode(url, "UTF-8")}").build()).execute().use { it.isSuccessful }
         } catch (e: Exception) { false }
     }
 
@@ -225,10 +171,4 @@ class RadioRepository(
         }
         return list
     }
-}
-
-// Extension ظ„ظ€ StationDao (ظپظٹ ظ†ظپط³ ط§ظ„ظ…ظ„ظپ ظƒظ€ top-level)
-suspend fun StationDao.getVisibleStationsSnapshot(): List<StationEntity> {
-    // ظ†ط­طھط§ط¬ ط¯ط§ظ„ط© snapshot - ط³ط£ط¶ظٹظپظ‡ط§ ظپظٹ DAO
-    return getAllStationsSnapshot()
 }
