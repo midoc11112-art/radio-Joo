@@ -47,8 +47,14 @@ interface StationDao {
     @Query("UPDATE stations SET lastUrlWorks = :works, failCount = :failCount, lastCheckedAt = :timestamp WHERE uuid = :uuid")
     suspend fun updateHealth(uuid: String, works: Boolean, failCount: Int, timestamp: Long)
 
-    @Query("UPDATE stations SET primaryUrl = :newUrl, failCount = 0, lastUrlWorks = 1, lastCheckedAt = :ts WHERE uuid = :uuid")
+    @Query("UPDATE stations SET primaryUrl = :newUrl, fallbackUrl = '', failCount = 0, lastUrlWorks = 1, lastCheckedAt = :ts WHERE uuid = :uuid")
     suspend fun updateStationUrl(uuid: String, newUrl: String, ts: Long = System.currentTimeMillis())
+
+    @Query("UPDATE stations SET fallbackUrl = '' WHERE uuid = :uuid")
+    suspend fun clearFallbackUrl(uuid: String)
+
+    @Query("SELECT * FROM stations WHERE (failCount > 0 OR lastUrlWorks = 0) ORDER BY isFavorite DESC, failCount DESC, priority DESC, popularity DESC LIMIT :limit")
+    suspend fun getStationsNeedingHeal(limit: Int): List<StationEntity>
 
     @Query("DELETE FROM stations WHERE isFavorite = 0 AND lastUrlWorks = 0 AND failCount >= 30")
     suspend fun cleanupDeadStations()

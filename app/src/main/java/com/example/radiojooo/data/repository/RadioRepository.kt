@@ -7,7 +7,6 @@ import com.example.radiojooo.data.local.AppDatabase
 import com.example.radiojooo.data.local.StationDao
 import com.example.radiojooo.data.model.StationEntity
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -58,6 +57,12 @@ class RadioRepository(
     private val apiClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).build()
 
+    private val healClient = OkHttpClient.Builder()
+        .connectTimeout(8, TimeUnit.SECONDS).readTimeout(12, TimeUnit.SECONDS).followRedirects(true).build()
+
+    private val webSearchClient = OkHttpClient.Builder()
+        .connectTimeout(6, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS).followRedirects(true).build()
+
     private val healthClient = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS).readTimeout(10, TimeUnit.SECONDS).followRedirects(true).build()
 
@@ -74,31 +79,57 @@ class RadioRepository(
     private var healthCheckJob: Job? = null
 
     suspend fun neuralHeal(station: StationEntity): HealResult? = withContext(Dispatchers.IO) {
+        // PHASE 0: Try cloud backup first
+        try {
+            val cloudReq = "$PROXY_BASE_URL/get-saved-url?uuid=${URLEncoder.encode(station.uuid, "UTF-8")}"
+            healClient.newCall(Request.Builder().url(cloudReq).build()).execute().use { res ->
+                if (res.isSuccessful) {
+                    val body = res.body?.string() ?: ""
+                    val json = JSONObject(body)
+                    if (json.optBoolean("success", false)) {
+                        val savedUrl = json.optString("url")
+                        if (savedUrl.isNotBlank() && savedUrl.startsWith("http")) {
+                            if (checkUrlAlive(savedUrl)) {
+                                persistHealedUrl(station.uuid, savedUrl)
+                                Log.d("HealAI", "✓ Cloud backup used: ${station.name} -> $savedUrl")
+                                return@withContext HealResult(savedUrl, station.name + " (cloud)")
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (t: Throwable) {
+            Log.d("HealAI", "Cloud backup check failed: ${t.message}")
+        }
+
+        // PHASE 1: Worker heal
         try {
             val url = "$PROXY_BASE_URL/heal?uuid=${URLEncoder.encode(station.uuid, "UTF-8")}&name=${URLEncoder.encode(station.name, "UTF-8")}&country=${station.countryCode}&category=${station.category}"
-            apiClient.newCall(Request.Builder().url(url).build()).execute().use { res ->
+            healClient.newCall(Request.Builder().url(url).build()).execute().use { res ->
                 if (res.isSuccessful) {
                     val body = res.body?.string() ?: return@withContext null
                     val json = JSONObject(body)
+
                     if (json.optBoolean("success", false)) {
                         val newUrl = json.optString("newUrl")
                         val matchedName = json.optString("matchedName", station.name)
                         if (newUrl.isNotBlank() && newUrl.startsWith("http")) {
-                            // v109.7: Layer 1 — explicit persist with logging
-                            try {
-                                stationDao.updateStationUrl(station.uuid, newUrl)
-                                Log.d("HealAI", "✓ DB persisted: ${station.name} -> $newUrl")
-                            } catch (e: Throwable) {
-                                Log.e("HealAI", "✗ DB persist failed: ${e.message}", e)
-                            }
-                            // v109.7: Layer 2 — SharedPrefs backup (survives DB failure)
-                            try {
-                                prefs.edit().putString("healed_url_${station.uuid}", newUrl).apply()
-                                Log.d("HealAI", "✓ Prefs persisted: ${station.uuid}")
-                            } catch (e: Throwable) {
-                                Log.e("HealAI", "✗ Prefs persist failed: ${e.message}", e)
-                            }
+                            persistHealedUrl(station.uuid, newUrl)
+                            saveUrlToCloud(station.uuid, newUrl, station.primaryUrl)
+                            Log.d("HealAI", "✓ Worker healed: ${station.name} -> $newUrl")
                             return@withContext HealResult(newUrl, matchedName)
+                        }
+                    }
+
+                    // PHASE 2: Web search if signaled
+                    if (json.optBoolean("needsWebSearch", false)) {
+                        Log.d("HealAI", "Worker signaled web search for: ${station.name}")
+                        val webUrl = webSearchForStream(station)
+                        if (webUrl != null && checkUrlAlive(webUrl)) {
+                            persistHealedUrl(station.uuid, webUrl)
+                            saveUrlToCloud(station.uuid, webUrl, station.primaryUrl)
+                            Log.d("HealAI", "✓ Web search found: ${station.name} -> $webUrl")
+                            return@withContext HealResult(webUrl, station.name + " (web)")
                         }
                     }
                 }
@@ -107,6 +138,139 @@ class RadioRepository(
             Log.e("HealAI", "Heal request failed: ${t.message}", t)
         }
         return@withContext null
+    }
+
+    private suspend fun persistHealedUrl(uuid: String, newUrl: String) {
+        try {
+            stationDao.updateStationUrl(uuid, newUrl)
+            Log.d("HealAI", "✓ DB persisted: $uuid -> $newUrl")
+        } catch (e: Throwable) {
+            Log.e("HealAI", "✗ DB persist failed: ${e.message}", e)
+        }
+        try {
+            prefs.edit().putString("healed_url_$uuid", newUrl).apply()
+            Log.d("HealAI", "✓ Prefs persisted: $uuid")
+        } catch (e: Throwable) {
+            Log.e("HealAI", "✗ Prefs persist failed: ${e.message}", e)
+        }
+    }
+
+    private suspend fun saveUrlToCloud(uuid: String, newUrl: String, oldUrl: String) = withContext(Dispatchers.IO) {
+        try {
+            val reqUrl = "$PROXY_BASE_URL/save-url?uuid=${URLEncoder.encode(uuid, "UTF-8")}&newUrl=${URLEncoder.encode(newUrl, "UTF-8")}&oldUrl=${URLEncoder.encode(oldUrl, "UTF-8")}"
+            healClient.newCall(Request.Builder().url(reqUrl).build()).execute().close()
+            Log.d("HealAI", "✓ Cloud saved: $uuid")
+        } catch (_: Throwable) {}
+    }
+
+    private suspend fun checkUrlAlive(url: String): Boolean = withContext(Dispatchers.IO) {
+        if (url.isBlank() || !url.startsWith("http")) return@withContext false
+        try {
+            val req = Request.Builder().url(url).header("User-Agent", "Mozilla/5.0").header("Range", "bytes=0-1024").build()
+            healthClient.newCall(req).execute().use { res ->
+                if (res.isSuccessful || res.code == 206) {
+                    val ct = res.header("Content-Type")?.lowercase() ?: ""
+                    if (!ct.contains("text/html") && !ct.contains("application/json")) return@withContext true
+                }
+            }
+        } catch (_: Throwable) {}
+        false
+    }
+
+    private suspend fun webSearchForStream(station: StationEntity): String? = withContext(Dispatchers.IO) {
+        val queries = listOf(
+            "\"${station.name}\" radio stream mp3",
+            "${station.name} listen live",
+            "${station.name} ${station.countryCode} radio"
+        )
+
+        for (q in queries) {
+            try {
+                val searchUrl = "https://html.duckduckgo.com/html/?q=" + URLEncoder.encode(q, "UTF-8")
+                val req = Request.Builder().url(searchUrl)
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0")
+                    .build()
+                webSearchClient.newCall(req).execute().use { res ->
+                    if (res.isSuccessful) {
+                        val html = res.body?.string() ?: ""
+                        val urls = extractStreamUrls(html)
+                        for (u in urls) {
+                            if (checkUrlAlive(u)) return@withContext u
+                        }
+                    }
+                }
+            } catch (_: Throwable) {}
+            delay(400)
+        }
+
+        try {
+            val myTunerUrl = "https://mytuner-radio.com/search/?q=" + URLEncoder.encode(station.name, "UTF-8")
+            val req = Request.Builder().url(myTunerUrl).header("User-Agent", "Mozilla/5.0").build()
+            webSearchClient.newCall(req).execute().use { res ->
+                if (res.isSuccessful) {
+                    val html = res.body?.string() ?: ""
+                    val urls = extractStreamUrls(html)
+                    for (u in urls) if (checkUrlAlive(u)) return@withContext u
+                }
+            }
+        } catch (_: Throwable) {}
+
+        try {
+            val streemaUrl = "https://streema.com/search?q=" + URLEncoder.encode(station.name, "UTF-8")
+            val req = Request.Builder().url(streemaUrl).header("User-Agent", "Mozilla/5.0").build()
+            webSearchClient.newCall(req).execute().use { res ->
+                if (res.isSuccessful) {
+                    val html = res.body?.string() ?: ""
+                    val urls = extractStreamUrls(html)
+                    for (u in urls) if (checkUrlAlive(u)) return@withContext u
+                }
+            }
+        } catch (_: Throwable) {}
+
+        null
+    }
+
+    private fun extractStreamUrls(html: String): List<String> {
+        val urls = mutableSetOf<String>()
+        val streamRegex = Regex("""https?://[^\s"'<>\\]+\.(?:mp3|aac|ogg|m3u8|m3u)(?:\?[^\s"'<>\\]*)?""")
+        streamRegex.findAll(html).forEach { urls.add(it.value.replace("\\/", "/")) }
+        val patternRegex = Regex("""https?://[^\s"'<>\\]*(?:stream|listen|audio|icecast|shoutcast)[^\s"'<>\\]*""")
+        patternRegex.findAll(html).take(30).forEach {
+            val cleaned = it.value.replace("\\/", "/").trimEnd('.', ',', ';', ')', ']', '}')
+            if (cleaned.length > 20) urls.add(cleaned)
+        }
+        return urls.filter { u ->
+            !u.contains("google.com") && !u.contains("youtube.com") &&
+            !u.contains("facebook.com") && !u.contains("twitter.com") &&
+            !u.contains("wikipedia.org") && !u.contains("amazon.com") &&
+            u.length < 500
+        }.toList()
+    }
+
+    suspend fun healBatch(limit: Int = 30): Pair<Int, Int> = withContext(Dispatchers.IO) {
+        var healed = 0
+        var failed = 0
+        try {
+            val stations = stationDao.getStationsNeedingHeal(limit)
+            Log.d("HealBatch", "Starting batch of ${stations.size} stations")
+            for (s in stations) {
+                try {
+                    val result = neuralHeal(s)
+                    if (result != null) {
+                        healed++
+                        Log.d("HealBatch", "✓ ${s.name} -> ${result.url}")
+                    } else {
+                        failed++
+                        Log.d("HealBatch", "✗ ${s.name}")
+                        try { stationDao.updateHealth(s.uuid, false, s.failCount + 1, System.currentTimeMillis()) } catch (_: Throwable) {}
+                    }
+                    delay(300)
+                } catch (_: Throwable) { failed++ }
+            }
+        } catch (t: Throwable) {
+            Log.e("HealBatch", "Batch failed: ${t.message}", t)
+        }
+        return@withContext healed to failed
     }
 
     suspend fun sendFeedback(uuid: String, source: String, success: Boolean, errorType: String = "none", country: String = "", category: String = "") = withContext(Dispatchers.IO) {
@@ -129,7 +293,6 @@ class RadioRepository(
                         stations.chunked(500).forEach { chunk -> stationDao.insertStations(chunk) }
                         try { stationDao.syncPriorities(stations) } catch (t: Throwable) { Log.e("RadioRepository", "syncPriorities: ${t.message}") }
 
-                        // v109.7: Apply SharedPrefs backups on top of fetched data (in case DB lost them)
                         try {
                             for (s in stations) {
                                 val backupUrl = prefs.getString("healed_url_${s.uuid}", null)
@@ -151,9 +314,7 @@ class RadioRepository(
     suspend fun performSmartHealthCheck() {
         val lastScanTime = stationDao.getLastFullScanTime() ?: 0L
         val isSameDay = isSameDay(lastScanTime)
-        if (!isSameDay) {
-            dbMutex.withLock { stationDao.resetAllHealthStatus() }
-        }
+        if (!isSameDay) { dbMutex.withLock { stationDao.resetAllHealthStatus() } }
         performHealthChecks(MAX_CHECKS_PER_SESSION)
     }
 
@@ -271,8 +432,7 @@ class RadioRepository(
                         fallbackUrl=o.optString("fallbackUrl",""),
                         category=o.optString("category","MUSIC"),
                         countryCode=o.optString("countryCode",""),
-                        bitrate=o.optInt("bitrate",0),
-                        popularity=o.optInt("popularity",0),
+                        bitrate=o.optInt("bitrate                        popularity=o.optInt("popularity",0),
                         priority=o.optInt("priority",0),
                         lastUpdated=System.currentTimeMillis()
                     ))
