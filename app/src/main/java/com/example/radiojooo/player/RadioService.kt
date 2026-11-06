@@ -5,7 +5,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -256,12 +255,17 @@ class RadioService : Service() {
             .setTargetBufferBytes(-1)
             .build()
 
-        // v109.5: Fast Error Policy — محاولة واحدة فقط، تأخير 300ms
-        val fastErrorPolicy = object : LoadErrorHandlingPolicy() {
+        val fastErrorPolicy = object : LoadErrorHandlingPolicy {
             override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
                 return if (loadErrorInfo.errorCount >= 1) C.TIME_UNSET else 300L
             }
             override fun getMinimumLoadableRetryCount(dataType: Int): Int = 1
+            override fun getFallbackSelectionFor(
+                fallbackOptions: LoadErrorHandlingPolicy.FallbackOptions,
+                loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo
+            ): LoadErrorHandlingPolicy.FallbackSelection? {
+                return null
+            }
         }
 
         val dataSourceFactory = DefaultHttpDataSource.Factory()
@@ -319,7 +323,6 @@ class RadioService : Service() {
                         acquireLocks()
                         bufferTimeoutHandler.removeCallbacks(bufferTimeoutRunnable)
                         hasPlayedSuccessfully = true
-                        // v109.5: حفظ Last-Good URL + مسح Dead Cache
                         val currentUrl = synchronized(availableUrls) { availableUrls.getOrNull(currentUrlIndex) }
                         if (!currentUrl.isNullOrBlank()) {
                             if (currentStationUuid.isNotBlank()) {
@@ -349,7 +352,6 @@ class RadioService : Service() {
         })
     }
 
-    // v109.5: Multi-Protocol URL generation
     private fun generateUrlVariants(url: String): List<String> {
         if (url.isBlank()) return emptyList()
         val variants = mutableListOf<String>()
@@ -368,7 +370,6 @@ class RadioService : Service() {
         return variants.distinct()
     }
 
-    // v109.5: Pre-flight probe (HEAD, 1.5s timeout, skip dead)
     private suspend fun preFlightProbe(urls: List<String>): String? = withContext(Dispatchers.IO) {
         for (url in urls) {
             val deadTime = deadUrlCache.get(url) ?: 0L
@@ -398,7 +399,6 @@ class RadioService : Service() {
         return@withContext null
     }
 
-    // v109.5: Build candidate list
     private fun buildUrlCandidates(primaryUrl: String, fallbackUrl: String): List<String> {
         val candidates = mutableListOf<String>()
         candidates.addAll(generateUrlVariants(primaryUrl))
@@ -582,7 +582,6 @@ class RadioService : Service() {
         stationStartTimeMs = System.currentTimeMillis()
         toast("📻 $title")
 
-        // v109.5: Pre-flight probe قبل التشغيل
         serviceScope.launch {
             try {
                 val candidates = buildUrlCandidates(pUrl, fUrl)
@@ -605,7 +604,6 @@ class RadioService : Service() {
                     }
                 }
             } catch (t: Throwable) {
-                // Fallback: ابدأ بالرابط الأساسي
                 statsHandler.post {
                     if (!isDestroyed.get()) {
                         val first = synchronized(availableUrls) { availableUrls.firstOrNull() }
@@ -729,22 +727,5 @@ class RadioService : Service() {
                 lastRxBytes = rx
             } else currentSpeedKbps = 0.0
         } catch (t: Throwable) {}
-    }
-}
-
-class RadioActionReceiver : BroadcastReceiver() {
-    companion object {
-        const val ACTION_PLAY_PAUSE = "com.example.radiojooo.PLAY_PAUSE"
-        const val ACTION_STOP = "com.example.radiojooo.STOP"
-    }
-
-    override fun onReceive(context: Context, intent: Intent) {
-        val serviceIntent = Intent(context, RadioService::class.java)
-        serviceIntent.action = intent.action
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(serviceIntent)
-        } else {
-            context.startService(serviceIntent)
-        }
     }
 }
