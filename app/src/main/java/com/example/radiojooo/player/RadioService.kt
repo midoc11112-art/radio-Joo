@@ -84,7 +84,7 @@ class RadioService : Service() {
     var sleepTimeRemainingMs = 0L; private set
 
     private var retryCount = 0
-    private val maxRetries = 5 // زيادة المحاولات
+    private val maxRetries = 5
     private val statsHandler = Handler(Looper.getMainLooper())
     private val bufferTimeoutHandler = Handler(Looper.getMainLooper())
     private val statsRunnable = object : Runnable {
@@ -165,7 +165,6 @@ class RadioService : Service() {
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true).setMaxAudioBitrate(48000).build()
         }
-        // ✅ زيادة البافر لمنع التقطيع
         val loadControl = DefaultLoadControl.Builder().setBufferDurationsMs(30000, 120000, 5000, 15000).setTargetBufferBytes(-1).build()
         val dataSourceFactory = DefaultHttpDataSource.Factory()
             .setConnectTimeoutMs(60000).setReadTimeoutMs(60000).setAllowCrossProtocolRedirects(true)
@@ -219,7 +218,6 @@ class RadioService : Service() {
             else -> "unknown"
         }
 
-        // ✅ منع التبديل الوهمي: لو المحطة اشتغلت قبل كده، هنعيد المحاولة على نفس الرابط بس
         if (hasPlayedSuccessfully && errorType != "403" && errorType != "not_found") {
             retryCount++
             if (retryCount <= 5) {
@@ -260,7 +258,6 @@ class RadioService : Service() {
             return
         }
 
-        // Heal
         retryCount = 0
         if (currentStationUuid.isBlank() || isDestroyed.get()) return
         if (!isHealing.compareAndSet(false, true)) return
@@ -410,7 +407,7 @@ class RadioService : Service() {
             player.prepare(); player.playWhenReady = true
             
             bufferTimeoutHandler.removeCallbacks(bufferTimeoutRunnable)
-            bufferTimeoutHandler.postDelayed(bufferTimeoutRunnable, 30000L) // 30 ثانية
+            bufferTimeoutHandler.postDelayed(bufferTimeoutRunnable, 30000L)
         } catch (t: Throwable) { toast("❌ خطأ في التشغيل") }
     }
 
