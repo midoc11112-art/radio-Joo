@@ -1,4 +1,4 @@
-package com.example.radiojooo.player
+﻿package com.example.radiojooo.player
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -439,8 +439,47 @@ class RadioService : Service() {
 
     private suspend fun probeHead(url: String): Boolean = suspendCancellableCoroutine { cont ->
         try {
-            val req = Request.Builder().url(url).head().build()
-            val call = apiClient.newCall(req)
+            val headReq = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 13)")
+                .head()
+                .build()
+            val call = apiClient.newCall(headReq)
+            cont.invokeOnCancellation { try { call.cancel() } catch (_: Throwable) {} }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    probeGetRange(url, cont)
+                }
+                override fun onResponse(call: Call, response: Response) {
+                    try {
+                        response.use { r ->
+                            val ct = r.header("Content-Type")?.lowercase() ?: ""
+                            val ok = (r.isSuccessful || r.code == 206) &&
+                                    !ct.contains("text/html") && !ct.contains("application/json")
+                            if (ok) {
+                                if (cont.isActive) cont.resume(true) {}
+                            } else {
+                                probeGetRange(url, cont)
+                            }
+                        }
+                    } catch (_: Throwable) {
+                        probeGetRange(url, cont)
+                    }
+                }
+            })
+        } catch (_: Throwable) {
+            probeGetRange(url, cont)
+        }
+    }
+
+    private fun probeGetRange(url: String, cont: kotlin.coroutines.Continuation<Boolean>) {
+        try {
+            val getReq = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 13)")
+                .header("Range", "bytes=0-100")
+                .build()
+            val call = apiClient.newCall(getReq)
             cont.invokeOnCancellation { try { call.cancel() } catch (_: Throwable) {} }
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
@@ -449,17 +488,20 @@ class RadioService : Service() {
                 override fun onResponse(call: Call, response: Response) {
                     try {
                         response.use { r ->
-                            var ok = false
-                            if (r.isSuccessful || r.code == 206) {
-                                val ct = r.header("Content-Type")?.lowercase() ?: ""
-                                if (!ct.contains("text/html") && !ct.contains("application/json")) ok = true
-                            }
+                            val ct = r.header("Content-Type")?.lowercase() ?: ""
+                            val ok = (r.isSuccessful || r.code == 206) &&
+                                    !ct.contains("text/html") && !ct.contains("application/json")
                             if (cont.isActive) cont.resume(ok) {}
                         }
                     } catch (_: Throwable) {
                         if (cont.isActive) cont.resume(false) {}
                     }
                 }
+            })
+        } catch (_: Throwable) {
+            if (cont.isActive) cont.resume(false) {}
+        }
+    }
             })
         } catch (_: Throwable) {
             if (cont.isActive) cont.resume(false) {}

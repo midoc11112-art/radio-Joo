@@ -1,4 +1,4 @@
-package com.example.radiojooo.data.local
+﻿package com.example.radiojooo.data.local
 
 import androidx.room.Dao
 import androidx.room.Insert
@@ -28,7 +28,7 @@ interface StationDao {
     @Query("SELECT COUNT(*) FROM stations")
     suspend fun getTotalCount(): Int
 
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertStations(stations: List<StationEntity>)
 
     @Query("UPDATE stations SET priority = :priority WHERE uuid = :uuid")
