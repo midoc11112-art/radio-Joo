@@ -18,13 +18,14 @@ class RadioApp : Application() {
     }
 
     private fun scheduleWorkers() {
-        val constraints = Constraints.Builder()
+        // 1. Health Check (every 6 hours) - Very lightweight (HEAD requests only)
+        // Runs on any network (Wi-Fi or Mobile Data) because it barely consumes data.
+        val syncConstraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
 
-        // 1. Health Check (every 6 hours)
         val syncRequest = PeriodicWorkRequestBuilder<StationSyncWorker>(6, TimeUnit.HOURS)
-            .setConstraints(constraints)
+            .setConstraints(syncConstraints)
             .build()
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             "station_sync_worker",
@@ -32,9 +33,14 @@ class RadioApp : Application() {
             syncRequest
         )
 
-        // 2. URL Healer (every 4 hours)
-        val healRequest = PeriodicWorkRequestBuilder<StationUrlHealerWorker>(4, TimeUnit.HOURS)
-            .setConstraints(constraints)
+        // 2. URL Healer (every 7 days) - Heavy operations (Web Scraping)
+        // STRICTLY Wi-Fi ONLY (UNMETERED) to prevent any mobile data consumption.
+        val healConstraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.UNMETERED) // Wi-Fi Only
+            .build()
+
+        val healRequest = PeriodicWorkRequestBuilder<StationUrlHealerWorker>(7, TimeUnit.DAYS)
+            .setConstraints(healConstraints)
             .build()
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             "station_url_healer_worker",
