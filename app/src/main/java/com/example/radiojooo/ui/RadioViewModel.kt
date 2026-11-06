@@ -135,7 +135,7 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                 }
-                // v109.3: الترتيب حسب priority أولاً ثم popularity
+                // الترتيب: priority أولاً ثم popularity
                 filtered.sortedWith(compareByDescending<StationEntity> { it.priority }.thenByDescending { it.popularity })
             }.collect { filteredFlow.value = it }
         }
