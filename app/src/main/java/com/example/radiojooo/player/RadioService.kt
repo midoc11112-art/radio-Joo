@@ -1,4 +1,4 @@
-﻿package com.example.radiojooo.player
+package com.example.radiojooo.player
 
 import android.app.*
 import android.content.Context
@@ -84,7 +84,7 @@ class RadioService : Service() {
     var sleepTimeRemainingMs = 0L; private set
 
     private var retryCount = 0
-    private val maxRetries = 3
+    private val maxRetries = 5 // زيادة المحاولات
     private val statsHandler = Handler(Looper.getMainLooper())
     private val bufferTimeoutHandler = Handler(Looper.getMainLooper())
     private val statsRunnable = object : Runnable {
@@ -165,6 +165,7 @@ class RadioService : Service() {
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true).setMaxAudioBitrate(48000).build()
         }
+        // ✅ زيادة البافر لمنع التقطيع
         val loadControl = DefaultLoadControl.Builder().setBufferDurationsMs(30000, 120000, 5000, 15000).setTargetBufferBytes(-1).build()
         val dataSourceFactory = DefaultHttpDataSource.Factory()
             .setConnectTimeoutMs(60000).setReadTimeoutMs(60000).setAllowCrossProtocolRedirects(true)
@@ -189,29 +190,12 @@ class RadioService : Service() {
                         acquireLocks()
                         bufferTimeoutHandler.removeCallbacks(bufferTimeoutRunnable)
                         hasPlayedSuccessfully = true
-                        val capturedUuid = currentStationUuid
-                        val capturedIndex = currentUrlIndex
-                        val capturedUrl = synchronized(availableUrls) { availableUrls.getOrNull(capturedIndex) }
-                        if (capturedUuid.isNotBlank()) {
+                        if (currentStationUuid.isNotBlank()) {
                             serviceScope.launch {
                                 try {
                                     delay(10000)
-                                    if (isPlaying() && currentStationUuid == capturedUuid) {
-                                        repoInstance.sendFeedback(capturedUuid, "exo_active", true)
-                                        // التحديث الذاتي (Self-Healing): حفظ الرابط الشغال إن كان احتياطياً
-                                        if (capturedIndex > 0 && !capturedUrl.isNullOrBlank() && currentUrlIndex == capturedIndex) {
-                                            val snapshot = synchronized(availableUrls) { availableUrls.toList() }
-                                            if (capturedUrl in snapshot) {
-                                                val remaining = snapshot.filter { it != capturedUrl }
-                                                val newFallback = remaining.joinToString(",")
-                                                runCatching {
-                                                    AppDatabase.getDatabase(applicationContext)
-                                                        .stationDao()
-                                                        .updateActiveStreamUrl(capturedUuid, capturedUrl, newFallback)
-                                                }
-                                                toast("💾 تم حفظ الرابط الشغال")
-                                            }
-                                        }
+                                    if (isPlaying() && currentStationUuid.isNotBlank()) {
+                                        repoInstance.sendFeedback(currentStationUuid, "exo_active", true)
                                     }
                                 } catch (_: Throwable) {}
                             }
@@ -228,10 +212,33 @@ class RadioService : Service() {
     private fun handlePlaybackError(error: PlaybackException) {
         if (isHealing.get() || isDestroyed.get()) return
         
-        val isPermanentError = error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
-                error.errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND ||
-                error.errorCode == PlaybackException.ERROR_CODE_IO_NO_PERMISSION
-        
+        val errorType = when (error.errorCode) {
+            PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> "403"
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> "timeout"
+            PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND -> "not_found"
+            else -> "unknown"
+        }
+
+        // ✅ منع التبديل الوهمي: لو المحطة اشتغلت قبل كده، هنعيد المحاولة على نفس الرابط بس
+        if (hasPlayedSuccessfully && errorType != "403" && errorType != "not_found") {
+            retryCount++
+            if (retryCount <= 5) {
+                toast("🔄 إعادة الاتصال...")
+                statsHandler.postDelayed({
+                    if (!isDestroyed.get()) {
+                        val urls = synchronized(availableUrls) { availableUrls.toList() }
+                        val currentUrl = urls.getOrNull(currentUrlIndex) ?: return@postDelayed
+                        startStream(currentUrl, useProxy = true)
+                    }
+                }, 3000L)
+                return
+            } else {
+                retryCount = 0
+                toast("❌ توقف البث")
+                return
+            }
+        }
+
         val urls = synchronized(availableUrls) { availableUrls.toList() }
         
         if (currentUrlIndex < urls.size - 1) {
@@ -239,30 +246,28 @@ class RadioService : Service() {
             toast("🔄 محاولة خادم بديل (${currentUrlIndex + 1}/${urls.size})")
             statsHandler.postDelayed({
                 if (!isDestroyed.get()) startStream(urls[currentUrlIndex], useProxy = true)
-            }, if (isPermanentError) 500L else 2000L)
+            }, 2000L)
             return
         }
 
-        if (!isPermanentError) {
-            retryCount++
-            if (retryCount <= maxRetries) {
-                val delayMs = when (retryCount) { 1 -> 2000L; 2 -> 4000L; else -> 8000L }
-                toast("🔄 إعادة محاولة $retryCount/$maxRetries")
-                statsHandler.postDelayed({
-                    if (!isDestroyed.get()) startStream(urls.getOrNull(currentUrlIndex) ?: "", useProxy = true)
-                }, delayMs)
-                return
-            }
+        retryCount++
+        if (retryCount <= maxRetries) {
+            val delayMs = when (retryCount) { 1 -> 2000L; 2 -> 4000L; else -> 8000L }
+            toast("🔄 إعادة محاولة $retryCount/$maxRetries")
+            statsHandler.postDelayed({
+                if (!isDestroyed.get()) startStream(urls.getOrNull(currentUrlIndex) ?: "", useProxy = true)
+            }, delayMs)
+            return
         }
 
+        // Heal
         retryCount = 0
         if (currentStationUuid.isBlank() || isDestroyed.get()) return
         if (!isHealing.compareAndSet(false, true)) return
 
-        toast("🧠 Oracle AI يبحث...")
-        
+        toast("🧠 Oracle AI يبحث عن بدائل...")
         val uuidToHeal = currentStationUuid
-        val errCap = "unknown"
+        val errCap = errorType
         val countryCap = currentCountry
         val catCap = currentCategory
 
@@ -278,7 +283,7 @@ class RadioService : Service() {
                 if (healResult != null && !isDestroyed.get()) {
                     val newUrl = healResult.url
                     toast("🔍 تم العثور على: ${healResult.matchedName}")
-                    delay(2000L)
+                    delay(2000L) 
                     
                     val isValidAudio = withContext(Dispatchers.IO) {
                         try {
@@ -377,11 +382,7 @@ class RadioService : Service() {
         synchronized(availableUrls) {
             availableUrls.clear()
             if (pUrl.isNotBlank()) availableUrls.add(pUrl)
-            if (fUrl.isNotBlank()) {
-                fUrl.split(",").map { it.trim() }.filter { it.isNotBlank() }.forEach {
-                    if (it !in availableUrls) availableUrls.add(it)
-                }
-            }
+            if (fUrl.isNotBlank()) availableUrls.addAll(fUrl.split(",").map { it.trim() }.filter { it.isNotBlank() })
         }
         currentUrlIndex = 0; totalSessionBytes = 0L
         lastRxBytes = TrafficStats.getUidRxBytes(android.os.Process.myUid())
@@ -409,7 +410,7 @@ class RadioService : Service() {
             player.prepare(); player.playWhenReady = true
             
             bufferTimeoutHandler.removeCallbacks(bufferTimeoutRunnable)
-            bufferTimeoutHandler.postDelayed(bufferTimeoutRunnable, 25000L)
+            bufferTimeoutHandler.postDelayed(bufferTimeoutRunnable, 30000L) // 30 ثانية
         } catch (t: Throwable) { toast("❌ خطأ في التشغيل") }
     }
 
