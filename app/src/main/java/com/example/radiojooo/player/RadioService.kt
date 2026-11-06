@@ -1,4 +1,4 @@
-package com.example.radiojooo.player
+﻿package com.example.radiojooo.player
 
 import android.app.*
 import android.content.Context
@@ -369,27 +369,110 @@ class RadioService : Service() {
         else startForeground(NOTIFICATION_ID, buildNotification())
     }
 
-    private fun playStationInternal(title: String, uuid: String, pUrl: String, fUrl: String, bitrate: Int = 0, category: String = "", country: String = "") {
+        private fun playStationInternal(title: String, uuid: String, pUrl: String, fUrl: String, bitrate: Int = 0, category: String = "", country: String = "") {
+        val mySession = sessionCounter.incrementAndGet()
+        currentSessionId = mySession
+
+        // ⚡ إلغاء قاطع وسريع لأي عملية خاصة بالمحطة السابقة
+        activeProbeJob?.cancel(); activeProbeJob = null
+        activeHealingJob?.cancel(); activeHealingJob = null
+        bufferTimeoutHandler.removeCallbacksAndMessages(null)
+        statsHandler.removeCallbacksAndMessages(null)
+
+        // ⚡ إيقاف البث السابق فوراً لمنع أي تأخير في الصوت عند النقل
+        try {
+            if (::player.isInitialized) {
+                player.stop()
+                player.clearMediaItems()
+            }
+        } catch (_: Throwable) {}
+
         stopRecording()
         currentTitle = title; currentStationUuid = uuid; currentBitrate = bitrate
         currentCategory = category; currentCountry = country
-        retryCount = 0; isHealing.set(false); hasPlayedSuccessfully = false
-        synchronized(availableUrls) {
-            availableUrls.clear()
-            if (pUrl.isNotBlank()) availableUrls.add(pUrl)
-            if (fUrl.isNotBlank()) {
-                fUrl.split(",").map { it.trim() }.filter { it.isNotBlank() }.forEach {
-                    if (it !in availableUrls) availableUrls.add(it)
+        _currentTrackTitle.value = ""
+        retryCount = 0; healingAttempts = 0; isHealing.set(false); hasPlayedSuccessfully = false
+
+        toast("📻 $title")
+
+        if (isAppInForeground) statsHandler.post(statsRunnable)
+
+        serviceScope.launch {
+            var dbPrimary: String? = null
+            var dbFallback: String? = null
+            try {
+                val dao = AppDatabase.getDatabase(applicationContext).stationDao()
+                val fresh = dao.getStationById(uuid)
+                if (fresh != null) {
+                    dbPrimary = fresh.primaryUrl.takeIf { it.isNotBlank() }
+                    dbFallback = fresh.fallbackUrl.takeIf { it.isNotBlank() }
+                }
+            } catch (t: Throwable) {
+                Log.e(TAG, "DB lookup failed: ${t.message}")
+            }
+            if (currentSessionId != mySession) return@launch
+
+            val healedPrimary = prefs.getString(KEY_HEALED_PREFIX + uuid, null)
+
+            val effectivePrimary = dbPrimary
+                ?: healedPrimary?.takeIf { it.isNotBlank() }
+                ?: pUrl
+            val effectiveFallback = dbFallback ?: fUrl
+
+            synchronized(availableUrls) {
+                availableUrls.clear()
+                if (effectivePrimary.isNotBlank()) availableUrls.add(effectivePrimary)
+                if (effectiveFallback.isNotBlank()) {
+                    availableUrls.addAll(effectiveFallback.split(",").map { it.trim() }.filter { it.isNotBlank() })
+                }
+            }
+            currentUrlIndex = 0
+            totalSessionBytes = 0L
+            lastRxBytes = TrafficStats.getUidRxBytes(android.os.Process.myUid())
+            stationStartTimeMs = System.currentTimeMillis()
+
+            if (currentSessionId != mySession) return@launch
+
+            activeProbeJob = serviceScope.launch {
+                try {
+                    val candidates = buildUrlCandidates(effectivePrimary, effectiveFallback)
+                    val aliveUrl = preFlightProbe(candidates, mySession)
+                    if (currentSessionId != mySession) return@launch
+                    if (aliveUrl != null) {
+                        val idx = synchronized(availableUrls) { availableUrls.indexOf(aliveUrl) }
+                        if (currentSessionId != mySession) return@launch
+                        if (idx >= 0) {
+                            currentUrlIndex = idx
+                        } else {
+                            synchronized(availableUrls) { availableUrls.clear(); availableUrls.add(aliveUrl) }
+                            currentUrlIndex = 0
+                        }
+                        statsHandler.post {
+                            if (currentSessionId == mySession) startStream(aliveUrl, mySession, useProxy = true)
+                        }
+                    } else {
+                        statsHandler.post {
+                            if (currentSessionId == mySession) {
+                                val first = synchronized(availableUrls) { availableUrls.firstOrNull() } ?: effectivePrimary
+                                startStream(first, mySession, useProxy = true)
+                            }
+                        }
+                    }
+                } catch (ce: CancellationException) {
+                    throw ce
+                } catch (t: Throwable) {
+                    if (currentSessionId == mySession) {
+                        statsHandler.post {
+                            if (currentSessionId == mySession) {
+                                val first = synchronized(availableUrls) { availableUrls.firstOrNull() } ?: effectivePrimary
+                                startStream(first, mySession, useProxy = true)
+                            }
+                        }
+                    }
                 }
             }
         }
-        currentUrlIndex = 0; totalSessionBytes = 0L
-        lastRxBytes = TrafficStats.getUidRxBytes(android.os.Process.myUid())
-        stationStartTimeMs = System.currentTimeMillis()
-        toast("📻 $title")
 
-        val firstUrl = synchronized(availableUrls) { availableUrls.firstOrNull() }
-        if (firstUrl != null) startStream(firstUrl, useProxy = true)
         updateNotification(); acquireLocks()
     }
 

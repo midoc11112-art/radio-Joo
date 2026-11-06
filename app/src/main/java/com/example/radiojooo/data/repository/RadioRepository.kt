@@ -5,7 +5,10 @@ import android.util.Log
 import com.example.radiojooo.data.local.AppDatabase
 import com.example.radiojooo.data.local.StationDao
 import com.example.radiojooo.data.model.StationEntity
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -17,6 +20,8 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
@@ -47,10 +52,16 @@ class RadioRepository(
     private val _healthComplete = MutableSharedFlow<HealthCheckResult>(replay = 1, extraBufferCapacity = 1)
     val healthComplete: SharedFlow<HealthCheckResult> = _healthComplete.asSharedFlow()
 
+    private val _isCheckingHealth = MutableStateFlow(false)
+    val isCheckingHealth: StateFlow<Boolean> = _isCheckingHealth.asStateFlow()
+
     private val apiClient = OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build()
     private val healthClient = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS).followRedirects(true).build()
-    private val healthSemaphore = Semaphore(200)
+    private val healthSemaphore = Semaphore(50)
     private val dbMutex = Mutex()
+
+    private var healthCheckJob: Job? = null
+    @Volatile private var isHealthCheckDisabledUntilNextRefresh = false
 
     val allStations: Flow<List<StationEntity>> = stationDao.getVisibleStations()
 
@@ -91,7 +102,10 @@ class RadioRepository(
                     val arr = json.getJSONArray("stations")
                     count = arr.length()
                     val stations = parseStations(arr)
-                    if (stations.isNotEmpty()) stationDao.insertStations(stations)
+                    if (stations.isNotEmpty()) {
+                        stationDao.insertStations(stations)
+                        try { stationDao.syncPriorities(stations) } catch (_: Throwable) {}
+                    }
                 }
             }
         } catch (t: Throwable) { Log.e("RadioRepository", "Fetch: ${t.message}") }
@@ -101,45 +115,77 @@ class RadioRepository(
     suspend fun ensureInitialDataLoaded() {
         try {
             dbMutex.withLock {
-                _healthTotal.value = 0; _healthChecked.value = 0
+                _healthTotal.value = 0
+                _healthChecked.value = 0
                 fetchStationsFromServer()
             }
-            delay(500)
-            performHealthChecks() // ✅ إرجاع الفحص
+            delay(300)
+            if (!isHealthCheckDisabledUntilNextRefresh) {
+                performHealthChecks()
+            }
         } catch (t: Throwable) { Log.e("RadioRepository", "Init: ${t.message}") }
+    }
+
+    fun stopHealthCheck() {
+        isHealthCheckDisabledUntilNextRefresh = true
+        healthCheckJob?.cancel()
+        healthCheckJob = null
+        _isCheckingHealth.value = false
+        _healthChecked.value = 0
+        _healthTotal.value = 0
     }
 
     suspend fun forceRefreshAll() {
         try {
+            stopHealthCheck()
+            isHealthCheckDisabledUntilNextRefresh = false
             dbMutex.withLock {
                 stationDao.resetAllHealthStatus()
                 fetchStationsFromServer()
             }
-            delay(500)
+            delay(300)
             performHealthChecks()
         } catch (t: Throwable) { Log.e("RadioRepository", "Refresh: ${t.message}") }
     }
 
-    private suspend fun performHealthChecks() {
-        val total = stationDao.getUncheckedCount()
-        _healthTotal.value = total
-        _healthChecked.value = 0
-        if (total > 0) {
-            var healthy = 0; var safety = 0
-            while (safety < 200 && stationDao.getUncheckedCount() > 0) {
-                healthy += runHealthChecks(200)
-                _healthChecked.value = minOf(_healthChecked.value + 200, total)
-                safety++
+    private fun performHealthChecks() {
+        if (isHealthCheckDisabledUntilNextRefresh) return
+        healthCheckJob?.cancel()
+        healthCheckJob = CoroutineScope(Dispatchers.IO).launch {
+            try {
+                _isCheckingHealth.value = true
+                val total = stationDao.getUncheckedCount()
+                _healthTotal.value = total
+                _healthChecked.value = 0
+                if (total > 0) {
+                    var healthy = 0
+                    var checkedCount = 0
+                    val batchSize = 50
+                    
+                    while (isActive && !isHealthCheckDisabledUntilNextRefresh && stationDao.getUncheckedCount() > 0) {
+                        val batchHealthy = runHealthChecks(batchSize)
+                        healthy += batchHealthy
+                        checkedCount = minOf(checkedCount + batchSize, total)
+                        _healthChecked.value = checkedCount
+                        delay(100)
+                    }
+                    if (isActive && !isHealthCheckDisabledUntilNextRefresh) {
+                        runCatching { stationDao.cleanupDeadStations() }
+                        _healthChecked.value = total
+                        _healthComplete.emit(HealthCheckResult(total, healthy))
+                    }
+                } else {
+                    _healthComplete.emit(HealthCheckResult(0, 0))
+                }
+            } catch (e: CancellationException) {
+                Log.d("RadioRepository", "Stopped health check")
+            } finally {
+                _isCheckingHealth.value = false
             }
-            runCatching { stationDao.cleanupDeadStations() }
-            _healthChecked.value = total
-            _healthComplete.emit(HealthCheckResult(total, healthy))
-        } else {
-            _healthComplete.emit(HealthCheckResult(0, 0))
         }
     }
 
-    suspend fun runHealthChecks(batchSize: Int = 200): Int = coroutineScope {
+    suspend fun runHealthChecks(batchSize: Int = 50): Int = coroutineScope {
         var healthy = 0
         try {
             val stations = stationDao.getUncheckedStations(batchSize)
@@ -149,8 +195,10 @@ class RadioRepository(
             for ((station, ok) in results) {
                 stationDao.updateHealth(station.uuid, ok, if (ok) 0 else station.failCount + 1, System.currentTimeMillis())
             }
-            runCatching { stationDao.cleanupDeadStations() }
-        } catch (t: Throwable) { Log.e("RadioRepository", "Health: ${t.message}") }
+        } catch (t: Throwable) {
+            if (t is CancellationException) throw t
+            Log.e("RadioRepository", "Health check batch error: ${t.message}")
+        }
         return@coroutineScope healthy
     }
 
@@ -176,7 +224,18 @@ class RadioRepository(
                 val o = arr.getJSONObject(i)
                 val uuid = o.optString("uuid"); val url = o.optString("primaryUrl")
                 if (uuid.isNotBlank() && url.isNotBlank()) {
-                    list.add(StationEntity(uuid=uuid, name=o.optString("name"), primaryUrl=url, fallbackUrl=o.optString("fallbackUrl",""), category=o.optString("category","MUSIC"), countryCode=o.optString("countryCode",""), bitrate=o.optInt("bitrate",0), popularity=o.optInt("popularity",0), lastUpdated=System.currentTimeMillis()))
+                    list.add(StationEntity(
+                        uuid=uuid,
+                        name=o.optString("name"),
+                        primaryUrl=url,
+                        fallbackUrl=o.optString("fallbackUrl",""),
+                        category=o.optString("category","MUSIC"),
+                        countryCode=o.optString("countryCode",""),
+                        bitrate=o.optInt("bitrate",64),
+                        popularity=o.optInt("popularity",0),
+                        priority=o.optInt("priority",0),
+                        lastUpdated=System.currentTimeMillis()
+                    ))
                 }
             } catch (t: Throwable) {}
         }
