@@ -163,25 +163,37 @@ class RadioService : Service() {
 
     private fun initializePlayer() {
         val renderersFactory = DefaultRenderersFactory(this).apply { setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF) }
+        
+        // ✅ الطبقة الأولى: منع أي مسار صوتي يتجاوز 32kbps
         trackSelector = DefaultTrackSelector(this).apply {
-            parameters = buildUponParameters().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true).setMaxAudioBitrate(48000).build()
+            parameters = buildUponParameters()
+                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
+                .setMaxAudioBitrate(32_000) // 32kbps كحد أقصى
+                .setForceLowestBitrate(false) // لا تفرض الأقل، بل اسمح بأي مسار ≤ 32kbps
+                .build()
         }
-        // ✅ بافر متوازن: 15-30 ثانية (لا يستهلك بيانات زائدة، ويكفي لتحمل التقلبات)
+        
+        // ✅ بافر متوازن: 10-20 ثانية (توفير بيانات مع استقرار)
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(15000, 30000, 2500, 5000)
+            .setBufferDurationsMs(10000, 20000, 2500, 5000)
             .setTargetBufferBytes(-1)
             .build()
-        // ✅ سياسة أخطاء مخصصة: محاولات أكثر مع تأخير تصاعدي
+            
+        // ✅ سياسة أخطاء: محاولات أكثر مع تأخير تصاعدي
         val loadErrorPolicy = object : DefaultLoadErrorHandlingPolicy() {
             override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
-                return minOf(1000L * (loadErrorInfo.errorCount + 1), 5000L) // تأخير تصاعدي حتى 5 ثوانٍ
+                return minOf(1000L * (loadErrorInfo.errorCount + 1), 5000L)
             }
         }
+        
         val dataSourceFactory = DefaultHttpDataSource.Factory()
             .setConnectTimeoutMs(30000).setReadTimeoutMs(30000).setAllowCrossProtocolRedirects(true)
             .setUserAgent("Mozilla/5.0 (Linux; Android 13) ExoPlayer/1.6.1")
             .setDefaultRequestProperties(mapOf("Accept" to "audio/*", "Icy-MetaData" to "0"))
-        mediaSourceFactory = DefaultMediaSourceFactory(this).setDataSourceFactory(dataSourceFactory).setLoadErrorHandlingPolicy(loadErrorPolicy)
+            
+        mediaSourceFactory = DefaultMediaSourceFactory(this)
+            .setDataSourceFactory(dataSourceFactory)
+            .setLoadErrorHandlingPolicy(loadErrorPolicy)
 
         player = ExoPlayer.Builder(this, renderersFactory)
             .setTrackSelector(trackSelector).setLoadControl(loadControl).setMediaSourceFactory(mediaSourceFactory)
@@ -406,7 +418,7 @@ class RadioService : Service() {
         if (!::player.isInitialized || isDestroyed.get()) return
         try {
             player.stop(); player.clearMediaItems(); isUsingProxy = useProxy
-            val finalUrl = if (useProxy) cloudflareProxyBase + URLEncoder.encode(streamUrl, "UTF-8") + "&bitrate=48" else streamUrl
+            val finalUrl = if (useProxy) cloudflareProxyBase + URLEncoder.encode(streamUrl, "UTF-8") + "&bitrate=32" else streamUrl
             val mimeType = when {
                 streamUrl.contains(".m3u8", true) -> MimeTypes.APPLICATION_M3U8
                 streamUrl.contains(".aac", true) -> MimeTypes.AUDIO_AAC
