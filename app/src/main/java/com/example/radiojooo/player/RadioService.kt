@@ -492,7 +492,8 @@ class RadioService : Service() {
         return@withContext null
     }
 
-    pri        if (currentSessionId != sessionId) return
+    private fun handlePlaybackError(error: PlaybackException, sessionId: Long) {
+        if (currentSessionId != sessionId) return
         if (isHealing.get() || isDestroyed.get()) return
 
         val currentUrl = synchronized(availableUrls) { availableUrls.getOrNull(currentUrlIndex) } ?: ""
@@ -555,7 +556,6 @@ class RadioService : Service() {
                 runCatching { dao.updateHealth(uuidToHeal, false, station.failCount + 1, System.currentTimeMillis()) }
                 runCatching { repoInstance.sendFeedback(uuidToHeal, "exo_error", false, errCap, countryCap, catCap) }
 
-                // v110.0: neuralHeal now handles Cloud -> Worker -> Web Search -> Persistence
                 val healResult = withTimeoutOrNull(20000L) { runCatching { repoInstance.neuralHeal(station) }.getOrNull() }
                 
                 if (currentSessionId != sessionId) { isHealing.set(false); return@launch }
@@ -667,10 +667,8 @@ class RadioService : Service() {
             }
             if (currentSessionId != mySession) return@launch
 
-            // Layer 2: SharedPrefs backup
             val healedPrimary = prefs.getString(KEY_HEALED_PREFIX + uuid, null)
 
-            // Resolve priority: DB > SharedPrefs > Intent
             val effectivePrimary = dbPrimary
                 ?: healedPrimary?.takeIf { it.isNotBlank() }
                 ?: pUrl

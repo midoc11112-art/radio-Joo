@@ -432,7 +432,8 @@ class RadioRepository(
                         fallbackUrl=o.optString("fallbackUrl",""),
                         category=o.optString("category","MUSIC"),
                         countryCode=o.optString("countryCode",""),
-                        bitrate=o.optInt("bitrate                        popularity=o.optInt("popularity",0),
+                        bitrate=o.optInt("bitrate", 64),
+                        popularity=o.optInt("popularity",0),
                         priority=o.optInt("priority",0),
                         lastUpdated=System.currentTimeMillis()
                     ))
