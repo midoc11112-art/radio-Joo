@@ -119,10 +119,6 @@ class RadioRepository(
                 _healthChecked.value = 0
                 fetchStationsFromServer()
             }
-            delay(300)
-            if (!isHealthCheckDisabledUntilNextRefresh) {
-                performHealthChecks()
-            }
         } catch (t: Throwable) { Log.e("RadioRepository", "Init: ${t.message}") }
     }
 
