@@ -93,7 +93,7 @@ class RadioService : Service() {
             if (isAppInForeground) { calculateDataUsage(); statsHandler.postDelayed(this, 1000) }
         }
     }
-    
+
     private val bufferTimeoutRunnable = Runnable {
         try {
             if (::player.isInitialized && player.playbackState == Player.STATE_BUFFERING && !player.isPlaying && !hasPlayedSuccessfully) {
@@ -163,34 +163,34 @@ class RadioService : Service() {
 
     private fun initializePlayer() {
         val renderersFactory = DefaultRenderersFactory(this).apply { setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF) }
-        
-        // ✅ الطبقة الأولى: منع أي مسار صوتي يتجاوز 32kbps
+
+        // ✅ توفير البيانات: سقف 32kbps + فرض أقل بتريت متاح (دون منع المحطة)
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters()
                 .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
-                .setMaxAudioBitrate(32_000) // 32kbps كحد أقصى
-                .setForceLowestBitrate(false) // لا تفرض الأقل، بل اسمح بأي مسار ≤ 32kbps
+                .setMaxAudioBitrate(32_000)
+                .setForceLowestBitrate(true)
                 .build()
         }
-        
-        // ✅ بافر متوازن: 10-20 ثانية (توفير بيانات مع استقرار)
+
+        // ✅ بافر متوازن: 10-20 ثانية
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(10000, 20000, 2500, 5000)
             .setTargetBufferBytes(-1)
             .build()
-            
-        // ✅ سياسة أخطاء: محاولات أكثر مع تأخير تصاعدي
+
+        // ✅ سياسة أخطاء مخصصة
         val loadErrorPolicy = object : DefaultLoadErrorHandlingPolicy() {
             override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
                 return minOf(1000L * (loadErrorInfo.errorCount + 1), 5000L)
             }
         }
-        
+
         val dataSourceFactory = DefaultHttpDataSource.Factory()
             .setConnectTimeoutMs(30000).setReadTimeoutMs(30000).setAllowCrossProtocolRedirects(true)
             .setUserAgent("Mozilla/5.0 (Linux; Android 13) ExoPlayer/1.6.1")
             .setDefaultRequestProperties(mapOf("Accept" to "audio/*", "Icy-MetaData" to "0"))
-            
+
         mediaSourceFactory = DefaultMediaSourceFactory(this)
             .setDataSourceFactory(dataSourceFactory)
             .setLoadErrorHandlingPolicy(loadErrorPolicy)
@@ -233,7 +233,7 @@ class RadioService : Service() {
 
     private fun handlePlaybackError(error: PlaybackException) {
         if (isHealing.get() || isDestroyed.get()) return
-        
+
         val errorType = when (error.errorCode) {
             PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> "403"
             PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> "timeout"
@@ -261,7 +261,7 @@ class RadioService : Service() {
         }
 
         val urls = synchronized(availableUrls) { availableUrls.toList() }
-        
+
         if (currentUrlIndex < urls.size - 1) {
             currentUrlIndex++
             toast("🔄 محاولة خادم بديل (${currentUrlIndex + 1}/${urls.size})")
@@ -303,8 +303,8 @@ class RadioService : Service() {
                 if (healResult != null && !isDestroyed.get()) {
                     val newUrl = healResult.url
                     toast("🔍 تم العثور على: ${healResult.matchedName}")
-                    delay(2000L) 
-                    
+                    delay(2000L)
+
                     val isValidAudio = withContext(Dispatchers.IO) {
                         try {
                             val probe = URL(newUrl).openConnection().apply { connectTimeout = 5000; readTimeout = 5000 }
@@ -428,7 +428,7 @@ class RadioService : Service() {
                 .setMediaMetadata(MediaMetadata.Builder().setTitle(currentTitle).build()).build()
             player.setMediaSource(mediaSourceFactory.createMediaSource(mediaItem))
             player.prepare(); player.playWhenReady = true
-            
+
             bufferTimeoutHandler.removeCallbacks(bufferTimeoutRunnable)
             bufferTimeoutHandler.postDelayed(bufferTimeoutRunnable, 30000L)
         } catch (t: Throwable) { toast("❌ خطأ في التشغيل") }
@@ -465,9 +465,9 @@ class RadioService : Service() {
         if (!folder.exists()) folder.mkdirs()
         return folder
     }
-    
+
     fun toggleRecording(): Boolean { if (isRecording) stopRecording() else startRecording(); return isRecording }
-    
+
     private fun startRecording() {
         try {
             val urls = synchronized(availableUrls) { availableUrls.toList() }
@@ -490,7 +490,7 @@ class RadioService : Service() {
             }
         } catch (t: Throwable) { isRecording = false }
     }
-    
+
     private fun stopRecording() { isRecording = false; recordingJob?.cancel(); recordingJob = null }
 
     fun startSleepTimer(minutes: Int) {
