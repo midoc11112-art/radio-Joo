@@ -165,12 +165,11 @@ class RadioService : Service() {
     private fun initializePlayer() {
         val renderersFactory = DefaultRenderersFactory(this).apply { setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF) }
 
-        // ✅ توفير البيانات: سقف 32kbps + فرض أقل بتريت متاح (دون منع المحطة)
+        // ✅ توفير البيانات: سقف 32kbps (تم إزالة setForceLowestBitrate لتجنب التعارض)
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters()
                 .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
                 .setMaxAudioBitrate(32_000)
-                
                 .build()
         }
 
