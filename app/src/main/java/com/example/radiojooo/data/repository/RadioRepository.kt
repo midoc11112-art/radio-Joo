@@ -55,8 +55,8 @@ class RadioRepository(
     private val _isCheckingHealth = MutableStateFlow(false)
     val isCheckingHealth: StateFlow<Boolean> = _isCheckingHealth.asStateFlow()
 
-    private val apiClient = OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build()
-    private val healthClient = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS).followRedirects(true).build()
+    private val apiClient = OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(15, TimeUnit.SECONDS).build()
+    private val healthClient = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS).readTimeout(5, TimeUnit.SECONDS).followRedirects(true).build()
     private val healthSemaphore = Semaphore(50)
     private val dbMutex = Mutex()
 
@@ -82,7 +82,7 @@ class RadioRepository(
                     }
                 }
             }
-        } catch (t: Throwable) { Log.e("HealAI", "فشل: ${t.message}") }
+        } catch (_: Throwable) {}
         return@withContext null
     }
 

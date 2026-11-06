@@ -84,7 +84,6 @@ class RadioService : Service() {
     var sleepTimeRemainingMs = 0L; private set
 
     private var retryCount = 0
-    private val maxRetries = 3
     private val statsHandler = Handler(Looper.getMainLooper())
     private val bufferTimeoutHandler = Handler(Looper.getMainLooper())
     private val statsRunnable = object : Runnable {
@@ -96,7 +95,6 @@ class RadioService : Service() {
     private val bufferTimeoutRunnable = Runnable {
         try {
             if (::player.isInitialized && player.playbackState == Player.STATE_BUFFERING && !player.isPlaying && !hasPlayedSuccessfully) {
-                toast("⏱️ البث متجمد...")
                 handlePlaybackError(PlaybackException("Buffer timeout", null, PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT))
             }
         } catch (t: Throwable) {}
@@ -167,7 +165,7 @@ class RadioService : Service() {
         }
         val loadControl = DefaultLoadControl.Builder().setBufferDurationsMs(15000, 60000, 2500, 5000).setTargetBufferBytes(-1).build()
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(30000).setReadTimeoutMs(30000).setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(15000).setReadTimeoutMs(15000).setAllowCrossProtocolRedirects(true)
             .setUserAgent("Mozilla/5.0 (Linux; Android 13) ExoPlayer/1.6.1")
             .setDefaultRequestProperties(mapOf("Accept" to "audio/*", "Icy-MetaData" to "0"))
         mediaSourceFactory = DefaultMediaSourceFactory(this).setDataSourceFactory(dataSourceFactory)
@@ -189,32 +187,6 @@ class RadioService : Service() {
                         acquireLocks()
                         bufferTimeoutHandler.removeCallbacks(bufferTimeoutRunnable)
                         hasPlayedSuccessfully = true
-                        val capturedUuid = currentStationUuid
-                        val capturedIndex = currentUrlIndex
-                        val capturedUrl = synchronized(availableUrls) { availableUrls.getOrNull(capturedIndex) }
-                        if (capturedUuid.isNotBlank()) {
-                            serviceScope.launch {
-                                try {
-                                    delay(10000)
-                                    if (isPlaying() && currentStationUuid == capturedUuid) {
-                                        repoInstance.sendFeedback(capturedUuid, "exo_active", true)
-                                        if (capturedIndex > 0 && !capturedUrl.isNullOrBlank() && currentUrlIndex == capturedIndex) {
-                                            val snapshot = synchronized(availableUrls) { availableUrls.toList() }
-                                            if (capturedUrl in snapshot) {
-                                                val remaining = snapshot.filter { it != capturedUrl }
-                                                val newFallback = remaining.joinToString(",")
-                                                runCatching {
-                                                    AppDatabase.getDatabase(applicationContext)
-                                                        .stationDao()
-                                                        .updateActiveStreamUrl(capturedUuid, capturedUrl, newFallback)
-                                                }
-                                                toast("💾 تم حفظ الرابط الشغال")
-                                            }
-                                        }
-                                    }
-                                } catch (_: Throwable) {}
-                            }
-                        }
                     }
                 } catch (t: Throwable) {}
             }
@@ -227,102 +199,50 @@ class RadioService : Service() {
     private fun handlePlaybackError(error: PlaybackException) {
         if (isHealing.get() || isDestroyed.get()) return
         
-        val isPermanentError = error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
-                error.errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND ||
-                error.errorCode == PlaybackException.ERROR_CODE_IO_NO_PERMISSION
-        
         val urls = synchronized(availableUrls) { availableUrls.toList() }
         
+        // 1. التجربة السريعة للروابط الاحتياطية المسجلة مسبقاً
         if (currentUrlIndex < urls.size - 1) {
             currentUrlIndex++
-            toast("🔄 محاولة خادم بديل (${currentUrlIndex + 1}/${urls.size})")
-            statsHandler.postDelayed({
+            toast("🔄 تجربة رابط بديل (${currentUrlIndex + 1}/${urls.size})")
+            statsHandler.post {
                 if (!isDestroyed.get()) startStream(urls[currentUrlIndex], useProxy = true)
-            }, if (isPermanentError) 500L else 2000L)
+            }
             return
         }
 
-        if (!isPermanentError) {
-            retryCount++
-            if (retryCount <= maxRetries) {
-                val delayMs = when (retryCount) { 1 -> 2000L; 2 -> 4000L; else -> 8000L }
-                toast("🔄 إعادة محاولة $retryCount/$maxRetries")
-                statsHandler.postDelayed({
-                    if (!isDestroyed.get()) startStream(urls.getOrNull(currentUrlIndex) ?: "", useProxy = true)
-                }, delayMs)
-                return
-            }
-        }
-
-        retryCount = 0
         if (currentStationUuid.isBlank() || isDestroyed.get()) return
         if (!isHealing.compareAndSet(false, true)) return
 
-        toast("🧠 Oracle AI يبحث...")
-        
         val uuidToHeal = currentStationUuid
-        val errCap = "unknown"
-        val countryCap = currentCountry
-        val catCap = currentCategory
 
+        // 2. البحث الخاطف عبر الخادم في أقل من 1 ثانية فقط بدقة بدون بحث ويب
         serviceScope.launch {
             try {
                 val dao = AppDatabase.getDatabase(applicationContext).stationDao()
                 val station = dao.getStationById(uuidToHeal) ?: run { isHealing.set(false); return@launch }
-                runCatching { dao.updateHealth(uuidToHeal, false, station.failCount + 1, System.currentTimeMillis()) }
-                runCatching { repoInstance.sendFeedback(uuidToHeal, "exo_error", false, errCap, countryCap, catCap) }
 
-                val healResult = withTimeoutOrNull(15000L) { runCatching { repoInstance.neuralHeal(station) }.getOrNull() }
+                val healResult = withTimeoutOrNull(1000L) { runCatching { repoInstance.neuralHeal(station) }.getOrNull() }
 
-                if (healResult != null && !isDestroyed.get()) {
+                if (healResult != null && !isDestroyed.get() && healResult.url.isNotBlank()) {
                     val newUrl = healResult.url
-                    toast("🔍 تم العثور على: ${healResult.matchedName}")
-                    delay(2000L)
-                    
-                    val isValidAudio = withContext(Dispatchers.IO) {
+                    statsHandler.post {
                         try {
-                            val probe = URL(newUrl).openConnection().apply { connectTimeout = 5000; readTimeout = 5000 }
-                            probe.connect()
-                            val ct = probe.contentType?.lowercase() ?: ""
-                            ct.startsWith("audio/") || ct.contains("mpeg") || ct.contains("octet-stream")
-                        } catch (e: Exception) { false }
-                    }
-                    if (isValidAudio) {
-                        statsHandler.post {
-                            try {
-                                if (!isDestroyed.get() && ::player.isInitialized) {
-                                    synchronized(availableUrls) { availableUrls.clear(); availableUrls.add(newUrl) }
-                                    currentUrlIndex = 0; retryCount = 0; hasPlayedSuccessfully = false
-                                    startStream(newUrl, useProxy = true)
-                                }
-                            } catch (t: Throwable) {} finally { isHealing.set(false) }
-                        }
-                    } else {
-                        toast("⚠️ الرابط البديل ليس صوتاً")
-                        isHealing.set(false)
-                        tryFallback()
+                            if (!isDestroyed.get() && ::player.isInitialized) {
+                                synchronized(availableUrls) { availableUrls.clear(); availableUrls.add(newUrl) }
+                                currentUrlIndex = 0; retryCount = 0; hasPlayedSuccessfully = false
+                                startStream(newUrl, useProxy = true)
+                            }
+                        } catch (t: Throwable) {} finally { isHealing.set(false) }
                     }
                 } else {
-                    toast("❌ لم أجد بديلاً")
+                    toast("❌ المحطة غير متاحة حالياً")
                     isHealing.set(false)
-                    tryFallback()
                 }
-            } catch (t: Throwable) { isHealing.set(false); tryFallback() }
-        }
-    }
-
-    private fun tryFallback() {
-        val urls = synchronized(availableUrls) { availableUrls.toList() }
-        if (urls.size > 1) {
-            currentUrlIndex = (currentUrlIndex + 1) % urls.size
-            toast("🔄 تجربة احتياطي #${currentUrlIndex + 1}")
-            statsHandler.post {
-                try {
-                    if (!isDestroyed.get() && ::player.isInitialized) startStream(urls[currentUrlIndex], useProxy = true)
-                } catch (t: Throwable) {}
+            } catch (t: Throwable) {
+                toast("❌ المحطة غير متاحة حالياً")
+                isHealing.set(false)
             }
-        } else {
-            toast("❌ المحطة غير متاحة حالياً")
         }
     }
 
@@ -437,7 +357,7 @@ class RadioService : Service() {
             player.prepare(); player.playWhenReady = true
             
             bufferTimeoutHandler.removeCallbacks(bufferTimeoutRunnable)
-            bufferTimeoutHandler.postDelayed(bufferTimeoutRunnable, 25000L)
+            bufferTimeoutHandler.postDelayed(bufferTimeoutRunnable, 15000L)
         } catch (t: Throwable) { toast("❌ خطأ في التشغيل") }
     }
 
