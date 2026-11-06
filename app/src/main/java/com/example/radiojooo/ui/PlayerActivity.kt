@@ -9,6 +9,7 @@ import android.view.View
 import android.widget.Toast
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.util.UnstableApi
 import com.example.radiojooo.databinding.ActivityPlayerBinding
 import com.example.radiojooo.player.RadioService
@@ -56,7 +57,15 @@ class PlayerActivity : AppCompatActivity() {
         binding.btnOpenFolder.setOnClickListener {
             val service = RadioService.getInstance() ?: return@setOnClickListener
             val folder = service.getRecordingsFolder()
-            try { val intent = Intent(Intent.ACTION_VIEW).apply { setDataAndType(Uri.fromFile(folder), "*/*"); addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }; startActivity(intent) } catch (e: Exception) { Toast.makeText(this, "مجلد التسجيلات: ${folder.absolutePath}", Toast.LENGTH_LONG).show() }
+            try {
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(Uri.fromFile(folder), "*/*")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(intent)
+            } catch (e: Exception) {
+                Toast.makeText(this, "مجلد التسجيلات: ${folder.absolutePath}", Toast.LENGTH_LONG).show()
+            }
         }
     }
 
