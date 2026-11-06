@@ -33,13 +33,16 @@ class StationAdapter(
         fun bind(station: StationEntity) {
             binding.tvStationName.text = station.name
             binding.tvCountryBadge.text = if (station.countryCode.isBlank()) "EG" else station.countryCode.uppercase()
-            binding.tvBitrateBadge.text = "${if (station.bitrate <= 0) 32 else station.bitrate} Kbps"
+            // لا نعرض رقم مزيف — إذا كان البت ريت مجهولاً نعرض "غير محدد"
+            binding.tvBitrateBadge.text = if (station.bitrate > 0) "${station.bitrate} Kbps" else "غير محدد"
 
             val categoryText = when (station.category) {
                 "QURAN" -> "القرآن الكريم"
                 "NEWS" -> "الأخبار"
                 "MUSIC" -> "موسيقى"
                 "SPORTS" -> "الرياضة"
+                "TALK" -> "توك شو"
+                "EGYPT" -> "مصر"
                 else -> "عام"
             }
             binding.tvCategoryBadge.text = categoryText

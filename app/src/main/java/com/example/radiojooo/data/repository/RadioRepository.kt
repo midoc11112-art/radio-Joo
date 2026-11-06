@@ -1,4 +1,4 @@
-﻿package com.example.radiojooo.data.repository
+package com.example.radiojooo.data.repository
 
 import android.content.Context
 import android.util.Log
@@ -47,10 +47,28 @@ class RadioRepository(
     private val _healthComplete = MutableSharedFlow<HealthCheckResult>(replay = 1, extraBufferCapacity = 1)
     val healthComplete: SharedFlow<HealthCheckResult> = _healthComplete.asSharedFlow()
 
-    private val apiClient = OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build()
-    private val healthClient = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS).followRedirects(true).build()
-    private val healthSemaphore = Semaphore(200)
+    // readTimeout مرتفع: أول طلب بعد رفع worker جديد قد يستغرق 10-20 ثانية (cold cache)
+    private val apiClient = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .build()
+
+    private val healthClient = OkHttpClient.Builder()
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .build()
+
+    // تقليل التزامن من 200 إلى 25 لحماية Cloudflare من rate limit
+    private val healthSemaphore = Semaphore(25)
     private val dbMutex = Mutex()
+
+    // حدود الفحص: 100 محطة كحد أقصى في الجلسة (لا انفجار مع آلاف المحطات)
+    private val MAX_CHECKS_PER_SESSION = 100
+    private val BATCH_SIZE = 25
+    private val INTER_BATCH_DELAY_MS = 200L
+
+    private enum class HealthStatus { HEALTHY, UNHEALTHY, UNKNOWN }
 
     val allStations: Flow<List<StationEntity>> = stationDao.getVisibleStations()
 
@@ -91,7 +109,12 @@ class RadioRepository(
                     val arr = json.getJSONArray("stations")
                     count = arr.length()
                     val stations = parseStations(arr)
-                    if (stations.isNotEmpty()) stationDao.insertStations(stations)
+                    if (stations.isNotEmpty()) {
+                        // إدخال على دفعات 500 لتفادي ضغط SQLite مع آلاف المحطات
+                        stations.chunked(500).forEach { chunk ->
+                            stationDao.insertStations(chunk)
+                        }
+                    }
                 }
             }
         } catch (t: Throwable) { Log.e("RadioRepository", "Fetch: ${t.message}") }
@@ -105,7 +128,7 @@ class RadioRepository(
                 fetchStationsFromServer()
             }
             delay(500)
-            performHealthChecks() // ✅ إرجاع الفحص
+            performHealthChecks(MAX_CHECKS_PER_SESSION)
         } catch (t: Throwable) { Log.e("RadioRepository", "Init: ${t.message}") }
     }
 
@@ -116,49 +139,105 @@ class RadioRepository(
                 fetchStationsFromServer()
             }
             delay(500)
-            performHealthChecks()
+            // التحديث اليدوي يسمح بفحص أكبر لكن ليس كل شيء دفعة واحدة
+            performHealthChecks(300)
         } catch (t: Throwable) { Log.e("RadioRepository", "Refresh: ${t.message}") }
     }
 
-    private suspend fun performHealthChecks() {
-        val total = stationDao.getUncheckedCount()
-        _healthTotal.value = total
+    private suspend fun performHealthChecks(maxPerSession: Int = MAX_CHECKS_PER_SESSION) {
+        val unchecked = stationDao.getUncheckedCount()
+        val targetForSession = minOf(unchecked, maxPerSession)
+        _healthTotal.value = targetForSession
         _healthChecked.value = 0
-        if (total > 0) {
-            var healthy = 0; var safety = 0
-            while (safety < 200 && stationDao.getUncheckedCount() > 0) {
-                healthy += runHealthChecks(200)
-                _healthChecked.value = minOf(_healthChecked.value + 200, total)
-                safety++
-            }
-            runCatching { stationDao.cleanupDeadStations() }
-            _healthChecked.value = total
-            _healthComplete.emit(HealthCheckResult(total, healthy))
-        } else {
+
+        if (unchecked <= 0) {
             _healthComplete.emit(HealthCheckResult(0, 0))
+            return
         }
+
+        var healthy = 0
+        var checked = 0
+        var safety = 0
+        val maxBatches = (targetForSession + BATCH_SIZE - 1) / BATCH_SIZE
+
+        while (safety < maxBatches && checked < maxPerSession && stationDao.getUncheckedCount() > 0) {
+            val remaining = maxPerSession - checked
+            val thisBatch = minOf(BATCH_SIZE, remaining)
+            val (h, c) = runHealthChecksWithCount(thisBatch)
+            if (c == 0) {
+                // لا تقدم (احتمال rate limit 429) → أوقف الجلسة
+                Log.w("RadioRepository", "Health: no progress, likely rate-limited. Stopping session early.")
+                break
+            }
+            healthy += h
+            checked += c
+            _healthChecked.value = checked
+            safety++
+            if (checked < maxPerSession) delay(INTER_BATCH_DELAY_MS)
+        }
+
+        runCatching { stationDao.cleanupDeadStations() }
+        _healthChecked.value = checked
+        _healthComplete.emit(HealthCheckResult(checked, healthy))
     }
 
-    suspend fun runHealthChecks(batchSize: Int = 200): Int = coroutineScope {
+    // واجهة متوافقة مع StationSyncWorker (ترجع عدد السليمة فقط)
+    suspend fun runHealthChecks(batchSize: Int = BATCH_SIZE): Int {
+        return runHealthChecksWithCount(batchSize).first
+    }
+
+    private suspend fun runHealthChecksWithCount(batchSize: Int): Pair<Int, Int> = coroutineScope {
         var healthy = 0
+        var actuallyChecked = 0
         try {
             val stations = stationDao.getUncheckedStations(batchSize)
-            if (stations.isEmpty()) return@coroutineScope 0
-            val results = stations.map { s -> async(Dispatchers.IO) { healthSemaphore.withPermit { s to checkStationHealth(s.primaryUrl) } } }.awaitAll()
-            healthy = results.count { it.second }
-            for ((station, ok) in results) {
-                stationDao.updateHealth(station.uuid, ok, if (ok) 0 else station.failCount + 1, System.currentTimeMillis())
+            if (stations.isEmpty()) return@coroutineScope 0 to 0
+            val results = stations.map { s ->
+                async(Dispatchers.IO) {
+                    healthSemaphore.withPermit { s to checkStationHealth(s.primaryUrl) }
+                }
+            }.awaitAll()
+            for ((station, status) in results) {
+                when (status) {
+                    HealthStatus.HEALTHY -> {
+                        healthy++
+                        actuallyChecked++
+                        stationDao.updateHealth(station.uuid, true, 0, System.currentTimeMillis())
+                    }
+                    HealthStatus.UNHEALTHY -> {
+                        actuallyChecked++
+                        stationDao.updateHealth(station.uuid, false, station.failCount + 1, System.currentTimeMillis())
+                    }
+                    HealthStatus.UNKNOWN -> {
+                        // لا نلمس المحطة — تبقى unchecked وتُعاد في جلسة لاحقة
+                        // هذا يمنع تحويل محطات سليمة إلى ميتة بسبب rate limit
+                    }
+                }
             }
             runCatching { stationDao.cleanupDeadStations() }
         } catch (t: Throwable) { Log.e("RadioRepository", "Health: ${t.message}") }
-        return@coroutineScope healthy
+        return@coroutineScope healthy to actuallyChecked
     }
 
-    private suspend fun checkStationHealth(url: String): Boolean = withContext(Dispatchers.IO) {
-        if (url.isBlank()) return@withContext false
+    // يقرأ الرد الفعلي "OK"/"FAIL" بدل الاعتماد على status code فقط
+    private suspend fun checkStationHealth(url: String): HealthStatus = withContext(Dispatchers.IO) {
+        if (url.isBlank()) return@withContext HealthStatus.UNHEALTHY
         try {
-            healthClient.newCall(Request.Builder().url("$PROXY_BASE_URL/health-check?url=${URLEncoder.encode(url, "UTF-8")}").build()).execute().use { it.isSuccessful }
-        } catch (t: Throwable) { false }
+            healthClient.newCall(
+                Request.Builder()
+                    .url("$PROXY_BASE_URL/health-check?url=${URLEncoder.encode(url, "UTF-8")}")
+                    .build()
+            ).execute().use { resp ->
+                val body = resp.body?.string()?.trim() ?: ""
+                when {
+                    body == "OK" -> HealthStatus.HEALTHY
+                    body == "FAIL" -> HealthStatus.UNHEALTHY
+                    resp.code == 429 -> HealthStatus.UNKNOWN
+                    resp.code in 500..599 -> HealthStatus.UNKNOWN
+                    else -> HealthStatus.UNKNOWN
+                }
+            }
+        } catch (t: Throwable) { HealthStatus.UNKNOWN }
     }
 
     suspend fun toggleFavorite(uuid: String, currentStatus: Boolean) = stationDao.updateFavoriteStatus(uuid, !currentStatus)

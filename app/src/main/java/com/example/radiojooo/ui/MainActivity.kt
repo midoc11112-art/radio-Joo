@@ -1,4 +1,4 @@
-﻿package com.example.radiojooo.ui
+package com.example.radiojooo.ui
 
 import android.Manifest
 import android.app.NotificationChannel
@@ -341,12 +341,13 @@ class MainActivity : AppCompatActivity() {
             binding.tvMiniStationName.text = currentStation?.name ?: service?.currentTitle
             if (currentStation != null) {
                 binding.tvMiniCategoryBadge.text = getCategoryArabicTitle(currentStation.category)
-                binding.tvMiniBitrateBadge.text = if (currentStation.bitrate > 0) "${currentStation.bitrate} Kbps" else "32 Kbps"
+                // لا نعرض رقم مزيف — إن كان مجهولاً نعرض "غير محدد"
+                binding.tvMiniBitrateBadge.text = if (currentStation.bitrate > 0) "${currentStation.bitrate} Kbps" else "غير محدد"
                 binding.tvMiniCountryBadge.text = currentStation.countryCode
                 binding.tvMiniServersBadge.text = "1 خادم"
             } else {
                 binding.tvMiniCategoryBadge.text = "عام"
-                binding.tvMiniBitrateBadge.text = "32 Kbps"
+                binding.tvMiniBitrateBadge.text = "غير محدد"
                 binding.tvMiniCountryBadge.text = "EG"
                 binding.tvMiniServersBadge.text = "1 خادم"
             }
