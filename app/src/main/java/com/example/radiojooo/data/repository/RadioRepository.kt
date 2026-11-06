@@ -1,16 +1,33 @@
 package com.example.radiojooo.data.repository
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.util.Log
 import com.example.radiojooo.data.local.AppDatabase
 import com.example.radiojooo.data.local.StationDao
 import com.example.radiojooo.data.model.StationEntity
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -29,6 +46,7 @@ class RadioRepository(
 ) {
     private val stationDao: StationDao = stationDaoParam ?: AppDatabase.getDatabase(context).stationDao()
     private val PROXY_BASE_URL = "https://radio-joo-proxy.midoc11112.workers.dev"
+    private val prefs: SharedPreferences by lazy { context.getSharedPreferences("radio_joo_prefs", Context.MODE_PRIVATE) }
 
     private val _healthChecked = MutableStateFlow(0)
     val healthChecked: StateFlow<Int> = _healthChecked.asStateFlow()
@@ -52,7 +70,7 @@ class RadioRepository(
 
     private enum class HealthStatus { HEALTHY, UNHEALTHY, UNKNOWN }
 
-    val allStations: Flow<List<StationEntity>> = stationDao.getVisibleStations()
+    val allStations: kotlinx.coroutines.flow.Flow<List<StationEntity>> = stationDao.getVisibleStations()
     private var healthCheckJob: Job? = null
 
     suspend fun neuralHeal(station: StationEntity): HealResult? = withContext(Dispatchers.IO) {
@@ -63,15 +81,31 @@ class RadioRepository(
                     val body = res.body?.string() ?: return@withContext null
                     val json = JSONObject(body)
                     if (json.optBoolean("success", false)) {
-                        val newUrl = json.optString("newUrl"); val matchedName = json.optString("matchedName", station.name)
+                        val newUrl = json.optString("newUrl")
+                        val matchedName = json.optString("matchedName", station.name)
                         if (newUrl.isNotBlank() && newUrl.startsWith("http")) {
-                            runCatching { stationDao.updateStationUrl(station.uuid, newUrl) }
+                            // v109.7: Layer 1 — explicit persist with logging
+                            try {
+                                stationDao.updateStationUrl(station.uuid, newUrl)
+                                Log.d("HealAI", "✓ DB persisted: ${station.name} -> $newUrl")
+                            } catch (e: Throwable) {
+                                Log.e("HealAI", "✗ DB persist failed: ${e.message}", e)
+                            }
+                            // v109.7: Layer 2 — SharedPrefs backup (survives DB failure)
+                            try {
+                                prefs.edit().putString("healed_url_${station.uuid}", newUrl).apply()
+                                Log.d("HealAI", "✓ Prefs persisted: ${station.uuid}")
+                            } catch (e: Throwable) {
+                                Log.e("HealAI", "✗ Prefs persist failed: ${e.message}", e)
+                            }
                             return@withContext HealResult(newUrl, matchedName)
                         }
                     }
                 }
             }
-        } catch (t: Throwable) { Log.e("HealAI", "فشل: ${t.message}") }
+        } catch (t: Throwable) {
+            Log.e("HealAI", "Heal request failed: ${t.message}", t)
+        }
         return@withContext null
     }
 
@@ -94,6 +128,19 @@ class RadioRepository(
                     if (stations.isNotEmpty()) {
                         stations.chunked(500).forEach { chunk -> stationDao.insertStations(chunk) }
                         try { stationDao.syncPriorities(stations) } catch (t: Throwable) { Log.e("RadioRepository", "syncPriorities: ${t.message}") }
+
+                        // v109.7: Apply SharedPrefs backups on top of fetched data (in case DB lost them)
+                        try {
+                            for (s in stations) {
+                                val backupUrl = prefs.getString("healed_url_${s.uuid}", null)
+                                if (!backupUrl.isNullOrBlank() && backupUrl != s.primaryUrl) {
+                                    try {
+                                        stationDao.updateStationUrl(s.uuid, backupUrl)
+                                        Log.d("RadioRepository", "✓ Restored from backup: ${s.name} -> $backupUrl")
+                                    } catch (_: Throwable) {}
+                                }
+                            }
+                        } catch (_: Throwable) {}
                     }
                 }
             }

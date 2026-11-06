@@ -23,6 +23,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.util.Log
 import android.util.LruCache
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
@@ -87,12 +88,14 @@ class RadioService : Service() {
         private const val PREFS_NAME = "radio_joo_prefs"
         private const val KEY_LAST_GOOD_PREFIX = "last_good_"
         private const val KEY_DEAD_PREFIX = "dead_"
+        private const val KEY_HEALED_PREFIX = "healed_url_"
         private const val DEAD_TTL_MS = 30 * 60 * 1000L
         private const val LAST_GOOD_TTL_MS = 60 * 60 * 1000L
         private const val ROOT_BLACKLIST_TTL_MS = 24 * 60 * 60 * 1000L
         private const val MAX_RETRY_SAME_URL = 2
         private const val MAX_HEALING_ATTEMPTS = 3
         private const val STABLE_PLAYBACK_RESET_MS = 30_000L
+        private const val TAG = "RadioService"
 
         fun getInstance(): RadioService? = instance
 
@@ -371,7 +374,6 @@ class RadioService : Service() {
                                 } catch (_: Throwable) {}
                             }
                         }
-                        // v109.6: reset counters after stable playback
                         serviceScope.launch {
                             try {
                                 delay(STABLE_PLAYBACK_RESET_MS)
@@ -560,6 +562,7 @@ class RadioService : Service() {
                 if (healResult != null && !isDestroyed.get()) {
                     val newUrl = healResult.url
                     toast("🔍 تم العثور على: ${healResult.matchedName}")
+                    Log.d(TAG, "Healed: ${station.name} -> $newUrl")
                     statsHandler.post {
                         try {
                             if (currentSessionId == sessionId && !isDestroyed.get() && ::player.isInitialized) {
@@ -629,6 +632,35 @@ class RadioService : Service() {
         else startForeground(NOTIFICATION_ID, buildNotification())
     }
 
+    // v109.7: 4-layer URL resolution (DB > SharedPrefs > Intent)
+    private fun resolveFreshUrls(uuid: String, intentPrimary: String, intentFallback: String): Pair<String, String> {
+        var dbPrimary: String? = null
+        var dbFallback: String? = null
+        try {
+            val dao = AppDatabase.getDatabase(applicationContext).stationDao()
+            // getStationById is suspend, so we cannot call it here synchronously.
+            // We use the backup path instead — SharedPrefs + Intent.
+            // The suspend call is done in a coroutine before this function in playStationInternal.
+        } catch (_: Throwable) {}
+
+        val healedPrimary = prefs.getString(KEY_HEALED_PREFIX + uuid, null)
+
+        val effectivePrimary = when {
+            !dbPrimary.isNullOrBlank() -> dbPrimary!!
+            !healedPrimary.isNullOrBlank() -> healedPrimary!!
+            intentPrimary.isNotBlank() -> intentPrimary
+            else -> ""
+        }
+
+        val effectiveFallback = when {
+            !dbFallback.isNullOrBlank() -> dbFallback!!
+            intentFallback.isNotBlank() -> intentFallback
+            else -> ""
+        }
+
+        return effectivePrimary to effectiveFallback
+    }
+
     private fun playStationInternal(title: String, uuid: String, pUrl: String, fUrl: String, bitrate: Int = 0, category: String = "", country: String = "") {
         val mySession = sessionCounter.incrementAndGet()
         currentSessionId = mySession
@@ -643,62 +675,97 @@ class RadioService : Service() {
         currentCategory = category; currentCountry = country
         _currentTrackTitle.value = ""
         retryCount = 0; healingAttempts = 0; isHealing.set(false); hasPlayedSuccessfully = false
-        synchronized(availableUrls) {
-            availableUrls.clear()
-            if (pUrl.isNotBlank()) availableUrls.add(pUrl)
-            if (fUrl.isNotBlank()) availableUrls.addAll(fUrl.split(",").map { it.trim() }.filter { it.isNotBlank() })
-        }
-        currentUrlIndex = 0; totalSessionBytes = 0L
-        lastRxBytes = TrafficStats.getUidRxBytes(android.os.Process.myUid())
-        stationStartTimeMs = System.currentTimeMillis()
-
-        try { if (::player.isInitialized) { player.stop(); player.clearMediaItems() } } catch (_: Throwable) {}
 
         toast("📻 $title")
 
         if (isAppInForeground) statsHandler.post(statsRunnable)
 
-        activeProbeJob = serviceScope.launch {
+        // v109.7: DB query is async — do it in serviceScope first
+        serviceScope.launch {
+            var dbPrimary: String? = null
+            var dbFallback: String? = null
             try {
-                val candidates = buildUrlCandidates(pUrl, fUrl)
-                val aliveUrl = preFlightProbe(candidates, mySession)
-                if (currentSessionId != mySession) return@launch
-                if (aliveUrl != null) {
-                    val idx = synchronized(availableUrls) { availableUrls.indexOf(aliveUrl) }
+                val dao = AppDatabase.getDatabase(applicationContext).stationDao()
+                val fresh = dao.getStationById(uuid)
+                if (fresh != null) {
+                    dbPrimary = fresh.primaryUrl.takeIf { it.isNotBlank() }
+                    dbFallback = fresh.fallbackUrl.takeIf { it.isNotBlank() }
+                }
+            } catch (t: Throwable) {
+                Log.e(TAG, "DB lookup failed: ${t.message}")
+            }
+            if (currentSessionId != mySession) return@launch
+
+            // Layer 2: SharedPrefs backup
+            val healedPrimary = prefs.getString(KEY_HEALED_PREFIX + uuid, null)
+
+            // Resolve priority: DB > SharedPrefs > Intent
+            val effectivePrimary = dbPrimary
+                ?: healedPrimary?.takeIf { it.isNotBlank() }
+                ?: pUrl
+            val effectiveFallback = dbFallback ?: fUrl
+
+            Log.d(TAG, "Resolved URLs for $uuid: primary=$effectivePrimary (db=$dbPrimary, prefs=$healedPrimary, intent=$pUrl)")
+
+            synchronized(availableUrls) {
+                availableUrls.clear()
+                if (effectivePrimary.isNotBlank()) availableUrls.add(effectivePrimary)
+                if (effectiveFallback.isNotBlank()) {
+                    availableUrls.addAll(effectiveFallback.split(",").map { it.trim() }.filter { it.isNotBlank() })
+                }
+            }
+            currentUrlIndex = 0
+            totalSessionBytes = 0L
+            lastRxBytes = TrafficStats.getUidRxBytes(android.os.Process.myUid())
+            stationStartTimeMs = System.currentTimeMillis()
+
+            try { if (::player.isInitialized) { player.stop(); player.clearMediaItems() } } catch (_: Throwable) {}
+
+            if (currentSessionId != mySession) return@launch
+
+            activeProbeJob = serviceScope.launch {
+                try {
+                    val candidates = buildUrlCandidates(effectivePrimary, effectiveFallback)
+                    val aliveUrl = preFlightProbe(candidates, mySession)
                     if (currentSessionId != mySession) return@launch
-                    if (idx >= 0) {
-                        currentUrlIndex = idx
+                    if (aliveUrl != null) {
+                        val idx = synchronized(availableUrls) { availableUrls.indexOf(aliveUrl) }
+                        if (currentSessionId != mySession) return@launch
+                        if (idx >= 0) {
+                            currentUrlIndex = idx
+                        } else {
+                            synchronized(availableUrls) { availableUrls.clear(); availableUrls.add(aliveUrl) }
+                            currentUrlIndex = 0
+                        }
+                        statsHandler.post {
+                            if (currentSessionId == mySession) startStream(aliveUrl, mySession, useProxy = true)
+                        }
                     } else {
-                        synchronized(availableUrls) { availableUrls.clear(); availableUrls.add(aliveUrl) }
-                        currentUrlIndex = 0
-                    }
-                    statsHandler.post {
-                        if (currentSessionId == mySession) startStream(aliveUrl, mySession, useProxy = true)
-                    }
-                } else {
-                    toast("⚠️ كل الروابط فشلت، بحث فوري...")
-                    statsHandler.post {
-                        if (currentSessionId == mySession) {
-                            handlePlaybackError(
-                                PlaybackException("Pre-flight failed", null, PlaybackException.ERROR_CODE_IO_UNSPECIFIED),
-                                mySession
-                            )
+                        toast("⚠️ كل الروابط فشلت، بحث فوري...")
+                        statsHandler.post {
+                            if (currentSessionId == mySession) {
+                                handlePlaybackError(
+                                    PlaybackException("Pre-flight failed", null, PlaybackException.ERROR_CODE_IO_UNSPECIFIED),
+                                    mySession
+                                )
+                            }
                         }
                     }
-                }
-            } catch (ce: CancellationException) {
-                throw ce
-            } catch (t: Throwable) {
-                if (currentSessionId == mySession) {
-                    statsHandler.post {
-                        if (currentSessionId == mySession) {
-                            val first = synchronized(availableUrls) { availableUrls.firstOrNull() }
-                            if (first != null) startStream(first, mySession, useProxy = true)
+                } catch (ce: CancellationException) {
+                    throw ce
+                } catch (t: Throwable) {
+                    if (currentSessionId == mySession) {
+                        statsHandler.post {
+                            if (currentSessionId == mySession) {
+                                val first = synchronized(availableUrls) { availableUrls.firstOrNull() }
+                                if (first != null) startStream(first, mySession, useProxy = true)
+                            }
                         }
                     }
                 }
             }
         }
+
         updateNotification(); acquireLocks()
     }
 
