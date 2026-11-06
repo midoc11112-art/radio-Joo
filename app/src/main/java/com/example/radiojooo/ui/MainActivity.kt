@@ -28,15 +28,22 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.util.UnstableApi
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.work.Constraints
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import com.example.radiojooo.R
 import com.example.radiojooo.data.model.StationEntity
 import com.example.radiojooo.data.repository.HealthCheckResult
+import com.example.radiojooo.data.worker.StationSyncWorker
 import com.example.radiojooo.databinding.ActivityMainBinding
 import com.example.radiojooo.player.RadioService
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 @UnstableApi
 class MainActivity : AppCompatActivity() {
@@ -44,6 +51,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val HEALTH_CHANNEL_ID = "radio_joo_health_check_channel"
         private const val HEALTH_NOTIFICATION_ID = 2001
+        private const val SYNC_WORK_NAME = "station_sync_worker"
     }
 
     private lateinit var binding: ActivityMainBinding
@@ -76,6 +84,7 @@ class MainActivity : AppCompatActivity() {
         observeViewModel()
         observeHealthCheck()
         createHealthNotificationChannel()
+        scheduleStationSyncWorker()
 
         binding.btnStopCheck.setOnClickListener {
             viewModel.stopHealthCheck()
@@ -85,6 +94,24 @@ class MainActivity : AppCompatActivity() {
 
         if (savedInstanceState == null) {
             showVerificationIndicator()
+        }
+    }
+
+    private fun scheduleStationSyncWorker() {
+        try {
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build()
+            val workRequest = PeriodicWorkRequestBuilder<StationSyncWorker>(6, TimeUnit.HOURS)
+                .setConstraints(constraints)
+                .build()
+            WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+                SYNC_WORK_NAME,
+                ExistingPeriodicWorkPolicy.KEEP,
+                workRequest
+            )
+        } catch (t: Throwable) {
+            // ignore
         }
     }
 

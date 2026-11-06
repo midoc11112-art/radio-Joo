@@ -1,8 +1,14 @@
 package com.example.radiojooo.player
 
-import android.app.*
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.ServiceInfo
 import android.graphics.BitmapFactory
 import android.media.MediaScannerConnection
@@ -10,33 +16,58 @@ import android.media.audiofx.LoudnessEnhancer
 import android.net.TrafficStats
 import android.net.Uri
 import android.net.wifi.WifiManager
-import android.os.*
+import android.os.Binder
+import android.os.Build
+import android.os.CountDownTimer
+import android.os.Environment
+import android.os.Handler
+import android.os.IBinder
+import android.os.Looper
+import android.os.PowerManager
+import android.util.LruCache
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.media.app.NotificationCompat.MediaStyle
-import androidx.media3.common.*
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Metadata
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
-import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import androidx.media3.extractor.metadata.icy.IcyInfo
 import com.example.radiojooo.R
 import com.example.radiojooo.data.local.AppDatabase
 import com.example.radiojooo.data.repository.RadioRepository
 import com.example.radiojooo.ui.MainActivity
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
 import java.net.URL
 import java.net.URLEncoder
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 class RadioService : Service() {
@@ -45,6 +76,12 @@ class RadioService : Service() {
         private var instance: RadioService? = null
         private const val CHANNEL_ID = "radio_joo_service_channel"
         private const val NOTIFICATION_ID = 1001
+        private const val PREFS_NAME = "radio_joo_prefs"
+        private const val KEY_LAST_GOOD_PREFIX = "last_good_"
+        private const val KEY_DEAD_PREFIX = "dead_"
+        private const val DEAD_TTL_MS = 30 * 60 * 1000L
+        private const val LAST_GOOD_TTL_MS = 60 * 60 * 1000L
+
         fun getInstance(): RadioService? = instance
 
         fun requestPlayStation(
@@ -73,6 +110,16 @@ class RadioService : Service() {
     private val availableUrls = mutableListOf<String>()
     private var currentUrlIndex = 0
     private var loudnessEnhancer: LoudnessEnhancer? = null
+
+    private val lastGoodUrlCache = LruCache<String, Long>(200)
+    private val deadUrlCache = LruCache<String, Long>(200)
+    private val prefs: SharedPreferences by lazy { getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
+
+    private val apiClient = OkHttpClient.Builder()
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .build()
 
     var currentTitle: String = "راديو جو PRO"
     var currentBitrate: Int = 0
@@ -132,6 +179,25 @@ class RadioService : Service() {
         acquireLocks()
         initializePlayer()
         statsHandler.post(statsRunnable)
+        loadCachesFromPrefs()
+    }
+
+    private fun loadCachesFromPrefs() {
+        try {
+            val all = prefs.all
+            for ((k, v) in all) {
+                if (v !is Long) continue
+                if (k.startsWith(KEY_LAST_GOOD_PREFIX)) {
+                    if (System.currentTimeMillis() - v < LAST_GOOD_TTL_MS) {
+                        lastGoodUrlCache.put(k.removePrefix(KEY_LAST_GOOD_PREFIX), v)
+                    }
+                } else if (k.startsWith(KEY_DEAD_PREFIX)) {
+                    if (System.currentTimeMillis() - v < DEAD_TTL_MS) {
+                        deadUrlCache.put(k.removePrefix(KEY_DEAD_PREFIX), v)
+                    }
+                }
+            }
+        } catch (_: Throwable) {}
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -190,20 +256,22 @@ class RadioService : Service() {
             .setTargetBufferBytes(-1)
             .build()
 
-        val loadErrorPolicy = object : DefaultLoadErrorHandlingPolicy() {
+        // v109.5: Fast Error Policy — محاولة واحدة فقط، تأخير 300ms
+        val fastErrorPolicy = object : LoadErrorHandlingPolicy() {
             override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
-                return minOf(1000L * (loadErrorInfo.errorCount + 1), 5000L)
+                return if (loadErrorInfo.errorCount >= 1) C.TIME_UNSET else 300L
             }
+            override fun getMinimumLoadableRetryCount(dataType: Int): Int = 1
         }
 
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(30000).setReadTimeoutMs(30000).setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(8000).setReadTimeoutMs(8000).setAllowCrossProtocolRedirects(true)
             .setUserAgent("Mozilla/5.0 (Linux; Android 13) ExoPlayer/1.6.1")
             .setDefaultRequestProperties(mapOf("Accept" to "audio/*", "Icy-MetaData" to "0"))
 
         mediaSourceFactory = DefaultMediaSourceFactory(this)
             .setDataSourceFactory(dataSourceFactory)
-            .setLoadErrorHandlingPolicy(loadErrorPolicy)
+            .setLoadErrorHandlingPolicy(fastErrorPolicy)
 
         player = ExoPlayer.Builder(this, renderersFactory)
             .setTrackSelector(trackSelector).setLoadControl(loadControl).setMediaSourceFactory(mediaSourceFactory)
@@ -251,6 +319,16 @@ class RadioService : Service() {
                         acquireLocks()
                         bufferTimeoutHandler.removeCallbacks(bufferTimeoutRunnable)
                         hasPlayedSuccessfully = true
+                        // v109.5: حفظ Last-Good URL + مسح Dead Cache
+                        val currentUrl = synchronized(availableUrls) { availableUrls.getOrNull(currentUrlIndex) }
+                        if (!currentUrl.isNullOrBlank()) {
+                            if (currentStationUuid.isNotBlank()) {
+                                lastGoodUrlCache.put(currentStationUuid, System.currentTimeMillis())
+                                try { prefs.edit().putLong(KEY_LAST_GOOD_PREFIX + currentStationUuid, System.currentTimeMillis()).apply() } catch (_: Throwable) {}
+                            }
+                            deadUrlCache.remove(currentUrl)
+                            try { prefs.edit().remove(KEY_DEAD_PREFIX + currentUrl).apply() } catch (_: Throwable) {}
+                        }
                         if (currentStationUuid.isNotBlank()) {
                             serviceScope.launch {
                                 try {
@@ -271,8 +349,75 @@ class RadioService : Service() {
         })
     }
 
+    // v109.5: Multi-Protocol URL generation
+    private fun generateUrlVariants(url: String): List<String> {
+        if (url.isBlank()) return emptyList()
+        val variants = mutableListOf<String>()
+        variants.add(url)
+        if (url.startsWith("https://")) {
+            variants.add(url.replaceFirst("https://", "http://"))
+        } else if (url.startsWith("http://")) {
+            variants.add(url.replaceFirst("http://", "https://"))
+        }
+        if (!url.contains("?")) {
+            variants.add(url + "?.mp3")
+        }
+        if (url.endsWith("/")) {
+            variants.add(url.dropLast(1))
+        }
+        return variants.distinct()
+    }
+
+    // v109.5: Pre-flight probe (HEAD, 1.5s timeout, skip dead)
+    private suspend fun preFlightProbe(urls: List<String>): String? = withContext(Dispatchers.IO) {
+        for (url in urls) {
+            val deadTime = deadUrlCache.get(url) ?: 0L
+            if (deadTime > 0 && System.currentTimeMillis() - deadTime < DEAD_TTL_MS) continue
+            try {
+                val req = Request.Builder().url(url).head().build()
+                val resp = withTimeoutOrNull(1500L) {
+                    withContext(Dispatchers.IO) { apiClient.newCall(req).execute() }
+                }
+                if (resp != null) {
+                    resp.use {
+                        if (it.isSuccessful || it.code == 206) {
+                            val ct = it.header("Content-Type")?.lowercase() ?: ""
+                            if (!ct.contains("text/html") && !ct.contains("application/json")) {
+                                return@withContext url
+                            }
+                        }
+                    }
+                }
+                deadUrlCache.put(url, System.currentTimeMillis())
+                try { prefs.edit().putLong(KEY_DEAD_PREFIX + url, System.currentTimeMillis()).apply() } catch (_: Throwable) {}
+            } catch (_: Throwable) {
+                deadUrlCache.put(url, System.currentTimeMillis())
+                try { prefs.edit().putLong(KEY_DEAD_PREFIX + url, System.currentTimeMillis()).apply() } catch (_: Throwable) {}
+            }
+        }
+        return@withContext null
+    }
+
+    // v109.5: Build candidate list
+    private fun buildUrlCandidates(primaryUrl: String, fallbackUrl: String): List<String> {
+        val candidates = mutableListOf<String>()
+        candidates.addAll(generateUrlVariants(primaryUrl))
+        if (fallbackUrl.isNotBlank()) {
+            fallbackUrl.split(",").map { it.trim() }.filter { it.isNotBlank() }.forEach { fb ->
+                candidates.addAll(generateUrlVariants(fb))
+            }
+        }
+        return candidates.distinct()
+    }
+
     private fun handlePlaybackError(error: PlaybackException) {
         if (isHealing.get() || isDestroyed.get()) return
+
+        val currentUrl = synchronized(availableUrls) { availableUrls.getOrNull(currentUrlIndex) } ?: ""
+        if (currentUrl.isNotBlank()) {
+            deadUrlCache.put(currentUrl, System.currentTimeMillis())
+            try { prefs.edit().putLong(KEY_DEAD_PREFIX + currentUrl, System.currentTimeMillis()).apply() } catch (_: Throwable) {}
+        }
 
         val errorType = when (error.errorCode) {
             PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> "403"
@@ -288,8 +433,8 @@ class RadioService : Service() {
                 statsHandler.postDelayed({
                     if (!isDestroyed.get()) {
                         val urls = synchronized(availableUrls) { availableUrls.toList() }
-                        val currentUrl = urls.getOrNull(currentUrlIndex) ?: return@postDelayed
-                        startStream(currentUrl, useProxy = true)
+                        val current = urls.getOrNull(currentUrlIndex) ?: return@postDelayed
+                        startStream(current, useProxy = true)
                     }
                 }, 3000L)
                 return
@@ -304,16 +449,16 @@ class RadioService : Service() {
 
         if (currentUrlIndex < urls.size - 1) {
             currentUrlIndex++
-            toast("🔄 محاولة خادم بديل (${currentUrlIndex + 1}/${urls.size})")
+            toast("🔄 محاولة بديل (${currentUrlIndex + 1}/${urls.size})")
             statsHandler.postDelayed({
                 if (!isDestroyed.get()) startStream(urls[currentUrlIndex], useProxy = true)
-            }, 2000L)
+            }, 1000L)
             return
         }
 
         retryCount++
         if (retryCount <= maxRetries) {
-            val delayMs = when (retryCount) { 1 -> 2000L; 2 -> 4000L; else -> 8000L }
+            val delayMs = when (retryCount) { 1 -> 1500L; 2 -> 3000L; else -> 5000L }
             toast("🔄 إعادة محاولة $retryCount/$maxRetries")
             statsHandler.postDelayed({
                 if (!isDestroyed.get()) startStream(urls.getOrNull(currentUrlIndex) ?: "", useProxy = true)
@@ -338,35 +483,19 @@ class RadioService : Service() {
                 runCatching { dao.updateHealth(uuidToHeal, false, station.failCount + 1, System.currentTimeMillis()) }
                 runCatching { repoInstance.sendFeedback(uuidToHeal, "exo_error", false, errCap, countryCap, catCap) }
 
-                val healResult = withTimeoutOrNull(30000L) { runCatching { repoInstance.neuralHeal(station) }.getOrNull() }
+                val healResult = withTimeoutOrNull(15000L) { runCatching { repoInstance.neuralHeal(station) }.getOrNull() }
 
                 if (healResult != null && !isDestroyed.get()) {
                     val newUrl = healResult.url
                     toast("🔍 تم العثور على: ${healResult.matchedName}")
-                    delay(2000L)
-
-                    val isValidAudio = withContext(Dispatchers.IO) {
+                    statsHandler.post {
                         try {
-                            val probe = URL(newUrl).openConnection().apply { connectTimeout = 5000; readTimeout = 5000 }
-                            probe.connect()
-                            val ct = probe.contentType?.lowercase() ?: ""
-                            ct.startsWith("audio/") || ct.contains("mpeg") || ct.contains("octet-stream")
-                        } catch (e: Exception) { false }
-                    }
-                    if (isValidAudio) {
-                        statsHandler.post {
-                            try {
-                                if (!isDestroyed.get() && ::player.isInitialized) {
-                                    synchronized(availableUrls) { availableUrls.clear(); availableUrls.add(newUrl) }
-                                    currentUrlIndex = 0; retryCount = 0; hasPlayedSuccessfully = false
-                                    startStream(newUrl, useProxy = true)
-                                }
-                            } catch (t: Throwable) {} finally { isHealing.set(false) }
-                        }
-                    } else {
-                        toast("⚠️ الرابط البديل ليس صوتاً")
-                        isHealing.set(false)
-                        tryFallback()
+                            if (!isDestroyed.get() && ::player.isInitialized) {
+                                synchronized(availableUrls) { availableUrls.clear(); availableUrls.add(newUrl) }
+                                currentUrlIndex = 0; retryCount = 0; hasPlayedSuccessfully = false
+                                startStream(newUrl, useProxy = true)
+                            }
+                        } catch (t: Throwable) {} finally { isHealing.set(false) }
                     }
                 } else {
                     toast("❌ لم أجد بديلاً")
@@ -453,8 +582,38 @@ class RadioService : Service() {
         stationStartTimeMs = System.currentTimeMillis()
         toast("📻 $title")
 
-        val firstUrl = synchronized(availableUrls) { availableUrls.firstOrNull() }
-        if (firstUrl != null) startStream(firstUrl, useProxy = true)
+        // v109.5: Pre-flight probe قبل التشغيل
+        serviceScope.launch {
+            try {
+                val candidates = buildUrlCandidates(pUrl, fUrl)
+                val aliveUrl = preFlightProbe(candidates)
+                if (!isDestroyed.get()) {
+                    if (aliveUrl != null) {
+                        val idx = synchronized(availableUrls) { availableUrls.indexOf(aliveUrl) }
+                        if (idx >= 0) {
+                            currentUrlIndex = idx
+                        } else {
+                            synchronized(availableUrls) { availableUrls.clear(); availableUrls.add(aliveUrl) }
+                            currentUrlIndex = 0
+                        }
+                        statsHandler.post { startStream(aliveUrl, useProxy = true) }
+                    } else {
+                        toast("⚠️ كل الروابط فشلت، بحث فوري...")
+                        statsHandler.post {
+                            handlePlaybackError(PlaybackException("Pre-flight failed", null, PlaybackException.ERROR_CODE_IO_UNSPECIFIED))
+                        }
+                    }
+                }
+            } catch (t: Throwable) {
+                // Fallback: ابدأ بالرابط الأساسي
+                statsHandler.post {
+                    if (!isDestroyed.get()) {
+                        val first = synchronized(availableUrls) { availableUrls.firstOrNull() }
+                        if (first != null) startStream(first, useProxy = true)
+                    }
+                }
+            }
+        }
         updateNotification(); acquireLocks()
     }
 
@@ -570,5 +729,22 @@ class RadioService : Service() {
                 lastRxBytes = rx
             } else currentSpeedKbps = 0.0
         } catch (t: Throwable) {}
+    }
+}
+
+class RadioActionReceiver : BroadcastReceiver() {
+    companion object {
+        const val ACTION_PLAY_PAUSE = "com.example.radiojooo.PLAY_PAUSE"
+        const val ACTION_STOP = "com.example.radiojooo.STOP"
+    }
+
+    override fun onReceive(context: Context, intent: Intent) {
+        val serviceIntent = Intent(context, RadioService::class.java)
+        serviceIntent.action = intent.action
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(serviceIntent)
+        } else {
+            context.startService(serviceIntent)
+        }
     }
 }
