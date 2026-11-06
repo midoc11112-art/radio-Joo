@@ -92,7 +92,7 @@ class RadioService : Service() {
             if (isAppInForeground) { calculateDataUsage(); statsHandler.postDelayed(this, 1000) }
         }
     }
-
+    
     private val bufferTimeoutRunnable = Runnable {
         try {
             if (::player.isInitialized && player.playbackState == Player.STATE_BUFFERING && !player.isPlaying && !hasPlayedSuccessfully) {
@@ -198,6 +198,7 @@ class RadioService : Service() {
                                     delay(10000)
                                     if (isPlaying() && currentStationUuid == capturedUuid) {
                                         repoInstance.sendFeedback(capturedUuid, "exo_active", true)
+                                        // التحديث الذاتي (Self-Healing): حفظ الرابط الشغال إن كان احتياطياً
                                         if (capturedIndex > 0 && !capturedUrl.isNullOrBlank() && currentUrlIndex == capturedIndex) {
                                             val snapshot = synchronized(availableUrls) { availableUrls.toList() }
                                             if (capturedUrl in snapshot) {
@@ -226,13 +227,13 @@ class RadioService : Service() {
 
     private fun handlePlaybackError(error: PlaybackException) {
         if (isHealing.get() || isDestroyed.get()) return
-
+        
         val isPermanentError = error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
                 error.errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND ||
                 error.errorCode == PlaybackException.ERROR_CODE_IO_NO_PERMISSION
-
+        
         val urls = synchronized(availableUrls) { availableUrls.toList() }
-
+        
         if (currentUrlIndex < urls.size - 1) {
             currentUrlIndex++
             toast("🔄 محاولة خادم بديل (${currentUrlIndex + 1}/${urls.size})")
@@ -259,7 +260,7 @@ class RadioService : Service() {
         if (!isHealing.compareAndSet(false, true)) return
 
         toast("🧠 Oracle AI يبحث...")
-
+        
         val uuidToHeal = currentStationUuid
         val errCap = "unknown"
         val countryCap = currentCountry
@@ -278,7 +279,7 @@ class RadioService : Service() {
                     val newUrl = healResult.url
                     toast("🔍 تم العثور على: ${healResult.matchedName}")
                     delay(2000L)
-
+                    
                     val isValidAudio = withContext(Dispatchers.IO) {
                         try {
                             val probe = URL(newUrl).openConnection().apply { connectTimeout = 5000; readTimeout = 5000 }
@@ -406,7 +407,7 @@ class RadioService : Service() {
                 .setMediaMetadata(MediaMetadata.Builder().setTitle(currentTitle).build()).build()
             player.setMediaSource(mediaSourceFactory.createMediaSource(mediaItem))
             player.prepare(); player.playWhenReady = true
-
+            
             bufferTimeoutHandler.removeCallbacks(bufferTimeoutRunnable)
             bufferTimeoutHandler.postDelayed(bufferTimeoutRunnable, 25000L)
         } catch (t: Throwable) { toast("❌ خطأ في التشغيل") }
@@ -443,9 +444,9 @@ class RadioService : Service() {
         if (!folder.exists()) folder.mkdirs()
         return folder
     }
-
+    
     fun toggleRecording(): Boolean { if (isRecording) stopRecording() else startRecording(); return isRecording }
-
+    
     private fun startRecording() {
         try {
             val urls = synchronized(availableUrls) { availableUrls.toList() }
@@ -468,7 +469,7 @@ class RadioService : Service() {
             }
         } catch (t: Throwable) { isRecording = false }
     }
-
+    
     private fun stopRecording() { isRecording = false; recordingJob?.cancel(); recordingJob = null }
 
     fun startSleepTimer(minutes: Int) {

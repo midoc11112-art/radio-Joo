@@ -1,4 +1,4 @@
-﻿package com.example.radiojooo.data.repository
+package com.example.radiojooo.data.repository
 
 import android.content.Context
 import android.util.Log
@@ -82,6 +82,7 @@ class RadioRepository(
         } catch (_: Throwable) {}
     }
 
+    // الدمج التراكمي (Hybrid Additive Merge): جلب الديناميكي + الاحتفاظ بالذهبي والمحلي
     suspend fun fetchStationsFromServer(): Int = withContext(Dispatchers.IO) {
         var count = 0
         try {
@@ -91,7 +92,11 @@ class RadioRepository(
                     val arr = json.getJSONArray("stations")
                     count = arr.length()
                     val stations = parseStations(arr)
-                    if (stations.isNotEmpty()) stationDao.insertStations(stations)
+                    if (stations.isNotEmpty()) {
+                        // InsertStations uses OnConflictStrategy.IGNORE
+                        // This guarantees that existing DB entries (with self-healed URLs and favorites) are NOT overwritten.
+                        stationDao.insertStations(stations)
+                    }
                 }
             }
         } catch (t: Throwable) { Log.e("RadioRepository", "Fetch: ${t.message}") }

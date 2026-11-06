@@ -33,6 +33,7 @@ interface StationDao {
     @Query("SELECT MAX(lastUpdated) FROM stations")
     suspend fun getLastUpdateTime(): Long?
 
+    // OnConflictStrategy.IGNORE يضمن الدمج التراكمي: يضيف الجديد فقط دون مسح المحطات أو الروابط التي تم إصلاحها
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertStations(stations: List<StationEntity>)
 
@@ -45,6 +46,7 @@ interface StationDao {
     @Query("UPDATE stations SET primaryUrl = :newUrl, failCount = 0, lastUrlWorks = 1, lastCheckedAt = :ts WHERE uuid = :uuid")
     suspend fun updateStationUrl(uuid: String, newUrl: String, ts: Long = System.currentTimeMillis())
 
+    // دالة التحديث الذاتي للرابط الشغال (Self-Healing) دون المساس بالبيانات
     @Query("UPDATE stations SET primaryUrl = :newUrl, fallbackUrl = :newFallback, failCount = 0, lastUrlWorks = 1, lastCheckedAt = :ts WHERE uuid = :uuid")
     suspend fun updateActiveStreamUrl(
         uuid: String,
