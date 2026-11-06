@@ -42,7 +42,6 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
     val categoryCounts = MutableStateFlow(CategoryCounts())
     val stations: StateFlow<List<StationEntity>>
 
-    // v108.0: تطبيع أسماء المحطات مرة واحدة وتخزينها للبحث الفوري
     private val normalizedNameCache = ConcurrentHashMap<String, String>()
 
     companion object {
@@ -136,7 +135,8 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                 }
-                filtered.sortedByDescending { it.popularity }
+                // v109.3: الترتيب حسب priority أولاً ثم popularity
+                filtered.sortedWith(compareByDescending<StationEntity> { it.priority }.thenByDescending { it.popularity })
             }.collect { filteredFlow.value = it }
         }
     }
@@ -188,30 +188,18 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
         val de = listOf("المانيا", "germany", "de")
         val us = listOf("امريكا", "usa", "us")
         return when {
-            eg.contains(q) -> listOf("EG")
-            sa.contains(q) -> listOf("SA")
-            ae.contains(q) -> listOf("AE")
-            kw.contains(q) -> listOf("KW")
-            qa.contains(q) -> listOf("QA")
-            bh.contains(q) -> listOf("BH")
-            om.contains(q) -> listOf("OM")
-            jo.contains(q) -> listOf("JO")
-            lb.contains(q) -> listOf("LB")
-            sy.contains(q) -> listOf("SY")
-            iq.contains(q) -> listOf("IQ")
-            ps.contains(q) -> listOf("PS")
-            ye.contains(q) -> listOf("YE")
-            sd.contains(q) -> listOf("SD")
-            ly.contains(q) -> listOf("LY")
-            tn.contains(q) -> listOf("TN")
-            dz.contains(q) -> listOf("DZ")
-            ma.contains(q) -> listOf("MA")
-            mr.contains(q) -> listOf("MR")
-            fr.contains(q) -> listOf("FR")
-            uk.contains(q) -> listOf("UK", "GB")
-            de.contains(q) -> listOf("DE")
-            us.contains(q) -> listOf("US")
-            else -> emptyList()
+            eg.contains(q) -> listOf("EG"); sa.contains(q) -> listOf("SA")
+            ae.contains(q) -> listOf("AE"); kw.contains(q) -> listOf("KW")
+            qa.contains(q) -> listOf("QA"); bh.contains(q) -> listOf("BH")
+            om.contains(q) -> listOf("OM"); jo.contains(q) -> listOf("JO")
+            lb.contains(q) -> listOf("LB"); sy.contains(q) -> listOf("SY")
+            iq.contains(q) -> listOf("IQ"); ps.contains(q) -> listOf("PS")
+            ye.contains(q) -> listOf("YE"); sd.contains(q) -> listOf("SD")
+            ly.contains(q) -> listOf("LY"); tn.contains(q) -> listOf("TN")
+            dz.contains(q) -> listOf("DZ"); ma.contains(q) -> listOf("MA")
+            mr.contains(q) -> listOf("MR"); fr.contains(q) -> listOf("FR")
+            uk.contains(q) -> listOf("UK", "GB"); de.contains(q) -> listOf("DE")
+            us.contains(q) -> listOf("US"); else -> emptyList()
         }
     }
 

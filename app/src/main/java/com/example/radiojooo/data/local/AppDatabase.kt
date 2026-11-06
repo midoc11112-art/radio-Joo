@@ -8,7 +8,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.radiojooo.data.model.StationEntity
 
-@Database(entities = [StationEntity::class], version = 3, exportSchema = false)
+@Database(entities = [StationEntity::class], version = 4, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun stationDao(): StationDao
 
@@ -23,10 +23,18 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                try { db.execSQL("ALTER TABLE stations ADD COLUMN priority INTEGER NOT NULL DEFAULT 0") } catch (_: Exception) {}
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "radio_joo_db")
-                    .addMigrations(MIGRATION_2_3).fallbackToDestructiveMigration().build()
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
+                    .fallbackToDestructiveMigration()
+                    .build()
                 INSTANCE = instance
                 instance
             }

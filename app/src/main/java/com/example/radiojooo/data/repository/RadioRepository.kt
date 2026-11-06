@@ -93,6 +93,7 @@ class RadioRepository(
                     val stations = parseStations(arr)
                     if (stations.isNotEmpty()) {
                         stations.chunked(500).forEach { chunk -> stationDao.insertStations(chunk) }
+                        try { stationDao.syncPriorities(stations) } catch (t: Throwable) { Log.e("RadioRepository", "syncPriorities: ${t.message}") }
                     }
                 }
             }
@@ -103,7 +104,6 @@ class RadioRepository(
     suspend fun performSmartHealthCheck() {
         val lastScanTime = stationDao.getLastFullScanTime() ?: 0L
         val isSameDay = isSameDay(lastScanTime)
-
         if (!isSameDay) {
             dbMutex.withLock { stationDao.resetAllHealthStatus() }
         }
@@ -141,7 +141,6 @@ class RadioRepository(
         _healthTotal.value = 0
     }
 
-    // دالة runHealthChecks المطلوبة لـ StationSyncWorker
     suspend fun runHealthChecks(batchSize: Int = BATCH_SIZE): Int = withContext(Dispatchers.IO) {
         return@withContext runHealthChecksWithCount(batchSize).first
     }
@@ -153,28 +152,21 @@ class RadioRepository(
             val target = minOf(unchecked, maxPerSession)
             _healthTotal.value = target
             _healthChecked.value = 0
-            
-            if (unchecked <= 0) { 
+            if (unchecked <= 0) {
                 _healthComplete.emit(HealthCheckResult(0, 0))
-                return@launch 
+                return@launch
             }
-
             var healthy = 0; var checked = 0; var safety = 0
             val maxBatches = (target + BATCH_SIZE - 1) / BATCH_SIZE
-
             while (safety < maxBatches && checked < maxPerSession && stationDao.getUncheckedCount() > 0) {
                 if (!isActive) break
-                
                 val remaining = maxPerSession - checked
                 val thisBatch = minOf(BATCH_SIZE, remaining)
                 val (h, c) = runHealthChecksWithCount(thisBatch)
-                
                 if (c == 0) break
-                
                 healthy += h; checked += c; _healthChecked.value = checked; safety++
                 if (checked < maxPerSession) delay(INTER_BATCH_DELAY_MS)
             }
-            
             runCatching { stationDao.cleanupDeadStations() }
             _healthChecked.value = checked
             _healthComplete.emit(HealthCheckResult(checked, healthy))
@@ -186,12 +178,7 @@ class RadioRepository(
         try {
             val stations = stationDao.getUncheckedStations(batchSize)
             if (stations.isEmpty()) return@coroutineScope 0 to 0
-            val results = stations.map { s -> 
-                async(Dispatchers.IO) { 
-                    healthSemaphore.withPermit { s to checkStationHealth(s.primaryUrl) } 
-                } 
-            }.awaitAll()
-            
+            val results = stations.map { s -> async(Dispatchers.IO) { healthSemaphore.withPermit { s to checkStationHealth(s.primaryUrl) } } }.awaitAll()
             for ((station, status) in results) {
                 when (status) {
                     HealthStatus.HEALTHY -> { healthy++; checked++; stationDao.updateHealth(station.uuid, true, 0, System.currentTimeMillis()) }
@@ -199,9 +186,7 @@ class RadioRepository(
                     HealthStatus.UNKNOWN -> { }
                 }
             }
-        } catch (t: Throwable) { 
-            if (t is CancellationException) throw t
-        }
+        } catch (t: Throwable) { if (t is CancellationException) throw t }
         return@coroutineScope healthy to checked
     }
 
@@ -212,16 +197,13 @@ class RadioRepository(
                 val body = resp.body?.string()?.trim() ?: ""
                 if (body == "FAIL") return@withContext HealthStatus.UNHEALTHY
                 if (body == "OK") return@withContext HealthStatus.HEALTHY
-                
                 val actualBitrate = body.toIntOrNull()
-                if (actualBitrate != null) {
-                    return@withContext HealthStatus.HEALTHY
-                }
+                if (actualBitrate != null) return@withContext HealthStatus.HEALTHY
                 HealthStatus.UNKNOWN
             }
-        } catch (t: Throwable) { 
+        } catch (t: Throwable) {
             if (t is CancellationException) throw t
-            HealthStatus.UNKNOWN 
+            HealthStatus.UNKNOWN
         }
     }
 
@@ -235,7 +217,18 @@ class RadioRepository(
                 val o = arr.getJSONObject(i)
                 val uuid = o.optString("uuid"); val url = o.optString("primaryUrl")
                 if (uuid.isNotBlank() && url.isNotBlank()) {
-                    list.add(StationEntity(uuid=uuid, name=o.optString("name"), primaryUrl=url, fallbackUrl=o.optString("fallbackUrl",""), category=o.optString("category","MUSIC"), countryCode=o.optString("countryCode",""), bitrate=o.optInt("bitrate",0), popularity=o.optInt("popularity",0), lastUpdated=System.currentTimeMillis()))
+                    list.add(StationEntity(
+                        uuid=uuid,
+                        name=o.optString("name"),
+                        primaryUrl=url,
+                        fallbackUrl=o.optString("fallbackUrl",""),
+                        category=o.optString("category","MUSIC"),
+                        countryCode=o.optString("countryCode",""),
+                        bitrate=o.optInt("bitrate",0),
+                        popularity=o.optInt("popularity",0),
+                        priority=o.optInt("priority",0),
+                        lastUpdated=System.currentTimeMillis()
+                    ))
                 }
             } catch (t: Throwable) {}
         }
