@@ -423,7 +423,7 @@ class RadioService : Service() {
         return candidates.distinct()
     }
 
-    private fun isRootBlacklisted(url: String): Boolean {
+        private fun isRootBlacklisted(url: String): Boolean {
         val t = deadUrlCache.get(url) ?: return false
         return System.currentTimeMillis() - t < ROOT_BLACKLIST_TTL_MS && (urlFailureCount[url] ?: 0) >= 3
     }
@@ -437,70 +437,62 @@ class RadioService : Service() {
         }
     }
 
-        private suspend fun probeHead(url: String): Boolean = suspendCancellableCoroutine { cont ->
+    private suspend fun probeHead(url: String): Boolean = withContext(Dispatchers.IO) {
+        if (url.isBlank() || !url.startsWith("http")) return@withContext false
         try {
             val headReq = Request.Builder()
                 .url(url)
                 .header("User-Agent", "Mozilla/5.0 (Linux; Android 13)")
                 .head()
                 .build()
-            val call = apiClient.newCall(headReq)
-            cont.invokeOnCancellation { try { call.cancel() } catch (_: Throwable) {} }
-            call.enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) {
-                    probeGetRange(url, cont)
-                }
-                override fun onResponse(call: Call, response: Response) {
-                    try {
-                        response.use { r ->
-                            val ct = r.header("Content-Type")?.lowercase() ?: ""
-                            val ok = (r.isSuccessful || r.code == 206) &&
-                                    !ct.contains("text/html") && !ct.contains("application/json")
-                            if (ok) {
-                                if (cont.isActive) cont.resume(true) {}
-                            } else {
-                                probeGetRange(url, cont)
-                            }
-                        }
-                    } catch (_: Throwable) {
-                        probeGetRange(url, cont)
-                    }
-                }
-            })
-        } catch (_: Throwable) {
-            probeGetRange(url, cont)
-        }
-    }
+            apiClient.newCall(headReq).execute().use { response ->
+                val ct = response.header("Content-Type")?.lowercase() ?: ""
+                val ok = (response.isSuccessful || response.code == 206) &&
+                        !ct.contains("text/html") && !ct.contains("application/json")
+                if (ok) return@withContext true
+            }
+        } catch (_: Throwable) {}
 
-    private fun probeGetRange(url: String, cont: kotlin.coroutines.Continuation<Boolean>) {
         try {
             val getReq = Request.Builder()
                 .url(url)
                 .header("User-Agent", "Mozilla/5.0 (Linux; Android 13)")
                 .header("Range", "bytes=0-100")
                 .build()
-            val call = apiClient.newCall(getReq)
-            cont.invokeOnCancellation { try { call.cancel() } catch (_: Throwable) {} }
-            call.enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) {
-                    if (cont.isActive) cont.resume(false) {}
-                }
-                override fun onResponse(call: Call, response: Response) {
-                    try {
-                        response.use { r ->
-                            val ct = r.header("Content-Type")?.lowercase() ?: ""
-                            val ok = (r.isSuccessful || r.code == 206) &&
-                                    !ct.contains("text/html") && !ct.contains("application/json")
-                            if (cont.isActive) cont.resume(true) {} else if (cont.isActive) cont.resume(false) {}
-                        }
-                    } catch (_: Throwable) {
-                        if (cont.isActive) cont.resume(false) {}
-                    }
-                }
-            })
+            apiClient.newCall(getReq).execute().use { response ->
+                val ct = response.header("Content-Type")?.lowercase() ?: ""
+                return@withContext (response.isSuccessful || response.code == 206) &&
+                        !ct.contains("text/html") && !ct.contains("application/json")
+            }
         } catch (_: Throwable) {
-            if (cont.isActive) cont.resume(false) {}
+            return@withContext false
         }
+    }
+
+    private suspend fun preFlightProbe(urls: List<String>, sessionId: Long): String? = withContext(Dispatchers.IO) {
+        for (url in urls) {
+            if (currentSessionId != sessionId) return@withContext null
+            if (isRootBlacklisted(url)) continue
+            val deadTime = deadUrlCache.get(url) ?: 0L
+            if (deadTime > 0 && System.currentTimeMillis() - deadTime < DEAD_TTL_MS) continue
+            val failCount = urlFailureCount[url] ?: 0
+            if (failCount >= 3) continue
+            try {
+                val isAlive = withTimeoutOrNull(1500L) { probeHead(url) } ?: false
+                if (currentSessionId != sessionId) return@withContext null
+                if (isAlive) {
+                    urlFailureCount.remove(url)
+                    return@withContext url
+                } else {
+                    recordUrlFailure(url)
+                }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (_: Throwable) {
+                recordUrlFailure(url)
+            }
+        }
+        return@withContext null
     }
 
     private fun handlePlaybackError(error: PlaybackException, sessionId: Long) {
@@ -865,4 +857,5 @@ class RadioService : Service() {
         } catch (t: Throwable) {}
     }
 }
+
 
