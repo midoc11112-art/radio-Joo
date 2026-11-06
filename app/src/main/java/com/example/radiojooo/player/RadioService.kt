@@ -201,7 +201,6 @@ class RadioService : Service() {
         
         val urls = synchronized(availableUrls) { availableUrls.toList() }
         
-        // 1. التجربة السريعة للروابط الاحتياطية المسجلة مسبقاً
         if (currentUrlIndex < urls.size - 1) {
             currentUrlIndex++
             toast("🔄 تجربة رابط بديل (${currentUrlIndex + 1}/${urls.size})")
@@ -216,7 +215,6 @@ class RadioService : Service() {
 
         val uuidToHeal = currentStationUuid
 
-        // 2. البحث الخاطف عبر الخادم في أقل من 1 ثانية فقط بدقة بدون بحث ويب
         serviceScope.launch {
             try {
                 val dao = AppDatabase.getDatabase(applicationContext).stationDao()
