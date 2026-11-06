@@ -5,28 +5,18 @@ import android.util.Log
 import com.example.radiojooo.data.local.AppDatabase
 import com.example.radiojooo.data.local.StationDao
 import com.example.radiojooo.data.model.StationEntity
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
-import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import java.io.File
 import java.net.URLEncoder
+import java.util.Calendar
 import java.util.concurrent.TimeUnit
 
 data class HealthCheckResult(val total: Int, val healthy: Int)
@@ -48,27 +38,23 @@ class RadioRepository(
     val healthComplete: SharedFlow<HealthCheckResult> = _healthComplete.asSharedFlow()
 
     private val apiClient = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .build()
+        .connectTimeout(30, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).build()
 
     private val healthClient = OkHttpClient.Builder()
-        .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
-        .followRedirects(true)
-        .build()
+        .connectTimeout(8, TimeUnit.SECONDS).readTimeout(10, TimeUnit.SECONDS).followRedirects(true).build()
 
-    private val healthSemaphore = Semaphore(25)
+    // تسريع الفحص: زيادة الـ Semaphore والدفعة
+    private val healthSemaphore = Semaphore(50)
     private val dbMutex = Mutex()
 
-    // ✅ زيادة الحدود القصوى للفحص
     private val MAX_CHECKS_PER_SESSION = 2000
-    private val BATCH_SIZE = 50
-    private val INTER_BATCH_DELAY_MS = 100L
+    private val BATCH_SIZE = 100
+    private val INTER_BATCH_DELAY_MS = 50L
 
     private enum class HealthStatus { HEALTHY, UNHEALTHY, UNKNOWN }
 
     val allStations: Flow<List<StationEntity>> = stationDao.getVisibleStations()
+    private var healthCheckJob: Job? = null
 
     suspend fun neuralHeal(station: StationEntity): HealResult? = withContext(Dispatchers.IO) {
         try {
@@ -78,8 +64,7 @@ class RadioRepository(
                     val body = res.body?.string() ?: return@withContext null
                     val json = JSONObject(body)
                     if (json.optBoolean("success", false)) {
-                        val newUrl = json.optString("newUrl")
-                        val matchedName = json.optString("matchedName", station.name)
+                        val newUrl = json.optString("newUrl"); val matchedName = json.optString("matchedName", station.name)
                         if (newUrl.isNotBlank() && newUrl.startsWith("http")) {
                             runCatching { stationDao.updateStationUrl(station.uuid, newUrl) }
                             return@withContext HealResult(newUrl, matchedName)
@@ -116,49 +101,86 @@ class RadioRepository(
         return@withContext stationDao.getTotalCount()
     }
 
+    // الفحص الذكي: لو نفس اليوم، بيفحص الجديد بس. لو يوم جديد، بيعيد الفحص كله.
+    suspend fun performSmartHealthCheck() {
+        val lastScanTime = stationDao.getLastFullScanTime() ?: 0L
+        val isSameDay = isSameDay(lastScanTime)
+
+        if (!isSameDay) {
+            Log.d("HealthCheck", "يوم جديد: إعادة تعيين حالة جميع المحطات للفحص الكامل.")
+            dbMutex.withLock { stationDao.resetAllHealthStatus() }
+        } else {
+            Log.d("HealthCheck", "نفس اليوم: فحص المحطات الجديدة فقط.")
+        }
+
+        performHealthChecks(MAX_CHECKS_PER_SESSION)
+    }
+
+    private fun isSameDay(timestamp: Long): Boolean {
+        if (timestamp == 0L) return false
+        val cal1 = Calendar.getInstance().apply { timeInMillis = timestamp }
+        val cal2 = Calendar.getInstance()
+        return cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) &&
+               cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR)
+    }
+
     suspend fun ensureInitialDataLoaded() {
         try {
-            dbMutex.withLock {
-                _healthTotal.value = 0; _healthChecked.value = 0
-                fetchStationsFromServer()
-            }
-            delay(1000)
-            performHealthChecks(MAX_CHECKS_PER_SESSION)
+            fetchStationsFromServer()
+            delay(500)
+            performSmartHealthCheck()
         } catch (t: Throwable) { Log.e("RadioRepository", "Init: ${t.message}") }
     }
 
-    // ✅ دالة جديدة: تحديث كامل (جلب + فحص) - ترجع عدد المحطات
     suspend fun forceRefreshAll(): Int {
         try {
-            dbMutex.withLock {
-                stationDao.resetAllHealthStatus()
-                fetchStationsFromServer()
-            }
-            delay(1000)
-            performHealthChecks(MAX_CHECKS_PER_SESSION)
+            fetchStationsFromServer()
+            delay(500)
+            performSmartHealthCheck()
         } catch (t: Throwable) { Log.e("RadioRepository", "Refresh: ${t.message}") }
         return stationDao.getTotalCount()
     }
 
-    private suspend fun performHealthChecks(maxPerSession: Int = MAX_CHECKS_PER_SESSION) {
-        val unchecked = stationDao.getUncheckedCount()
-        val target = minOf(unchecked, maxPerSession)
-        _healthTotal.value = target; _healthChecked.value = 0
-        if (unchecked <= 0) { _healthComplete.emit(HealthCheckResult(0, 0)); return }
+    fun stopHealthCheck() {
+        healthCheckJob?.cancel()
+        healthCheckJob = null
+        _healthChecked.value = 0
+        _healthTotal.value = 0
+    }
 
-        var healthy = 0; var checked = 0; var safety = 0
-        val maxBatches = (target + BATCH_SIZE - 1) / BATCH_SIZE
-        while (safety < maxBatches && checked < maxPerSession && stationDao.getUncheckedCount() > 0) {
-            val remaining = maxPerSession - checked
-            val thisBatch = minOf(BATCH_SIZE, remaining)
-            val (h, c) = runHealthChecksWithCount(thisBatch)
-            if (c == 0) { Log.w("RadioRepository", "Health: no progress, likely 429"); break }
-            healthy += h; checked += c; _healthChecked.value = checked; safety++
-            if (checked < maxPerSession) delay(INTER_BATCH_DELAY_MS)
+    private suspend fun performHealthChecks(maxPerSession: Int = MAX_CHECKS_PER_SESSION) {
+        healthCheckJob?.cancel()
+        healthCheckJob = CoroutineScope(Dispatchers.IO).launch {
+            val unchecked = stationDao.getUncheckedCount()
+            val target = minOf(unchecked, maxPerSession)
+            _healthTotal.value = target
+            _healthChecked.value = 0
+            
+            if (unchecked <= 0) { 
+                _healthComplete.emit(HealthCheckResult(0, 0))
+                return@launch 
+            }
+
+            var healthy = 0; var checked = 0; var safety = 0
+            val maxBatches = (target + BATCH_SIZE - 1) / BATCH_SIZE
+
+            while (safety < maxBatches && checked < maxPerSession && stationDao.getUncheckedCount() > 0) {
+                if (!isActive) break // التحقق من الإلغاء
+                
+                val remaining = maxPerSession - checked
+                val thisBatch = minOf(BATCH_SIZE, remaining)
+                val (h, c) = runHealthChecksWithCount(thisBatch)
+                
+                if (c == 0) { Log.w("RadioRepository", "Health: no progress"); break }
+                
+                healthy += h; checked += c; _healthChecked.value = checked; safety++
+                if (checked < maxPerSession) delay(INTER_BATCH_DELAY_MS)
+            }
+            
+            runCatching { stationDao.cleanupDeadStations() }
+            _healthChecked.value = checked
+            _healthComplete.emit(HealthCheckResult(checked, healthy))
         }
-        runCatching { stationDao.cleanupDeadStations() }
-        _healthChecked.value = checked
-        _healthComplete.emit(HealthCheckResult(checked, healthy))
     }
 
     suspend fun runHealthChecks(batchSize: Int = BATCH_SIZE): Int = runHealthChecksWithCount(batchSize).first
@@ -168,7 +190,12 @@ class RadioRepository(
         try {
             val stations = stationDao.getUncheckedStations(batchSize)
             if (stations.isEmpty()) return@coroutineScope 0 to 0
-            val results = stations.map { s -> async(Dispatchers.IO) { healthSemaphore.withPermit { s to checkStationHealth(s.primaryUrl) } } }.awaitAll()
+            val results = stations.map { s -> 
+                async(Dispatchers.IO) { 
+                    healthSemaphore.withPermit { s to checkStationHealth(s.primaryUrl) } 
+                } 
+            }.awaitAll()
+            
             for ((station, status) in results) {
                 when (status) {
                     HealthStatus.HEALTHY -> { healthy++; checked++; stationDao.updateHealth(station.uuid, true, 0, System.currentTimeMillis()) }
@@ -177,7 +204,10 @@ class RadioRepository(
                 }
             }
             runCatching { stationDao.cleanupDeadStations() }
-        } catch (t: Throwable) { Log.e("RadioRepository", "Health: ${t.message}") }
+        } catch (t: Throwable) { 
+            if (t is CancellationException) throw t
+            Log.e("RadioRepository", "Health: ${t.message}") 
+        }
         return@coroutineScope healthy to checked
     }
 
@@ -193,16 +223,14 @@ class RadioRepository(
                     else -> HealthStatus.UNKNOWN
                 }
             }
-        } catch (t: Throwable) { HealthStatus.UNKNOWN }
+        } catch (t: Throwable) { 
+            if (t is CancellationException) throw t
+            HealthStatus.UNKNOWN 
+        }
     }
 
     suspend fun toggleFavorite(uuid: String, currentStatus: Boolean) = stationDao.updateFavoriteStatus(uuid, !currentStatus)
-
-    fun wrapProxy(rawUrl: String): String {
-        if (rawUrl.isBlank()) return ""
-        if (rawUrl.contains("radio-joo-proxy")) return rawUrl
-        return try { "$PROXY_BASE_URL/?url=" + URLEncoder.encode(rawUrl, "UTF-8") } catch (t: Throwable) { "$PROXY_BASE_URL/?url=" + rawUrl }
-    }
+    fun wrapProxy(rawUrl: String): String = if (rawUrl.isBlank()) "" else try { "$PROXY_BASE_URL/?url=" + URLEncoder.encode(rawUrl, "UTF-8") } catch (t: Throwable) { "$PROXY_BASE_URL/?url=" + rawUrl }
 
     private fun parseStations(arr: org.json.JSONArray): List<StationEntity> {
         val list = mutableListOf<StationEntity>()

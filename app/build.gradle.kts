@@ -12,8 +12,8 @@ android {
         applicationId = "com.example.radiojooo"
         minSdk = 24
         targetSdk = 35
-        versionCode = 11
-        versionName = "11.0.0"
+        versionCode = 13
+        versionName = "13.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

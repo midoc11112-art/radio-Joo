@@ -8,24 +8,13 @@ import com.example.radiojooo.data.model.StationEntity
 import com.example.radiojooo.data.repository.HealthCheckResult
 import com.example.radiojooo.data.repository.RadioRepository
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 data class CategoryCounts(
-    val allCount: Int = 0,
-    val favCount: Int = 0,
-    val egyptCount: Int = 0,
-    val quranCount: Int = 0,
-    val newsCount: Int = 0,
-    val musicCount: Int = 0,
-    val sportsCount: Int = 0,
-    val talkCount: Int = 0
+    val allCount: Int = 0, val favCount: Int = 0, val egyptCount: Int = 0,
+    val quranCount: Int = 0, val newsCount: Int = 0, val musicCount: Int = 0,
+    val sportsCount: Int = 0, val talkCount: Int = 0
 )
 
 class RadioViewModel(application: Application) : AndroidViewModel(application) {
@@ -72,7 +61,6 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
                     val q = query.trim().lowercase()
                     val isGreater = q.contains("اكبر") || q.contains("أكبر") || q.contains(">")
                     val isLess = q.contains("اصغر") || q.contains("أصغر") || q.contains("<")
-
                     if (isGreater) {
                         val numStr = q.replace("اكبر", "").replace("أكبر", "").replace(">", "").trim()
                         val bitrateNum = numStr.toIntOrNull()
@@ -113,57 +101,18 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun getCountryCodesForQuery(q: String): List<String> {
-        val eg = listOf("مصر", "egypt", "masr", "eg")
-        val sa = listOf("السعودية", "saudi", "ksa", "sa")
-        val ae = listOf("الامارات", "الإمارات", "uae", "emirates", "ae")
-        val kw = listOf("الكويت", "kuwait", "kw")
-        val qa = listOf("قطر", "qatar", "qa")
-        val bh = listOf("البحرين", "bahrain", "bh")
-        val om = listOf("عمان", "oman", "om")
-        val jo = listOf("الاردن", "الأردن", "jordan", "jo")
-        val lb = listOf("لبنان", "lebanon", "lb")
-        val sy = listOf("سوريا", "syria", "sy")
-        val iq = listOf("العراق", "iraq", "iq")
-        val ps = listOf("فلسطين", "palestine", "ps")
-        val ye = listOf("اليمن", "yemen", "ye")
-        val sd = listOf("السودان", "sudan", "sd")
-        val ly = listOf("ليبيا", "libya", "ly")
-        val tn = listOf("تونس", "tunisia", "tn")
-        val dz = listOf("الجزائر", "algeria", "dz")
-        val ma = listOf("المغرب", "morocco", "ma")
-        val mr = listOf("موريتانيا", "mauritania", "mr")
-        val fr = listOf("فرنسا", "france", "fr")
-        val uk = listOf("بريطانيا", "uk", "gb", "england")
-        val de = listOf("المانيا", "ألمانيا", "germany", "de")
-        val us = listOf("امريكا", "أمريكا", "usa", "us")
-
-        return when {
-            eg.contains(q) -> listOf("EG"); sa.contains(q) -> listOf("SA"); ae.contains(q) -> listOf("AE"); kw.contains(q) -> listOf("KW")
-            qa.contains(q) -> listOf("QA"); bh.contains(q) -> listOf("BH"); om.contains(q) -> listOf("OM"); jo.contains(q) -> listOf("JO")
-            lb.contains(q) -> listOf("LB"); sy.contains(q) -> listOf("SY"); iq.contains(q) -> listOf("IQ"); ps.contains(q) -> listOf("PS")
-            ye.contains(q) -> listOf("YE"); sd.contains(q) -> listOf("SD"); ly.contains(q) -> listOf("LY"); tn.contains(q) -> listOf("TN")
-            dz.contains(q) -> listOf("DZ"); ma.contains(q) -> listOf("MA"); mr.contains(q) -> listOf("MR"); fr.contains(q) -> listOf("FR")
-            uk.contains(q) -> listOf("UK", "GB"); de.contains(q) -> listOf("DE"); us.contains(q) -> listOf("US"); else -> emptyList()
-        }
+        val eg = listOf("مصر", "egypt", "masr", "eg"); val sa = listOf("السعودية", "saudi", "ksa", "sa"); val ae = listOf("الامارات", "الإمارات", "uae", "emirates", "ae"); val kw = listOf("الكويت", "kuwait", "kw"); val qa = listOf("قطر", "qatar", "qa"); val bh = listOf("البحرين", "bahrain", "bh"); val om = listOf("عمان", "oman", "om"); val jo = listOf("الاردن", "الأردن", "jordan", "jo"); val lb = listOf("لبنان", "lebanon", "lb"); val sy = listOf("سوريا", "syria", "sy"); val iq = listOf("العراق", "iraq", "iq"); val ps = listOf("فلسطين", "palestine", "ps"); val ye = listOf("اليمن", "yemen", "ye"); val sd = listOf("السودان", "sudan", "sd"); val ly = listOf("ليبيا", "libya", "ly"); val tn = listOf("تونس", "tunisia", "tn"); val dz = listOf("الجزائر", "algeria", "dz"); val ma = listOf("المغرب", "morocco", "ma"); val mr = listOf("موريتانيا", "mauritania", "mr"); val fr = listOf("فرنسا", "france", "fr"); val uk = listOf("بريطانيا", "uk", "gb", "england"); val de = listOf("المانيا", "ألمانيا", "germany", "de"); val us = listOf("امريكا", "أمريكا", "usa", "us")
+        return when { eg.contains(q) -> listOf("EG"); sa.contains(q) -> listOf("SA"); ae.contains(q) -> listOf("AE"); kw.contains(q) -> listOf("KW"); qa.contains(q) -> listOf("QA"); bh.contains(q) -> listOf("BH"); om.contains(q) -> listOf("OM"); jo.contains(q) -> listOf("JO"); lb.contains(q) -> listOf("LB"); sy.contains(q) -> listOf("SY"); iq.contains(q) -> listOf("IQ"); ps.contains(q) -> listOf("PS"); ye.contains(q) -> listOf("YE"); sd.contains(q) -> listOf("SD"); ly.contains(q) -> listOf("LY"); tn.contains(q) -> listOf("TN"); dz.contains(q) -> listOf("DZ"); ma.contains(q) -> listOf("MA"); mr.contains(q) -> listOf("MR"); fr.contains(q) -> listOf("FR"); uk.contains(q) -> listOf("UK", "GB"); de.contains(q) -> listOf("DE"); us.contains(q) -> listOf("US"); else -> emptyList() }
     }
 
-    private fun getCategoryForQuery(q: String): String? = when {
-        listOf("أخبار", "اخبار", "news").contains(q) -> "NEWS"
-        listOf("قرآن", "قران", "quran").contains(q) -> "QURAN"
-        listOf("رياضة", "رياضه", "sports", "sport").contains(q) -> "SPORTS"
-        listOf("موسيقى", "موسيقي", "music", "أغاني", "اغاني").contains(q) -> "MUSIC"
-        listOf("توك شو", "talk", "حوار").contains(q) -> "TALK"
-        else -> null
-    }
+    private fun getCategoryForQuery(q: String): String? = when { listOf("أخبار", "اخبار", "news").contains(q) -> "NEWS"; listOf("قرآن", "قران", "quran").contains(q) -> "QURAN"; listOf("رياضة", "رياضه", "sports", "sport").contains(q) -> "SPORTS"; listOf("موسيقى", "موسيقي", "music", "أغاني", "اغاني").contains(q) -> "MUSIC"; listOf("توك شو", "talk", "حوار").contains(q) -> "TALK"; else -> null }
 
     private fun updateCategoryCounts(list: List<StationEntity>) {
         categoryCounts.value = CategoryCounts(
             allCount = list.size, favCount = list.count { it.isFavorite },
             egyptCount = list.count { it.countryCode.equals("EG", true) || it.category.equals("EGYPT", true) },
-            quranCount = list.count { it.category.equals("QURAN", true) },
-            newsCount = list.count { it.category.equals("NEWS", true) },
-            musicCount = list.count { it.category.equals("MUSIC", true) },
-            sportsCount = list.count { it.category.equals("SPORTS", true) },
+            quranCount = list.count { it.category.equals("QURAN", true) }, newsCount = list.count { it.category.equals("NEWS", true) },
+            musicCount = list.count { it.category.equals("MUSIC", true) }, sportsCount = list.count { it.category.equals("SPORTS", true) },
             talkCount = list.count { it.category.equals("TALK", true) }
         )
     }
@@ -176,14 +125,13 @@ class RadioViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ✅ دالة التحديث الجديدة: تجلب المحطات + تعيد فحصها بالكامل
     fun refreshData() {
         viewModelScope.launch(Dispatchers.IO) {
-            try {
-                _isLoading.value = true
-                _refreshResult.emit(repository.forceRefreshAll())
-                _isLoading.value = false
-            } catch (e: Exception) { _isLoading.value = false }
+            try { _isLoading.value = true; _refreshResult.emit(repository.forceRefreshAll()); _isLoading.value = false } catch (e: Exception) { _isLoading.value = false }
         }
+    }
+
+    fun stopHealthCheck() {
+        repository.stopHealthCheck()
     }
 }
