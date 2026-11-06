@@ -198,7 +198,6 @@ class RadioService : Service() {
                                     delay(10000)
                                     if (isPlaying() && currentStationUuid == capturedUuid) {
                                         repoInstance.sendFeedback(capturedUuid, "exo_active", true)
-                                        // التحديث الذاتي (Self-Healing): حفظ الرابط الشغال إن كان احتياطياً
                                         if (capturedIndex > 0 && !capturedUrl.isNullOrBlank() && currentUrlIndex == capturedIndex) {
                                             val snapshot = synchronized(availableUrls) { availableUrls.toList() }
                                             if (capturedUrl in snapshot) {
@@ -369,17 +368,7 @@ class RadioService : Service() {
         else startForeground(NOTIFICATION_ID, buildNotification())
     }
 
-        private fun playStationInternal(title: String, uuid: String, pUrl: String, fUrl: String, bitrate: Int = 0, category: String = "", country: String = "") {
-        val mySession = sessionCounter.incrementAndGet()
-        currentSessionId = mySession
-
-        // ⚡ إلغاء قاطع وسريع لأي عملية خاصة بالمحطة السابقة
-        activeProbeJob?.cancel(); activeProbeJob = null
-        activeHealingJob?.cancel(); activeHealingJob = null
-        bufferTimeoutHandler.removeCallbacksAndMessages(null)
-        statsHandler.removeCallbacksAndMessages(null)
-
-        // ⚡ إيقاف البث السابق فوراً لمنع أي تأخير في الصوت عند النقل
+    private fun playStationInternal(title: String, uuid: String, pUrl: String, fUrl: String, bitrate: Int = 0, category: String = "", country: String = "") {
         try {
             if (::player.isInitialized) {
                 player.stop()
@@ -390,8 +379,7 @@ class RadioService : Service() {
         stopRecording()
         currentTitle = title; currentStationUuid = uuid; currentBitrate = bitrate
         currentCategory = category; currentCountry = country
-        _currentTrackTitle.value = ""
-        retryCount = 0; healingAttempts = 0; isHealing.set(false); hasPlayedSuccessfully = false
+        retryCount = 0; hasPlayedSuccessfully = false
 
         toast("📻 $title")
 
@@ -407,16 +395,9 @@ class RadioService : Service() {
                     dbPrimary = fresh.primaryUrl.takeIf { it.isNotBlank() }
                     dbFallback = fresh.fallbackUrl.takeIf { it.isNotBlank() }
                 }
-            } catch (t: Throwable) {
-                Log.e(TAG, "DB lookup failed: ${t.message}")
-            }
-            if (currentSessionId != mySession) return@launch
+            } catch (t: Throwable) {}
 
-            val healedPrimary = prefs.getString(KEY_HEALED_PREFIX + uuid, null)
-
-            val effectivePrimary = dbPrimary
-                ?: healedPrimary?.takeIf { it.isNotBlank() }
-                ?: pUrl
+            val effectivePrimary = dbPrimary ?: pUrl
             val effectiveFallback = dbFallback ?: fUrl
 
             synchronized(availableUrls) {
@@ -431,45 +412,9 @@ class RadioService : Service() {
             lastRxBytes = TrafficStats.getUidRxBytes(android.os.Process.myUid())
             stationStartTimeMs = System.currentTimeMillis()
 
-            if (currentSessionId != mySession) return@launch
-
-            activeProbeJob = serviceScope.launch {
-                try {
-                    val candidates = buildUrlCandidates(effectivePrimary, effectiveFallback)
-                    val aliveUrl = preFlightProbe(candidates, mySession)
-                    if (currentSessionId != mySession) return@launch
-                    if (aliveUrl != null) {
-                        val idx = synchronized(availableUrls) { availableUrls.indexOf(aliveUrl) }
-                        if (currentSessionId != mySession) return@launch
-                        if (idx >= 0) {
-                            currentUrlIndex = idx
-                        } else {
-                            synchronized(availableUrls) { availableUrls.clear(); availableUrls.add(aliveUrl) }
-                            currentUrlIndex = 0
-                        }
-                        statsHandler.post {
-                            if (currentSessionId == mySession) startStream(aliveUrl, mySession, useProxy = true)
-                        }
-                    } else {
-                        statsHandler.post {
-                            if (currentSessionId == mySession) {
-                                val first = synchronized(availableUrls) { availableUrls.firstOrNull() } ?: effectivePrimary
-                                startStream(first, mySession, useProxy = true)
-                            }
-                        }
-                    }
-                } catch (ce: CancellationException) {
-                    throw ce
-                } catch (t: Throwable) {
-                    if (currentSessionId == mySession) {
-                        statsHandler.post {
-                            if (currentSessionId == mySession) {
-                                val first = synchronized(availableUrls) { availableUrls.firstOrNull() } ?: effectivePrimary
-                                startStream(first, mySession, useProxy = true)
-                            }
-                        }
-                    }
-                }
+            val firstUrl = synchronized(availableUrls) { availableUrls.firstOrNull() } ?: effectivePrimary
+            statsHandler.post {
+                startStream(firstUrl, useProxy = true)
             }
         }
 
