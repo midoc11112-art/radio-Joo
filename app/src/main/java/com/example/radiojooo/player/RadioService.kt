@@ -437,7 +437,7 @@ class RadioService : Service() {
         }
     }
 
-    private suspend fun probeHead(url: String): Boolean = suspendCancellableCoroutine { cont ->
+        private suspend fun probeHead(url: String): Boolean = suspendCancellableCoroutine { cont ->
         try {
             val headReq = Request.Builder()
                 .url(url)
@@ -491,7 +491,7 @@ class RadioService : Service() {
                             val ct = r.header("Content-Type")?.lowercase() ?: ""
                             val ok = (r.isSuccessful || r.code == 206) &&
                                     !ct.contains("text/html") && !ct.contains("application/json")
-                            if (cont.isActive) cont.resume(ok) {}
+                            if (cont.isActive) cont.resume(true) {} else if (cont.isActive) cont.resume(false) {}
                         }
                     } catch (_: Throwable) {
                         if (cont.isActive) cont.resume(false) {}
@@ -501,37 +501,6 @@ class RadioService : Service() {
         } catch (_: Throwable) {
             if (cont.isActive) cont.resume(false) {}
         }
-    }
-            })
-        } catch (_: Throwable) {
-            if (cont.isActive) cont.resume(false) {}
-        }
-    }
-
-    private suspend fun preFlightProbe(urls: List<String>, sessionId: Long): String? = withContext(Dispatchers.IO) {
-        for (url in urls) {
-            if (currentSessionId != sessionId) return@withContext null
-            if (isRootBlacklisted(url)) continue
-            val deadTime = deadUrlCache.get(url) ?: 0L
-            if (deadTime > 0 && System.currentTimeMillis() - deadTime < DEAD_TTL_MS) continue
-            val failCount = urlFailureCount[url] ?: 0
-            if (failCount >= 3) continue
-            try {
-                val isAlive = withTimeoutOrNull(1500L) { probeHead(url) } ?: false
-                if (currentSessionId != sessionId) return@withContext null
-                if (isAlive) {
-                    urlFailureCount.remove(url)
-                    return@withContext url
-                } else {
-                    recordUrlFailure(url)
-                }
-            } catch (ce: CancellationException) {
-                throw ce
-            } catch (_: Throwable) {
-                recordUrlFailure(url)
-            }
-        }
-        return@withContext null
     }
 
     private fun handlePlaybackError(error: PlaybackException, sessionId: Long) {
@@ -896,3 +865,4 @@ class RadioService : Service() {
         } catch (t: Throwable) {}
     }
 }
+
