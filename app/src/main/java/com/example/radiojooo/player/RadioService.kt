@@ -198,7 +198,6 @@ class RadioService : Service() {
                                     delay(10000)
                                     if (isPlaying() && currentStationUuid == capturedUuid) {
                                         repoInstance.sendFeedback(capturedUuid, "exo_active", true)
-                                        // 💾 حفظ الرابط الشغال إن كان احتياطياً (Persistence)
                                         if (capturedIndex > 0 && !capturedUrl.isNullOrBlank() && currentUrlIndex == capturedIndex) {
                                             val snapshot = synchronized(availableUrls) { availableUrls.toList() }
                                             if (capturedUrl in snapshot) {
@@ -228,7 +227,6 @@ class RadioService : Service() {
     private fun handlePlaybackError(error: PlaybackException) {
         if (isHealing.get() || isDestroyed.get()) return
 
-        // ⚡ Smart Retry: الأخطاء الدائمة (404/403/No Permission) لا تستحق إعادة محاولة
         val isPermanentError = error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
                 error.errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND ||
                 error.errorCode == PlaybackException.ERROR_CODE_IO_NO_PERMISSION
@@ -244,7 +242,6 @@ class RadioService : Service() {
             return
         }
 
-        // Retries فقط للأخطاء المؤقتة (timeout / connection)
         if (!isPermanentError) {
             retryCount++
             if (retryCount <= maxRetries) {

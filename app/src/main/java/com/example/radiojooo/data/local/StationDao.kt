@@ -12,7 +12,6 @@ interface StationDao {
     @Query("SELECT * FROM stations ORDER BY popularity DESC")
     fun getAllStations(): Flow<List<StationEntity>>
 
-    // عرض كل المحطات (بدون فلترة failCount) - المخفي فقط عند failCount >= 30
     @Query("SELECT * FROM stations WHERE failCount < 30 OR isFavorite = 1 ORDER BY popularity DESC")
     fun getVisibleStations(): Flow<List<StationEntity>>
 
@@ -43,11 +42,9 @@ interface StationDao {
     @Query("UPDATE stations SET lastUrlWorks = :works, failCount = :failCount, lastCheckedAt = :timestamp WHERE uuid = :uuid")
     suspend fun updateHealth(uuid: String, works: Boolean, failCount: Int, timestamp: Long)
 
-    // يستخدمه RadioRepository.neuralHeal (نُبقيه كما هو - خط أحمر)
     @Query("UPDATE stations SET primaryUrl = :newUrl, failCount = 0, lastUrlWorks = 1, lastCheckedAt = :ts WHERE uuid = :uuid")
     suspend fun updateStationUrl(uuid: String, newUrl: String, ts: Long = System.currentTimeMillis())
 
-    // 🆕 يستخدمه RadioService عند نجاح fallback: يحفظه كـ primary ويصفّر العداد
     @Query("UPDATE stations SET primaryUrl = :newUrl, fallbackUrl = :newFallback, failCount = 0, lastUrlWorks = 1, lastCheckedAt = :ts WHERE uuid = :uuid")
     suspend fun updateActiveStreamUrl(
         uuid: String,
@@ -56,7 +53,6 @@ interface StationDao {
         ts: Long = System.currentTimeMillis()
     )
 
-    // لا حذف تلقائي - فقط عند failCount >= 30
     @Query("DELETE FROM stations WHERE isFavorite = 0 AND lastUrlWorks = 0 AND failCount >= 30")
     suspend fun cleanupDeadStations()
 
