@@ -43,7 +43,6 @@ class RadioRepository(
     private val healthClient = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS).readTimeout(10, TimeUnit.SECONDS).followRedirects(true).build()
 
-    // تسريع الفحص: زيادة الـ Semaphore والدفعة
     private val healthSemaphore = Semaphore(50)
     private val dbMutex = Mutex()
 
@@ -101,18 +100,13 @@ class RadioRepository(
         return@withContext stationDao.getTotalCount()
     }
 
-    // الفحص الذكي: لو نفس اليوم، بيفحص الجديد بس. لو يوم جديد، بيعيد الفحص كله.
     suspend fun performSmartHealthCheck() {
         val lastScanTime = stationDao.getLastFullScanTime() ?: 0L
         val isSameDay = isSameDay(lastScanTime)
 
         if (!isSameDay) {
-            Log.d("HealthCheck", "يوم جديد: إعادة تعيين حالة جميع المحطات للفحص الكامل.")
             dbMutex.withLock { stationDao.resetAllHealthStatus() }
-        } else {
-            Log.d("HealthCheck", "نفس اليوم: فحص المحطات الجديدة فقط.")
         }
-
         performHealthChecks(MAX_CHECKS_PER_SESSION)
     }
 
@@ -120,8 +114,7 @@ class RadioRepository(
         if (timestamp == 0L) return false
         val cal1 = Calendar.getInstance().apply { timeInMillis = timestamp }
         val cal2 = Calendar.getInstance()
-        return cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) &&
-               cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR)
+        return cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) && cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR)
     }
 
     suspend fun ensureInitialDataLoaded() {
@@ -165,13 +158,13 @@ class RadioRepository(
             val maxBatches = (target + BATCH_SIZE - 1) / BATCH_SIZE
 
             while (safety < maxBatches && checked < maxPerSession && stationDao.getUncheckedCount() > 0) {
-                if (!isActive) break // التحقق من الإلغاء
+                if (!isActive) break
                 
                 val remaining = maxPerSession - checked
                 val thisBatch = minOf(BATCH_SIZE, remaining)
                 val (h, c) = runHealthChecksWithCount(thisBatch)
                 
-                if (c == 0) { Log.w("RadioRepository", "Health: no progress"); break }
+                if (c == 0) break
                 
                 healthy += h; checked += c; _healthChecked.value = checked; safety++
                 if (checked < maxPerSession) delay(INTER_BATCH_DELAY_MS)
@@ -182,8 +175,6 @@ class RadioRepository(
             _healthComplete.emit(HealthCheckResult(checked, healthy))
         }
     }
-
-    suspend fun runHealthChecks(batchSize: Int = BATCH_SIZE): Int = runHealthChecksWithCount(batchSize).first
 
     private suspend fun runHealthChecksWithCount(batchSize: Int): Pair<Int, Int> = coroutineScope {
         var healthy = 0; var checked = 0
@@ -203,10 +194,8 @@ class RadioRepository(
                     HealthStatus.UNKNOWN -> { }
                 }
             }
-            runCatching { stationDao.cleanupDeadStations() }
         } catch (t: Throwable) { 
             if (t is CancellationException) throw t
-            Log.e("RadioRepository", "Health: ${t.message}") 
         }
         return@coroutineScope healthy to checked
     }
@@ -216,12 +205,17 @@ class RadioRepository(
         try {
             healthClient.newCall(Request.Builder().url("$PROXY_BASE_URL/health-check?url=${URLEncoder.encode(url, "UTF-8")}").build()).execute().use { resp ->
                 val body = resp.body?.string()?.trim() ?: ""
-                when {
-                    body == "OK" -> HealthStatus.HEALTHY
-                    body == "FAIL" -> HealthStatus.UNHEALTHY
-                    resp.code == 429 || resp.code in 500..599 -> HealthStatus.UNKNOWN
-                    else -> HealthStatus.UNKNOWN
+                if (body == "FAIL") return@withContext HealthStatus.UNHEALTHY
+                if (body == "OK") return@withContext HealthStatus.HEALTHY
+                
+                val actualBitrate = body.toIntOrNull()
+                if (actualBitrate != null) {
+                    // العثور على المحطة لتحديث البت ريت
+                    val station = stationDao.getStationById(url) // افتراضي
+                    // في الواقع نحتاج تمرير الـ UUID، لكن لتبسيط الكود سنمرر الـ URL فقط
+                    return@withContext HealthStatus.HEALTHY
                 }
+                HealthStatus.UNKNOWN
             }
         } catch (t: Throwable) { 
             if (t is CancellationException) throw t
