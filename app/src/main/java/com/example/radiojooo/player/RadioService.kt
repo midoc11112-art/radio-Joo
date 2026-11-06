@@ -1,4 +1,4 @@
-package com.example.radiojooo.player
+﻿package com.example.radiojooo.player
 
 import android.app.*
 import android.content.Context
@@ -165,9 +165,9 @@ class RadioService : Service() {
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true).setMaxAudioBitrate(48000).build()
         }
-        val loadControl = DefaultLoadControl.Builder().setBufferDurationsMs(15000, 60000, 2500, 5000).setTargetBufferBytes(-1).build()
+        val loadControl = DefaultLoadControl.Builder().setBufferDurationsMs(30000, 120000, 5000, 15000).setTargetBufferBytes(-1).build()
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(30000).setReadTimeoutMs(30000).setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(60000).setReadTimeoutMs(60000).setAllowCrossProtocolRedirects(true)
             .setUserAgent("Mozilla/5.0 (Linux; Android 13) ExoPlayer/1.6.1")
             .setDefaultRequestProperties(mapOf("Accept" to "audio/*", "Icy-MetaData" to "0"))
         mediaSourceFactory = DefaultMediaSourceFactory(this).setDataSourceFactory(dataSourceFactory)
