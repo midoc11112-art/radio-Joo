@@ -14,7 +14,6 @@ data class StationEntity(
     val bitrate: Int = 64,
     val isFavorite: Boolean = false,
     val popularity: Int = 0,
-    val priority: Int = 0,
     val lastUpdated: Long = 0L,
     val lastUrlWorks: Boolean? = null,
     val failCount: Int = 0,
