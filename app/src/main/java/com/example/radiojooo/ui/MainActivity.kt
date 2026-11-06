@@ -1,4 +1,4 @@
-package com.example.radiojooo.ui
+﻿package com.example.radiojooo.ui
 
 import android.Manifest
 import android.app.NotificationChannel
@@ -137,9 +137,14 @@ class MainActivity : AppCompatActivity() {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                 viewModel.searchQuery.value = s?.toString() ?: ""
+                binding.btnClearSearch.visibility = if (s.isNullOrEmpty()) View.GONE else View.VISIBLE
             }
             override fun afterTextChanged(s: Editable?) {}
         })
+
+        binding.btnClearSearch.setOnClickListener {
+            binding.etSearch.text.clear()
+        }
     }
 
     private fun setupChipGroup() {

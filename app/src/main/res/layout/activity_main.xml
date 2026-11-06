@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
@@ -32,8 +32,38 @@
         </RelativeLayout>
 
         <FrameLayout android:layout_width="match_parent" android:layout_height="46dp" android:layout_marginTop="12dp" android:background="@drawable/bg_search_input">
-            <EditText android:id="@+id/etSearch" android:layout_width="match_parent" android:layout_height="match_parent" android:layout_marginEnd="40dp" android:background="@null" android:gravity="center_vertical|start" android:hint="ابحث باسم المحطة أو الدولة..." android:inputType="text" android:paddingStart="14dp" android:textColor="#FFFFFF" android:textColorHint="#64748B" android:textSize="13sp" />
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="center_vertical|end" android:layout_marginEnd="14dp" android:text="🔍" android:textSize="14sp" />
+            <EditText
+                android:id="@+id/etSearch"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_marginEnd="70dp"
+                android:background="@null"
+                android:gravity="center_vertical|start"
+                android:hint="ابحث بالاسم، الدولة، أو البت ريت (مثال: 128)..."
+                android:inputType="text"
+                android:paddingStart="14dp"
+                android:textColor="#FFFFFF"
+                android:textColorHint="#64748B"
+                android:textSize="13sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical|end"
+                android:layout_marginEnd="38dp"
+                android:text="🔍"
+                android:textSize="14sp" />
+
+            <ImageButton
+                android:id="@+id/btnClearSearch"
+                android:layout_width="30dp"
+                android:layout_height="30dp"
+                android:layout_gravity="center_vertical|end"
+                android:layout_marginEnd="8dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@android:drawable/ic_menu_close_clear_cancel"
+                android:visibility="gone"
+                app:tint="#94A3B8" />
         </FrameLayout>
 
         <HorizontalScrollView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:scrollbars="none">

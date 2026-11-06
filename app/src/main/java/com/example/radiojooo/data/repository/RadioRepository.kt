@@ -1,4 +1,4 @@
-package com.example.radiojooo.data.repository
+﻿package com.example.radiojooo.data.repository
 
 import android.content.Context
 import android.util.Log
@@ -82,7 +82,6 @@ class RadioRepository(
         } catch (_: Throwable) {}
     }
 
-    // الدمج التراكمي (Hybrid Additive Merge): جلب الديناميكي + الاحتفاظ بالذهبي والمحلي
     suspend fun fetchStationsFromServer(): Int = withContext(Dispatchers.IO) {
         var count = 0
         try {
@@ -92,11 +91,7 @@ class RadioRepository(
                     val arr = json.getJSONArray("stations")
                     count = arr.length()
                     val stations = parseStations(arr)
-                    if (stations.isNotEmpty()) {
-                        // InsertStations uses OnConflictStrategy.IGNORE
-                        // This guarantees that existing DB entries (with self-healed URLs and favorites) are NOT overwritten.
-                        stationDao.insertStations(stations)
-                    }
+                    if (stations.isNotEmpty()) stationDao.insertStations(stations)
                 }
             }
         } catch (t: Throwable) { Log.e("RadioRepository", "Fetch: ${t.message}") }
@@ -106,11 +101,11 @@ class RadioRepository(
     suspend fun ensureInitialDataLoaded() {
         try {
             dbMutex.withLock {
-                _healthTotal.value = 0
-                _healthChecked.value = 0
+                _healthTotal.value = 0; _healthChecked.value = 0
                 fetchStationsFromServer()
             }
-            _healthComplete.emit(HealthCheckResult(0, 0))
+            delay(500)
+            performHealthChecks() // ✅ إرجاع الفحص
         } catch (t: Throwable) { Log.e("RadioRepository", "Init: ${t.message}") }
     }
 
@@ -181,7 +176,7 @@ class RadioRepository(
                 val o = arr.getJSONObject(i)
                 val uuid = o.optString("uuid"); val url = o.optString("primaryUrl")
                 if (uuid.isNotBlank() && url.isNotBlank()) {
-                    list.add(StationEntity(uuid=uuid, name=o.optString("name"), primaryUrl=url, fallbackUrl=o.optString("fallbackUrl",""), category=o.optString("category","MUSIC"), countryCode=o.optString("countryCode",""), bitrate=o.optInt("bitrate",64), popularity=o.optInt("popularity",0), lastUpdated=System.currentTimeMillis()))
+                    list.add(StationEntity(uuid=uuid, name=o.optString("name"), primaryUrl=url, fallbackUrl=o.optString("fallbackUrl",""), category=o.optString("category","MUSIC"), countryCode=o.optString("countryCode",""), bitrate=o.optInt("bitrate",0), popularity=o.optInt("popularity",0), lastUpdated=System.currentTimeMillis()))
                 }
             } catch (t: Throwable) {}
         }
