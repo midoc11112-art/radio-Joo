@@ -10,7 +10,7 @@ class StationSyncWorker(appContext: Context, params: WorkerParameters) : Corouti
         return try {
             val repository = RadioRepository(applicationContext)
             repository.fetchStationsFromServer()
-            repository.runHealthChecks(batchSize = 30)
+            repository.runHealthChecks(batchSize = 50)
             Result.success()
         } catch (e: Exception) { Result.retry() }
     }

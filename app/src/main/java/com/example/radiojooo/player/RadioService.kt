@@ -170,7 +170,7 @@ class RadioService : Service() {
             parameters = buildUponParameters()
                 .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
                 .setMaxAudioBitrate(32_000)
-                .setForceLowestBitrate(true)
+                
                 .build()
         }
 

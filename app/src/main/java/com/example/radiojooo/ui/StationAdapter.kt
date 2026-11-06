@@ -15,11 +15,7 @@ class StationAdapter(
 ) : ListAdapter<StationEntity, StationAdapter.StationViewHolder>(StationDiffCallback()) {
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): StationViewHolder {
-        val binding = ItemStationBinding.inflate(
-            LayoutInflater.from(parent.context),
-            parent,
-            false
-        )
+        val binding = ItemStationBinding.inflate(LayoutInflater.from(parent.context), parent, false)
         return StationViewHolder(binding)
     }
 
@@ -27,13 +23,10 @@ class StationAdapter(
         holder.bind(getItem(position))
     }
 
-    inner class StationViewHolder(private val binding: ItemStationBinding) :
-        RecyclerView.ViewHolder(binding.root) {
-
+    inner class StationViewHolder(private val binding: ItemStationBinding) : RecyclerView.ViewHolder(binding.root) {
         fun bind(station: StationEntity) {
             binding.tvStationName.text = station.name
             binding.tvCountryBadge.text = if (station.countryCode.isBlank()) "EG" else station.countryCode.uppercase()
-            // لا نعرض رقم مزيف — إذا كان البت ريت مجهولاً نعرض "غير محدد"
             binding.tvBitrateBadge.text = if (station.bitrate > 0) "${station.bitrate} Kbps" else "غير محدد"
 
             val categoryText = when (station.category) {
@@ -47,34 +40,17 @@ class StationAdapter(
             }
             binding.tvCategoryBadge.text = categoryText
 
-            val serverCount = if (station.fallbackUrl.isNotBlank()) {
-                station.fallbackUrl.split(",").filter { it.isNotBlank() }.size + 1
-            } else 1
+            val serverCount = if (station.fallbackUrl.isNotBlank()) station.fallbackUrl.split(",").filter { it.isNotBlank() }.size + 1 else 1
             binding.tvServersBadge.text = "$serverCount خوادم"
 
-            if (station.isFavorite) {
-                binding.btnFavorite.setImageResource(R.drawable.ic_star_filled)
-            } else {
-                binding.btnFavorite.setImageResource(R.drawable.ic_star_outline)
-            }
-
-            binding.root.setOnClickListener {
-                onItemClick(station)
-            }
-
-            binding.btnFavorite.setOnClickListener {
-                onFavoriteClick(station)
-            }
+            binding.btnFavorite.setImageResource(if (station.isFavorite) R.drawable.ic_star_filled else R.drawable.ic_star_outline)
+            binding.root.setOnClickListener { onItemClick(station) }
+            binding.btnFavorite.setOnClickListener { onFavoriteClick(station) }
         }
     }
 
     class StationDiffCallback : DiffUtil.ItemCallback<StationEntity>() {
-        override fun areItemsTheSame(oldItem: StationEntity, newItem: StationEntity): Boolean {
-            return oldItem.uuid == newItem.uuid
-        }
-
-        override fun areContentsTheSame(oldItem: StationEntity, newItem: StationEntity): Boolean {
-            return oldItem == newItem
-        }
+        override fun areItemsTheSame(oldItem: StationEntity, newItem: StationEntity) = oldItem.uuid == newItem.uuid
+        override fun areContentsTheSame(oldItem: StationEntity, newItem: StationEntity) = oldItem == newItem
     }
 }
