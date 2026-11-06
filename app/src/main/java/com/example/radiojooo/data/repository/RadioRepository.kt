@@ -141,6 +141,11 @@ class RadioRepository(
         _healthTotal.value = 0
     }
 
+    // دالة runHealthChecks المطلوبة لـ StationSyncWorker
+    suspend fun runHealthChecks(batchSize: Int = BATCH_SIZE): Int = withContext(Dispatchers.IO) {
+        return@withContext runHealthChecksWithCount(batchSize).first
+    }
+
     private suspend fun performHealthChecks(maxPerSession: Int = MAX_CHECKS_PER_SESSION) {
         healthCheckJob?.cancel()
         healthCheckJob = CoroutineScope(Dispatchers.IO).launch {
@@ -210,9 +215,7 @@ class RadioRepository(
                 
                 val actualBitrate = body.toIntOrNull()
                 if (actualBitrate != null) {
-                    // العثور على المحطة لتحديث البت ريت
-                    val station = stationDao.getStationById(url) // افتراضي
-                    // في الواقع نحتاج تمرير الـ UUID، لكن لتبسيط الكود سنمرر الـ URL فقط
+                    // في حالة قراءة البت ريت الحقيقي، نعتبرها تعمل
                     return@withContext HealthStatus.HEALTHY
                 }
                 HealthStatus.UNKNOWN
