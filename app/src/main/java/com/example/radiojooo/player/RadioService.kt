@@ -47,6 +47,7 @@ import com.example.radiojooo.R
 import com.example.radiojooo.data.local.AppDatabase
 import com.example.radiojooo.data.repository.RadioRepository
 import com.example.radiojooo.ui.MainActivity
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -57,17 +58,25 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.net.URL
 import java.net.URLEncoder
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+import kotlin.coroutines.resume
 
 class RadioService : Service() {
 
@@ -80,6 +89,10 @@ class RadioService : Service() {
         private const val KEY_DEAD_PREFIX = "dead_"
         private const val DEAD_TTL_MS = 30 * 60 * 1000L
         private const val LAST_GOOD_TTL_MS = 60 * 60 * 1000L
+        private const val ROOT_BLACKLIST_TTL_MS = 24 * 60 * 60 * 1000L
+        private const val MAX_RETRY_SAME_URL = 2
+        private const val MAX_HEALING_ATTEMPTS = 3
+        private const val STABLE_PLAYBACK_RESET_MS = 30_000L
 
         fun getInstance(): RadioService? = instance
 
@@ -112,7 +125,14 @@ class RadioService : Service() {
 
     private val lastGoodUrlCache = LruCache<String, Long>(200)
     private val deadUrlCache = LruCache<String, Long>(200)
+    private val urlFailureCount = ConcurrentHashMap<String, Int>()
     private val prefs: SharedPreferences by lazy { getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
+
+    private val sessionCounter = AtomicLong(0)
+    @Volatile private var currentSessionId: Long = 0L
+    private var activeProbeJob: Job? = null
+    private var activeHealingJob: Job? = null
+    private var healingAttempts: Int = 0
 
     private val apiClient = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
@@ -141,7 +161,6 @@ class RadioService : Service() {
     var sleepTimeRemainingMs = 0L; private set
 
     private var retryCount = 0
-    private val maxRetries = 5
     private val statsHandler = Handler(Looper.getMainLooper())
     private val bufferTimeoutHandler = Handler(Looper.getMainLooper())
     private val statsRunnable = object : Runnable {
@@ -154,7 +173,10 @@ class RadioService : Service() {
         try {
             if (::player.isInitialized && player.playbackState == Player.STATE_BUFFERING && !player.isPlaying && !hasPlayedSuccessfully) {
                 toast("⏱️ البث متجمد...")
-                handlePlaybackError(PlaybackException("Buffer timeout", null, PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT))
+                handlePlaybackError(
+                    PlaybackException("Buffer timeout", null, PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT),
+                    currentSessionId
+                )
             }
         } catch (t: Throwable) {}
     }
@@ -191,7 +213,8 @@ class RadioService : Service() {
                         lastGoodUrlCache.put(k.removePrefix(KEY_LAST_GOOD_PREFIX), v)
                     }
                 } else if (k.startsWith(KEY_DEAD_PREFIX)) {
-                    if (System.currentTimeMillis() - v < DEAD_TTL_MS) {
+                    val age = System.currentTimeMillis() - v
+                    if (age < DEAD_TTL_MS || age < ROOT_BLACKLIST_TTL_MS) {
                         deadUrlCache.put(k.removePrefix(KEY_DEAD_PREFIX), v)
                     }
                 }
@@ -228,6 +251,7 @@ class RadioService : Service() {
         sleepTimer?.cancel(); stopRecording(); releaseLocks()
         statsHandler.removeCallbacksAndMessages(null)
         bufferTimeoutHandler.removeCallbacksAndMessages(null)
+        activeProbeJob?.cancel(); activeHealingJob?.cancel()
         try { loudnessEnhancer?.release() } catch (_: Throwable) {}
         try { if (::player.isInitialized) player.release() } catch (_: Throwable) {}
         try { serviceScope.cancel() } catch (_: Throwable) {}
@@ -313,7 +337,10 @@ class RadioService : Service() {
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                try { bufferTimeoutHandler.removeCallbacks(bufferTimeoutRunnable); handlePlaybackError(error) } catch (t: Throwable) {}
+                try {
+                    bufferTimeoutHandler.removeCallbacks(bufferTimeoutRunnable)
+                    handlePlaybackError(error, currentSessionId)
+                } catch (t: Throwable) {}
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -323,6 +350,7 @@ class RadioService : Service() {
                         acquireLocks()
                         bufferTimeoutHandler.removeCallbacks(bufferTimeoutRunnable)
                         hasPlayedSuccessfully = true
+                        val captureSession = currentSessionId
                         val currentUrl = synchronized(availableUrls) { availableUrls.getOrNull(currentUrlIndex) }
                         if (!currentUrl.isNullOrBlank()) {
                             if (currentStationUuid.isNotBlank()) {
@@ -330,6 +358,7 @@ class RadioService : Service() {
                                 try { prefs.edit().putLong(KEY_LAST_GOOD_PREFIX + currentStationUuid, System.currentTimeMillis()).apply() } catch (_: Throwable) {}
                             }
                             deadUrlCache.remove(currentUrl)
+                            urlFailureCount.remove(currentUrl)
                             try { prefs.edit().remove(KEY_DEAD_PREFIX + currentUrl).apply() } catch (_: Throwable) {}
                         }
                         if (currentStationUuid.isNotBlank()) {
@@ -341,6 +370,17 @@ class RadioService : Service() {
                                     }
                                 } catch (_: Throwable) {}
                             }
+                        }
+                        // v109.6: reset counters after stable playback
+                        serviceScope.launch {
+                            try {
+                                delay(STABLE_PLAYBACK_RESET_MS)
+                                if (currentSessionId == captureSession && isPlaying()) {
+                                    retryCount = 0
+                                    healingAttempts = 0
+                                    urlFailureCount.clear()
+                                }
+                            } catch (_: Throwable) {}
                         }
                     }
                 } catch (t: Throwable) {}
@@ -370,35 +410,6 @@ class RadioService : Service() {
         return variants.distinct()
     }
 
-    private suspend fun preFlightProbe(urls: List<String>): String? = withContext(Dispatchers.IO) {
-        for (url in urls) {
-            val deadTime = deadUrlCache.get(url) ?: 0L
-            if (deadTime > 0 && System.currentTimeMillis() - deadTime < DEAD_TTL_MS) continue
-            try {
-                val req = Request.Builder().url(url).head().build()
-                val resp = withTimeoutOrNull(1500L) {
-                    withContext(Dispatchers.IO) { apiClient.newCall(req).execute() }
-                }
-                if (resp != null) {
-                    resp.use {
-                        if (it.isSuccessful || it.code == 206) {
-                            val ct = it.header("Content-Type")?.lowercase() ?: ""
-                            if (!ct.contains("text/html") && !ct.contains("application/json")) {
-                                return@withContext url
-                            }
-                        }
-                    }
-                }
-                deadUrlCache.put(url, System.currentTimeMillis())
-                try { prefs.edit().putLong(KEY_DEAD_PREFIX + url, System.currentTimeMillis()).apply() } catch (_: Throwable) {}
-            } catch (_: Throwable) {
-                deadUrlCache.put(url, System.currentTimeMillis())
-                try { prefs.edit().putLong(KEY_DEAD_PREFIX + url, System.currentTimeMillis()).apply() } catch (_: Throwable) {}
-            }
-        }
-        return@withContext null
-    }
-
     private fun buildUrlCandidates(primaryUrl: String, fallbackUrl: String): List<String> {
         val candidates = mutableListOf<String>()
         candidates.addAll(generateUrlVariants(primaryUrl))
@@ -410,13 +421,82 @@ class RadioService : Service() {
         return candidates.distinct()
     }
 
-    private fun handlePlaybackError(error: PlaybackException) {
+    private fun isRootBlacklisted(url: String): Boolean {
+        val t = deadUrlCache.get(url) ?: return false
+        return System.currentTimeMillis() - t < ROOT_BLACKLIST_TTL_MS && (urlFailureCount[url] ?: 0) >= 3
+    }
+
+    private fun recordUrlFailure(url: String) {
+        val count = (urlFailureCount[url] ?: 0) + 1
+        urlFailureCount[url] = count
+        if (count >= 3) {
+            deadUrlCache.put(url, System.currentTimeMillis())
+            try { prefs.edit().putLong(KEY_DEAD_PREFIX + url, System.currentTimeMillis()).apply() } catch (_: Throwable) {}
+        }
+    }
+
+    private suspend fun probeHead(url: String): Boolean = suspendCancellableCoroutine { cont ->
+        try {
+            val req = Request.Builder().url(url).head().build()
+            val call = apiClient.newCall(req)
+            cont.invokeOnCancellation { try { call.cancel() } catch (_: Throwable) {} }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    if (cont.isActive) cont.resume(false) {}
+                }
+                override fun onResponse(call: Call, response: Response) {
+                    try {
+                        response.use { r ->
+                            var ok = false
+                            if (r.isSuccessful || r.code == 206) {
+                                val ct = r.header("Content-Type")?.lowercase() ?: ""
+                                if (!ct.contains("text/html") && !ct.contains("application/json")) ok = true
+                            }
+                            if (cont.isActive) cont.resume(ok) {}
+                        }
+                    } catch (_: Throwable) {
+                        if (cont.isActive) cont.resume(false) {}
+                    }
+                }
+            })
+        } catch (_: Throwable) {
+            if (cont.isActive) cont.resume(false) {}
+        }
+    }
+
+    private suspend fun preFlightProbe(urls: List<String>, sessionId: Long): String? = withContext(Dispatchers.IO) {
+        for (url in urls) {
+            if (currentSessionId != sessionId) return@withContext null
+            if (isRootBlacklisted(url)) continue
+            val deadTime = deadUrlCache.get(url) ?: 0L
+            if (deadTime > 0 && System.currentTimeMillis() - deadTime < DEAD_TTL_MS) continue
+            val failCount = urlFailureCount[url] ?: 0
+            if (failCount >= 3) continue
+            try {
+                val isAlive = withTimeoutOrNull(1500L) { probeHead(url) } ?: false
+                if (currentSessionId != sessionId) return@withContext null
+                if (isAlive) {
+                    urlFailureCount.remove(url)
+                    return@withContext url
+                } else {
+                    recordUrlFailure(url)
+                }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (_: Throwable) {
+                recordUrlFailure(url)
+            }
+        }
+        return@withContext null
+    }
+
+    private fun handlePlaybackError(error: PlaybackException, sessionId: Long = currentSessionId) {
+        if (currentSessionId != sessionId) return
         if (isHealing.get() || isDestroyed.get()) return
 
         val currentUrl = synchronized(availableUrls) { availableUrls.getOrNull(currentUrlIndex) } ?: ""
         if (currentUrl.isNotBlank()) {
-            deadUrlCache.put(currentUrl, System.currentTimeMillis())
-            try { prefs.edit().putLong(KEY_DEAD_PREFIX + currentUrl, System.currentTimeMillis()).apply() } catch (_: Throwable) {}
+            recordUrlFailure(currentUrl)
         }
 
         val errorType = when (error.errorCode) {
@@ -428,21 +508,17 @@ class RadioService : Service() {
 
         if (hasPlayedSuccessfully && errorType != "403" && errorType != "not_found") {
             retryCount++
-            if (retryCount <= 5) {
-                toast("🔄 إعادة الاتصال...")
+            if (retryCount <= MAX_RETRY_SAME_URL) {
+                toast("🔄 إعادة الاتصال ($retryCount/$MAX_RETRY_SAME_URL)...")
                 statsHandler.postDelayed({
-                    if (!isDestroyed.get()) {
-                        val urls = synchronized(availableUrls) { availableUrls.toList() }
-                        val current = urls.getOrNull(currentUrlIndex) ?: return@postDelayed
-                        startStream(current, useProxy = true)
+                    if (currentSessionId == sessionId && !isDestroyed.get()) {
+                        val current = synchronized(availableUrls) { availableUrls.getOrNull(currentUrlIndex) } ?: return@postDelayed
+                        startStream(current, sessionId, useProxy = true)
                     }
-                }, 3000L)
-                return
-            } else {
-                retryCount = 0
-                toast("❌ توقف البث")
+                }, 2000L)
                 return
             }
+            retryCount = 0
         }
 
         val urls = synchronized(availableUrls) { availableUrls.toList() }
@@ -451,32 +527,27 @@ class RadioService : Service() {
             currentUrlIndex++
             toast("🔄 محاولة بديل (${currentUrlIndex + 1}/${urls.size})")
             statsHandler.postDelayed({
-                if (!isDestroyed.get()) startStream(urls[currentUrlIndex], useProxy = true)
-            }, 1000L)
+                if (currentSessionId == sessionId && !isDestroyed.get()) {
+                    startStream(urls[currentUrlIndex], sessionId, useProxy = true)
+                }
+            }, 500L)
             return
         }
 
-        retryCount++
-        if (retryCount <= maxRetries) {
-            val delayMs = when (retryCount) { 1 -> 1500L; 2 -> 3000L; else -> 5000L }
-            toast("🔄 إعادة محاولة $retryCount/$maxRetries")
-            statsHandler.postDelayed({
-                if (!isDestroyed.get()) startStream(urls.getOrNull(currentUrlIndex) ?: "", useProxy = true)
-            }, delayMs)
+        if (healingAttempts >= MAX_HEALING_ATTEMPTS) {
+            toast("❌ المحطة غير متاحة — جرب محطة أخرى")
             return
         }
-
-        retryCount = 0
-        if (currentStationUuid.isBlank() || isDestroyed.get()) return
         if (!isHealing.compareAndSet(false, true)) return
+        healingAttempts++
 
-        toast("🧠 Oracle AI يبحث عن بدائل...")
+        toast("🧠 Oracle AI يبحث عن بدائل... ($healingAttempts/$MAX_HEALING_ATTEMPTS)")
         val uuidToHeal = currentStationUuid
         val errCap = errorType
         val countryCap = currentCountry
         val catCap = currentCategory
 
-        serviceScope.launch {
+        activeHealingJob = serviceScope.launch {
             try {
                 val dao = AppDatabase.getDatabase(applicationContext).stationDao()
                 val station = dao.getStationById(uuidToHeal) ?: run { isHealing.set(false); return@launch }
@@ -484,40 +555,32 @@ class RadioService : Service() {
                 runCatching { repoInstance.sendFeedback(uuidToHeal, "exo_error", false, errCap, countryCap, catCap) }
 
                 val healResult = withTimeoutOrNull(15000L) { runCatching { repoInstance.neuralHeal(station) }.getOrNull() }
+                if (currentSessionId != sessionId) { isHealing.set(false); return@launch }
 
                 if (healResult != null && !isDestroyed.get()) {
                     val newUrl = healResult.url
                     toast("🔍 تم العثور على: ${healResult.matchedName}")
                     statsHandler.post {
                         try {
-                            if (!isDestroyed.get() && ::player.isInitialized) {
+                            if (currentSessionId == sessionId && !isDestroyed.get() && ::player.isInitialized) {
                                 synchronized(availableUrls) { availableUrls.clear(); availableUrls.add(newUrl) }
                                 currentUrlIndex = 0; retryCount = 0; hasPlayedSuccessfully = false
-                                startStream(newUrl, useProxy = true)
+                                startStream(newUrl, sessionId, useProxy = true)
                             }
-                        } catch (t: Throwable) {} finally { isHealing.set(false) }
+                        } finally { isHealing.set(false) }
                     }
                 } else {
-                    toast("❌ لم أجد بديلاً")
+                    if (currentSessionId == sessionId) {
+                        toast("❌ لم أجد بديلاً ($healingAttempts/$MAX_HEALING_ATTEMPTS)")
+                    }
                     isHealing.set(false)
-                    tryFallback()
                 }
-            } catch (t: Throwable) { isHealing.set(false); tryFallback() }
-        }
-    }
-
-    private fun tryFallback() {
-        val urls = synchronized(availableUrls) { availableUrls.toList() }
-        if (urls.size > 1) {
-            currentUrlIndex = (currentUrlIndex + 1) % urls.size
-            toast("🔄 تجربة احتياطي #${currentUrlIndex + 1}")
-            statsHandler.post {
-                try {
-                    if (!isDestroyed.get() && ::player.isInitialized) startStream(urls[currentUrlIndex], useProxy = true)
-                } catch (t: Throwable) {}
+            } catch (ce: CancellationException) {
+                isHealing.set(false)
+                throw ce
+            } catch (t: Throwable) {
+                isHealing.set(false)
             }
-        } else {
-            toast("❌ المحطة غير متاحة حالياً")
         }
     }
 
@@ -567,11 +630,19 @@ class RadioService : Service() {
     }
 
     private fun playStationInternal(title: String, uuid: String, pUrl: String, fUrl: String, bitrate: Int = 0, category: String = "", country: String = "") {
+        val mySession = sessionCounter.incrementAndGet()
+        currentSessionId = mySession
+
+        activeProbeJob?.cancel(); activeProbeJob = null
+        activeHealingJob?.cancel(); activeHealingJob = null
+        bufferTimeoutHandler.removeCallbacksAndMessages(null)
+        statsHandler.removeCallbacksAndMessages(null)
+
         stopRecording()
         currentTitle = title; currentStationUuid = uuid; currentBitrate = bitrate
         currentCategory = category; currentCountry = country
         _currentTrackTitle.value = ""
-        retryCount = 0; isHealing.set(false); hasPlayedSuccessfully = false
+        retryCount = 0; healingAttempts = 0; isHealing.set(false); hasPlayedSuccessfully = false
         synchronized(availableUrls) {
             availableUrls.clear()
             if (pUrl.isNotBlank()) availableUrls.add(pUrl)
@@ -580,34 +651,50 @@ class RadioService : Service() {
         currentUrlIndex = 0; totalSessionBytes = 0L
         lastRxBytes = TrafficStats.getUidRxBytes(android.os.Process.myUid())
         stationStartTimeMs = System.currentTimeMillis()
+
+        try { if (::player.isInitialized) { player.stop(); player.clearMediaItems() } } catch (_: Throwable) {}
+
         toast("📻 $title")
 
-        serviceScope.launch {
+        if (isAppInForeground) statsHandler.post(statsRunnable)
+
+        activeProbeJob = serviceScope.launch {
             try {
                 val candidates = buildUrlCandidates(pUrl, fUrl)
-                val aliveUrl = preFlightProbe(candidates)
-                if (!isDestroyed.get()) {
-                    if (aliveUrl != null) {
-                        val idx = synchronized(availableUrls) { availableUrls.indexOf(aliveUrl) }
-                        if (idx >= 0) {
-                            currentUrlIndex = idx
-                        } else {
-                            synchronized(availableUrls) { availableUrls.clear(); availableUrls.add(aliveUrl) }
-                            currentUrlIndex = 0
-                        }
-                        statsHandler.post { startStream(aliveUrl, useProxy = true) }
+                val aliveUrl = preFlightProbe(candidates, mySession)
+                if (currentSessionId != mySession) return@launch
+                if (aliveUrl != null) {
+                    val idx = synchronized(availableUrls) { availableUrls.indexOf(aliveUrl) }
+                    if (currentSessionId != mySession) return@launch
+                    if (idx >= 0) {
+                        currentUrlIndex = idx
                     } else {
-                        toast("⚠️ كل الروابط فشلت، بحث فوري...")
-                        statsHandler.post {
-                            handlePlaybackError(PlaybackException("Pre-flight failed", null, PlaybackException.ERROR_CODE_IO_UNSPECIFIED))
+                        synchronized(availableUrls) { availableUrls.clear(); availableUrls.add(aliveUrl) }
+                        currentUrlIndex = 0
+                    }
+                    statsHandler.post {
+                        if (currentSessionId == mySession) startStream(aliveUrl, mySession, useProxy = true)
+                    }
+                } else {
+                    toast("⚠️ كل الروابط فشلت، بحث فوري...")
+                    statsHandler.post {
+                        if (currentSessionId == mySession) {
+                            handlePlaybackError(
+                                PlaybackException("Pre-flight failed", null, PlaybackException.ERROR_CODE_IO_UNSPECIFIED),
+                                mySession
+                            )
                         }
                     }
                 }
+            } catch (ce: CancellationException) {
+                throw ce
             } catch (t: Throwable) {
-                statsHandler.post {
-                    if (!isDestroyed.get()) {
-                        val first = synchronized(availableUrls) { availableUrls.firstOrNull() }
-                        if (first != null) startStream(first, useProxy = true)
+                if (currentSessionId == mySession) {
+                    statsHandler.post {
+                        if (currentSessionId == mySession) {
+                            val first = synchronized(availableUrls) { availableUrls.firstOrNull() }
+                            if (first != null) startStream(first, mySession, useProxy = true)
+                        }
                     }
                 }
             }
@@ -615,7 +702,8 @@ class RadioService : Service() {
         updateNotification(); acquireLocks()
     }
 
-    private fun startStream(streamUrl: String, useProxy: Boolean = false) {
+    private fun startStream(streamUrl: String, sessionId: Long = currentSessionId, useProxy: Boolean = false) {
+        if (currentSessionId != sessionId) return
         if (!::player.isInitialized || isDestroyed.get()) return
         try {
             player.stop(); player.clearMediaItems(); isUsingProxy = useProxy
@@ -705,6 +793,7 @@ class RadioService : Service() {
     private fun stopAndExitApp() {
         sleepTimer?.cancel(); stopRecording(); statsHandler.removeCallbacks(statsRunnable)
         bufferTimeoutHandler.removeCallbacksAndMessages(null)
+        activeProbeJob?.cancel(); activeHealingJob?.cancel()
         try { if (::player.isInitialized) player.stop() } catch (t: Throwable) {}
         releaseLocks(); try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (t: Throwable) {}
         stopSelf()
