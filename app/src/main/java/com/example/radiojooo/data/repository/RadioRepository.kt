@@ -215,7 +215,6 @@ class RadioRepository(
                 
                 val actualBitrate = body.toIntOrNull()
                 if (actualBitrate != null) {
-                    // في حالة قراءة البت ريت الحقيقي، نعتبرها تعمل
                     return@withContext HealthStatus.HEALTHY
                 }
                 HealthStatus.UNKNOWN
