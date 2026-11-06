@@ -257,7 +257,7 @@ class RadioService : Service() {
                 val station = dao.getStationById(uuidToHeal) ?: run { isHealing.set(false); return@launch }
                 runCatching { dao.updateHealth(uuidToHeal, false, station.failCount + 1, System.currentTimeMillis()) }
                 runCatching { repoInstance.sendFeedback(uuidToHeal, "exo_error", false, errCap, countryCap, catCap) }
-                val healResult = withTimeoutOrNull(15000L) { runCatching { repoInstance.neuralHeal(station) }.getOrNull() }
+                val healResult = withTimeoutOrNull(30000L) { runCatching { repoInstance.neuralHeal(station) }.getOrNull() }
                 if (healResult != null && !isDestroyed.get()) {
                     val newUrl = healResult.url
                     toast("🔍 تم العثور على: ${healResult.matchedName}"); delay(2000L)
