@@ -20,6 +20,7 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import com.example.radiojooo.R
 import com.example.radiojooo.data.local.AppDatabase
 import com.example.radiojooo.data.repository.RadioRepository
@@ -165,12 +166,22 @@ class RadioService : Service() {
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true).setMaxAudioBitrate(48000).build()
         }
-        val loadControl = DefaultLoadControl.Builder().setBufferDurationsMs(30000, 120000, 5000, 15000).setTargetBufferBytes(-1).build()
+        // ✅ بافر متوازن: 15-30 ثانية (لا يستهلك بيانات زائدة، ويكفي لتحمل التقلبات)
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(15000, 30000, 2500, 5000)
+            .setTargetBufferBytes(-1)
+            .build()
+        // ✅ سياسة أخطاء مخصصة: محاولات أكثر مع تأخير تصاعدي
+        val loadErrorPolicy = object : DefaultLoadErrorHandlingPolicy() {
+            override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
+                return minOf(1000L * (loadErrorInfo.errorCount + 1), 5000L) // تأخير تصاعدي حتى 5 ثوانٍ
+            }
+        }
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(60000).setReadTimeoutMs(60000).setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(30000).setReadTimeoutMs(30000).setAllowCrossProtocolRedirects(true)
             .setUserAgent("Mozilla/5.0 (Linux; Android 13) ExoPlayer/1.6.1")
             .setDefaultRequestProperties(mapOf("Accept" to "audio/*", "Icy-MetaData" to "0"))
-        mediaSourceFactory = DefaultMediaSourceFactory(this).setDataSourceFactory(dataSourceFactory)
+        mediaSourceFactory = DefaultMediaSourceFactory(this).setDataSourceFactory(dataSourceFactory).setLoadErrorHandlingPolicy(loadErrorPolicy)
 
         player = ExoPlayer.Builder(this, renderersFactory)
             .setTrackSelector(trackSelector).setLoadControl(loadControl).setMediaSourceFactory(mediaSourceFactory)
