@@ -1,4 +1,4 @@
-package com.example.radiojooo.data.repository
+﻿package com.example.radiojooo.data.repository
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -78,65 +78,24 @@ class RadioRepository(
     val allStations: kotlinx.coroutines.flow.Flow<List<StationEntity>> = stationDao.getVisibleStations()
     private var healthCheckJob: Job? = null
 
-    suspend fun neuralHeal(station: StationEntity): HealResult? = withContext(Dispatchers.IO) {
-        // PHASE 0: Try cloud backup first
+        suspend fun neuralHeal(station: StationEntity): HealResult? = withContext(Dispatchers.IO) {
         try {
-            val cloudReq = "$PROXY_BASE_URL/get-saved-url?uuid=${URLEncoder.encode(station.uuid, "UTF-8")}"
-            healClient.newCall(Request.Builder().url(cloudReq).build()).execute().use { res ->
-                if (res.isSuccessful) {
-                    val body = res.body?.string() ?: ""
-                    val json = JSONObject(body)
-                    if (json.optBoolean("success", false)) {
-                        val savedUrl = json.optString("url")
-                        if (savedUrl.isNotBlank() && savedUrl.startsWith("http")) {
-                            if (checkUrlAlive(savedUrl)) {
-                                persistHealedUrl(station.uuid, savedUrl)
-                                Log.d("HealAI", "✓ Cloud backup used: ${station.name} -> $savedUrl")
-                                return@withContext HealResult(savedUrl, station.name + " (cloud)")
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (t: Throwable) {
-            Log.d("HealAI", "Cloud backup check failed: ${t.message}")
-        }
-
-        // PHASE 1: Worker heal
-        try {
-            val url = "$PROXY_BASE_URL/heal?uuid=${URLEncoder.encode(station.uuid, "UTF-8")}&name=${URLEncoder.encode(station.name, "UTF-8")}&country=${station.countryCode}&category=${station.category}"
+            val url = "$PROXY_BASE_URL/heal?uuid=${URLEncoder.encode(station.uuid, "UTF-8")}&name=${URLEncoder.encode(station.name, "UTF-8")}"
             healClient.newCall(Request.Builder().url(url).build()).execute().use { res ->
                 if (res.isSuccessful) {
                     val body = res.body?.string() ?: return@withContext null
                     val json = JSONObject(body)
-
                     if (json.optBoolean("success", false)) {
                         val newUrl = json.optString("newUrl")
                         val matchedName = json.optString("matchedName", station.name)
                         if (newUrl.isNotBlank() && newUrl.startsWith("http")) {
                             persistHealedUrl(station.uuid, newUrl)
-                            saveUrlToCloud(station.uuid, newUrl, station.primaryUrl)
-                            Log.d("HealAI", "✓ Worker healed: ${station.name} -> $newUrl")
                             return@withContext HealResult(newUrl, matchedName)
-                        }
-                    }
-
-                    // PHASE 2: Web search if signaled
-                    if (json.optBoolean("needsWebSearch", false)) {
-                        Log.d("HealAI", "Worker signaled web search for: ${station.name}")
-                        val webUrl = webSearchForStream(station)
-                        if (webUrl != null && checkUrlAlive(webUrl)) {
-                            persistHealedUrl(station.uuid, webUrl)
-                            saveUrlToCloud(station.uuid, webUrl, station.primaryUrl)
-                            Log.d("HealAI", "✓ Web search found: ${station.name} -> $webUrl")
-                            return@withContext HealResult(webUrl, station.name + " (web)")
                         }
                     }
                 }
             }
-        } catch (t: Throwable) {
-            Log.e("HealAI", "Heal request failed: ${t.message}", t)
-        }
+        } catch (_: Throwable) {}
         return@withContext null
     }
 
