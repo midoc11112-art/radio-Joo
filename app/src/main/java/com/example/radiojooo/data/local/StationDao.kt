@@ -1,4 +1,4 @@
-﻿package com.example.radiojooo.data.local
+package com.example.radiojooo.data.local
 
 import androidx.room.Dao
 import androidx.room.Insert
@@ -43,8 +43,18 @@ interface StationDao {
     @Query("UPDATE stations SET lastUrlWorks = :works, failCount = :failCount, lastCheckedAt = :timestamp WHERE uuid = :uuid")
     suspend fun updateHealth(uuid: String, works: Boolean, failCount: Int, timestamp: Long)
 
+    // يستخدمه RadioRepository.neuralHeal (نُبقيه كما هو - خط أحمر)
     @Query("UPDATE stations SET primaryUrl = :newUrl, failCount = 0, lastUrlWorks = 1, lastCheckedAt = :ts WHERE uuid = :uuid")
     suspend fun updateStationUrl(uuid: String, newUrl: String, ts: Long = System.currentTimeMillis())
+
+    // 🆕 يستخدمه RadioService عند نجاح fallback: يحفظه كـ primary ويصفّر العداد
+    @Query("UPDATE stations SET primaryUrl = :newUrl, fallbackUrl = :newFallback, failCount = 0, lastUrlWorks = 1, lastCheckedAt = :ts WHERE uuid = :uuid")
+    suspend fun updateActiveStreamUrl(
+        uuid: String,
+        newUrl: String,
+        newFallback: String,
+        ts: Long = System.currentTimeMillis()
+    )
 
     // لا حذف تلقائي - فقط عند failCount >= 30
     @Query("DELETE FROM stations WHERE isFavorite = 0 AND lastUrlWorks = 0 AND failCount >= 30")

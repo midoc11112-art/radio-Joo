@@ -1,4 +1,4 @@
-﻿package com.example.radiojooo.player
+package com.example.radiojooo.player
 
 import android.app.*
 import android.content.Context
@@ -92,7 +92,7 @@ class RadioService : Service() {
             if (isAppInForeground) { calculateDataUsage(); statsHandler.postDelayed(this, 1000) }
         }
     }
-    
+
     private val bufferTimeoutRunnable = Runnable {
         try {
             if (::player.isInitialized && player.playbackState == Player.STATE_BUFFERING && !player.isPlaying && !hasPlayedSuccessfully) {
@@ -189,12 +189,29 @@ class RadioService : Service() {
                         acquireLocks()
                         bufferTimeoutHandler.removeCallbacks(bufferTimeoutRunnable)
                         hasPlayedSuccessfully = true
-                        if (currentStationUuid.isNotBlank()) {
+                        val capturedUuid = currentStationUuid
+                        val capturedIndex = currentUrlIndex
+                        val capturedUrl = synchronized(availableUrls) { availableUrls.getOrNull(capturedIndex) }
+                        if (capturedUuid.isNotBlank()) {
                             serviceScope.launch {
                                 try {
                                     delay(10000)
-                                    if (isPlaying() && currentStationUuid.isNotBlank()) {
-                                        repoInstance.sendFeedback(currentStationUuid, "exo_active", true)
+                                    if (isPlaying() && currentStationUuid == capturedUuid) {
+                                        repoInstance.sendFeedback(capturedUuid, "exo_active", true)
+                                        // 💾 حفظ الرابط الشغال إن كان احتياطياً (Persistence)
+                                        if (capturedIndex > 0 && !capturedUrl.isNullOrBlank() && currentUrlIndex == capturedIndex) {
+                                            val snapshot = synchronized(availableUrls) { availableUrls.toList() }
+                                            if (capturedUrl in snapshot) {
+                                                val remaining = snapshot.filter { it != capturedUrl }
+                                                val newFallback = remaining.joinToString(",")
+                                                runCatching {
+                                                    AppDatabase.getDatabase(applicationContext)
+                                                        .stationDao()
+                                                        .updateActiveStreamUrl(capturedUuid, capturedUrl, newFallback)
+                                                }
+                                                toast("💾 تم حفظ الرابط الشغال")
+                                            }
+                                        }
                                     }
                                 } catch (_: Throwable) {}
                             }
@@ -210,26 +227,34 @@ class RadioService : Service() {
 
     private fun handlePlaybackError(error: PlaybackException) {
         if (isHealing.get() || isDestroyed.get()) return
-        
+
+        // ⚡ Smart Retry: الأخطاء الدائمة (404/403/No Permission) لا تستحق إعادة محاولة
+        val isPermanentError = error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
+                error.errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND ||
+                error.errorCode == PlaybackException.ERROR_CODE_IO_NO_PERMISSION
+
         val urls = synchronized(availableUrls) { availableUrls.toList() }
-        
+
         if (currentUrlIndex < urls.size - 1) {
             currentUrlIndex++
             toast("🔄 محاولة خادم بديل (${currentUrlIndex + 1}/${urls.size})")
             statsHandler.postDelayed({
                 if (!isDestroyed.get()) startStream(urls[currentUrlIndex], useProxy = true)
-            }, 2000L)
+            }, if (isPermanentError) 500L else 2000L)
             return
         }
 
-        retryCount++
-        if (retryCount <= maxRetries) {
-            val delayMs = when (retryCount) { 1 -> 2000L; 2 -> 4000L; else -> 8000L }
-            toast("🔄 إعادة محاولة $retryCount/$maxRetries")
-            statsHandler.postDelayed({
-                if (!isDestroyed.get()) startStream(urls.getOrNull(currentUrlIndex) ?: "", useProxy = true)
-            }, delayMs)
-            return
+        // Retries فقط للأخطاء المؤقتة (timeout / connection)
+        if (!isPermanentError) {
+            retryCount++
+            if (retryCount <= maxRetries) {
+                val delayMs = when (retryCount) { 1 -> 2000L; 2 -> 4000L; else -> 8000L }
+                toast("🔄 إعادة محاولة $retryCount/$maxRetries")
+                statsHandler.postDelayed({
+                    if (!isDestroyed.get()) startStream(urls.getOrNull(currentUrlIndex) ?: "", useProxy = true)
+                }, delayMs)
+                return
+            }
         }
 
         retryCount = 0
@@ -237,7 +262,7 @@ class RadioService : Service() {
         if (!isHealing.compareAndSet(false, true)) return
 
         toast("🧠 Oracle AI يبحث...")
-        
+
         val uuidToHeal = currentStationUuid
         val errCap = "unknown"
         val countryCap = currentCountry
@@ -255,8 +280,8 @@ class RadioService : Service() {
                 if (healResult != null && !isDestroyed.get()) {
                     val newUrl = healResult.url
                     toast("🔍 تم العثور على: ${healResult.matchedName}")
-                    delay(2000L) // عرض الاسم لمدة ثانيتين
-                    
+                    delay(2000L)
+
                     val isValidAudio = withContext(Dispatchers.IO) {
                         try {
                             val probe = URL(newUrl).openConnection().apply { connectTimeout = 5000; readTimeout = 5000 }
@@ -354,7 +379,11 @@ class RadioService : Service() {
         synchronized(availableUrls) {
             availableUrls.clear()
             if (pUrl.isNotBlank()) availableUrls.add(pUrl)
-            if (fUrl.isNotBlank()) availableUrls.addAll(fUrl.split(",").map { it.trim() }.filter { it.isNotBlank() })
+            if (fUrl.isNotBlank()) {
+                fUrl.split(",").map { it.trim() }.filter { it.isNotBlank() }.forEach {
+                    if (it !in availableUrls) availableUrls.add(it)
+                }
+            }
         }
         currentUrlIndex = 0; totalSessionBytes = 0L
         lastRxBytes = TrafficStats.getUidRxBytes(android.os.Process.myUid())
@@ -380,7 +409,7 @@ class RadioService : Service() {
                 .setMediaMetadata(MediaMetadata.Builder().setTitle(currentTitle).build()).build()
             player.setMediaSource(mediaSourceFactory.createMediaSource(mediaItem))
             player.prepare(); player.playWhenReady = true
-            
+
             bufferTimeoutHandler.removeCallbacks(bufferTimeoutRunnable)
             bufferTimeoutHandler.postDelayed(bufferTimeoutRunnable, 25000L)
         } catch (t: Throwable) { toast("❌ خطأ في التشغيل") }
@@ -417,9 +446,9 @@ class RadioService : Service() {
         if (!folder.exists()) folder.mkdirs()
         return folder
     }
-    
+
     fun toggleRecording(): Boolean { if (isRecording) stopRecording() else startRecording(); return isRecording }
-    
+
     private fun startRecording() {
         try {
             val urls = synchronized(availableUrls) { availableUrls.toList() }
@@ -442,7 +471,7 @@ class RadioService : Service() {
             }
         } catch (t: Throwable) { isRecording = false }
     }
-    
+
     private fun stopRecording() { isRecording = false; recordingJob?.cancel(); recordingJob = null }
 
     fun startSleepTimer(minutes: Int) {
