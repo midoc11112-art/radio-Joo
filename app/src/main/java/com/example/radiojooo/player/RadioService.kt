@@ -492,8 +492,7 @@ class RadioService : Service() {
         return@withContext null
     }
 
-    private fun handlePlaybackError(error: PlaybackException, sessionId: Long = currentSessionId) {
-        if (currentSessionId != sessionId) return
+    pri        if (currentSessionId != sessionId) return
         if (isHealing.get() || isDestroyed.get()) return
 
         val currentUrl = synchronized(availableUrls) { availableUrls.getOrNull(currentUrlIndex) } ?: ""
@@ -556,7 +555,9 @@ class RadioService : Service() {
                 runCatching { dao.updateHealth(uuidToHeal, false, station.failCount + 1, System.currentTimeMillis()) }
                 runCatching { repoInstance.sendFeedback(uuidToHeal, "exo_error", false, errCap, countryCap, catCap) }
 
-                val healResult = withTimeoutOrNull(15000L) { runCatching { repoInstance.neuralHeal(station) }.getOrNull() }
+                // v110.0: neuralHeal now handles Cloud -> Worker -> Web Search -> Persistence
+                val healResult = withTimeoutOrNull(20000L) { runCatching { repoInstance.neuralHeal(station) }.getOrNull() }
+                
                 if (currentSessionId != sessionId) { isHealing.set(false); return@launch }
 
                 if (healResult != null && !isDestroyed.get()) {
@@ -632,35 +633,6 @@ class RadioService : Service() {
         else startForeground(NOTIFICATION_ID, buildNotification())
     }
 
-    // v109.7: 4-layer URL resolution (DB > SharedPrefs > Intent)
-    private fun resolveFreshUrls(uuid: String, intentPrimary: String, intentFallback: String): Pair<String, String> {
-        var dbPrimary: String? = null
-        var dbFallback: String? = null
-        try {
-            val dao = AppDatabase.getDatabase(applicationContext).stationDao()
-            // getStationById is suspend, so we cannot call it here synchronously.
-            // We use the backup path instead — SharedPrefs + Intent.
-            // The suspend call is done in a coroutine before this function in playStationInternal.
-        } catch (_: Throwable) {}
-
-        val healedPrimary = prefs.getString(KEY_HEALED_PREFIX + uuid, null)
-
-        val effectivePrimary = when {
-            !dbPrimary.isNullOrBlank() -> dbPrimary!!
-            !healedPrimary.isNullOrBlank() -> healedPrimary!!
-            intentPrimary.isNotBlank() -> intentPrimary
-            else -> ""
-        }
-
-        val effectiveFallback = when {
-            !dbFallback.isNullOrBlank() -> dbFallback!!
-            intentFallback.isNotBlank() -> intentFallback
-            else -> ""
-        }
-
-        return effectivePrimary to effectiveFallback
-    }
-
     private fun playStationInternal(title: String, uuid: String, pUrl: String, fUrl: String, bitrate: Int = 0, category: String = "", country: String = "") {
         val mySession = sessionCounter.incrementAndGet()
         currentSessionId = mySession
@@ -680,7 +652,6 @@ class RadioService : Service() {
 
         if (isAppInForeground) statsHandler.post(statsRunnable)
 
-        // v109.7: DB query is async — do it in serviceScope first
         serviceScope.launch {
             var dbPrimary: String? = null
             var dbFallback: String? = null
