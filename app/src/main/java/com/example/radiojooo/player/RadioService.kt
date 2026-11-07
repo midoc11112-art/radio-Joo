@@ -36,7 +36,7 @@ import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
 // ═══════════════════════════════════════════════════════════════════
-// كلاس الخنق الديناميكي المتكيف (يمنع التقطيع ويمنع سحب الميجابايت)
+// كلاس الخنق الديناميكي المتكيف (يمنع التقطيع ويقلل استهلاك البيانات)
 // ═══════════════════════════════════════════════════════════════════
 class ThrottlingDataSource(
     private val upstream: DataSource,
@@ -63,7 +63,6 @@ class ThrottlingDataSource(
             var elapsed = now - windowStartMs
             if (elapsed <= 0) elapsed = 1
 
-            // حساب السرعة المطلوبة ديناميكياً بناءً على البت ريت الحالي + هامش 20% منعاً للتقطيع
             val currentBitrate = bitrateProvider()
             val targetBytesPerSec = ((currentBitrate / 8) * 1.20).toLong().coerceAtLeast(6 * 1024L)
 
@@ -260,7 +259,6 @@ class RadioService : Service() {
                         bufferTimeoutHandler.removeCallbacks(bufferTimeoutRunnable)
                         hasPlayedSuccessfully = true
 
-                        // ترقية وتثبيت الرابط الناجح فوراً في قاعدة البيانات لمنع تكرار التحويل المرة القادمة
                         if (currentUrlIndex > 0 && currentStationUuid.isNotBlank()) {
                             promoteWorkingUrlToPrimary()
                         }
@@ -273,20 +271,23 @@ class RadioService : Service() {
         })
     }
 
-    // دالة ترقية وتثبيت الرابط الشغال بصفة دائمة في الموبايل
+    // ترقية وتثبيت الرابط الناجح باستخدام updateActiveStreamUrl المتاحة في StationDao
     private fun promoteWorkingUrlToPrimary() {
         serviceScope.launch {
             try {
                 val urls = synchronized(availableUrls) { availableUrls.toList() }
                 val workingUrl = urls.getOrNull(currentUrlIndex) ?: return@launch
                 val dao = AppDatabase.getDatabase(applicationContext).stationDao()
-                val station = dao.getStationById(currentStationUuid)
-                if (station != null) {
-                    val remainingUrls = urls.filter { it != workingUrl }.joinToString(",")
-                    dao.insertStation(station.copy(primaryUrl = workingUrl, fallbackUrl = remainingUrls))
-                    withContext(Dispatchers.Main) {
-                        toast("📌 تم تثبيت الرابط السريع كبث أساسي دائم")
-                    }
+                val remainingUrls = urls.filter { it != workingUrl }.joinToString(",")
+                
+                dao.updateActiveStreamUrl(
+                    uuid = currentStationUuid,
+                    newUrl = workingUrl,
+                    newFallback = remainingUrls
+                )
+                
+                withContext(Dispatchers.Main) {
+                    toast("📌 تم تثبيت الرابط السريع كبث أساسي دائم")
                 }
             } catch (_: Exception) {}
         }
@@ -550,4 +551,3 @@ class RadioService : Service() {
         } catch (t: Throwable) {}
     }
 }
-
