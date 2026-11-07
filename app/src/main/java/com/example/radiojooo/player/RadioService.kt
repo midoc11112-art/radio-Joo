@@ -339,7 +339,7 @@ class RadioService : Service() {
             trackSelector.parameters = trackSelector.buildUponParameters().setMaxAudioBitrate(32000).build()
         }
 
-        toast("📻 $title (32 Kbps Baseline)")
+        toast("📻 $title")
 
         if (isAppInForeground) statsHandler.post(statsRunnable)
 
@@ -493,4 +493,3 @@ class RadioService : Service() {
         } catch (t: Throwable) {}
     }
 }
-
