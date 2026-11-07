@@ -167,7 +167,7 @@ class RadioService : Service() {
             parameters = buildUponParameters()
                 .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
                 .setMaxAudioBitrate(currentBitrateCap)
-                .setAudioChannelCount(1)
+                .setMaxAudioChannelCount(1)
                 .build()
         }
 
@@ -493,3 +493,4 @@ class RadioService : Service() {
         } catch (t: Throwable) {}
     }
 }
+
