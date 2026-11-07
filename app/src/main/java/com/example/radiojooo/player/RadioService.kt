@@ -201,6 +201,7 @@ class RadioService : Service() {
         
         val urls = synchronized(availableUrls) { availableUrls.toList() }
         
+        // 1. التجربة على الرابط البديل التالي إن وجد
         if (currentUrlIndex < urls.size - 1) {
             currentUrlIndex++
             toast("🔄 تجربة رابط بديل (${currentUrlIndex + 1}/${urls.size})")
@@ -234,11 +235,12 @@ class RadioService : Service() {
                         } catch (t: Throwable) {} finally { isHealing.set(false) }
                     }
                 } else {
-                    toast("❌ المحطة غير متاحة حالياً")
+                    // 2. إذا فشلت جميع الروابط والرابط البديل من السيرفر: حذف المحطة نهائياً
+                    repoInstance.deleteDeadStation(uuidToHeal)
+                    toast("🗑️ تم حذف المحطة لعدم توفر رابط عمل")
                     isHealing.set(false)
                 }
             } catch (t: Throwable) {
-                toast("❌ المحطة غير متاحة حالياً")
                 isHealing.set(false)
             }
         }

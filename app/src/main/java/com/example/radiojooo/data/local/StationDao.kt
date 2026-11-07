@@ -10,10 +10,10 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface StationDao {
-    @Query("SELECT * FROM stations ORDER BY priority DESC, popularity DESC")
+    @Query("SELECT * FROM stations WHERE failCount < 3 OR isFavorite = 1 ORDER BY priority DESC, popularity DESC")
     fun getAllStations(): Flow<List<StationEntity>>
 
-    @Query("SELECT * FROM stations WHERE failCount < 30 OR isFavorite = 1 ORDER BY priority DESC, popularity DESC")
+    @Query("SELECT * FROM stations WHERE failCount < 3 OR isFavorite = 1 ORDER BY priority DESC, popularity DESC")
     fun getVisibleStations(): Flow<List<StationEntity>>
 
     @Query("SELECT * FROM stations WHERE uuid = :uuid LIMIT 1")
@@ -58,8 +58,12 @@ interface StationDao {
         ts: Long = System.currentTimeMillis()
     )
 
-    @Query("DELETE FROM stations WHERE isFavorite = 0 AND lastUrlWorks = 0 AND failCount >= 30")
+    // حذف المحطة نهائياً إذا ثبت تلفها وليست مفضلة
+    @Query("DELETE FROM stations WHERE isFavorite = 0 AND (failCount >= 3 OR lastUrlWorks = 0)")
     suspend fun cleanupDeadStations()
+
+    @Query("DELETE FROM stations WHERE uuid = :uuid AND isFavorite = 0")
+    suspend fun deleteDeadStation(uuid: String)
 
     @Query("UPDATE stations SET lastUrlWorks = NULL, failCount = 0")
     suspend fun resetAllHealthStatus()

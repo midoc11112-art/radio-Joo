@@ -86,11 +86,8 @@ class RadioRepository(
         return@withContext null
     }
 
-    suspend fun sendFeedback(uuid: String, source: String, success: Boolean, errorType: String = "none", country: String = "", category: String = "") = withContext(Dispatchers.IO) {
-        try {
-            val fb = "$PROXY_BASE_URL/feedback?uuid=${URLEncoder.encode(uuid, "UTF-8")}&source=${URLEncoder.encode(source, "UTF-8")}&success=$success&error=${URLEncoder.encode(errorType, "UTF-8")}&country=${URLEncoder.encode(country, "UTF-8")}&category=${URLEncoder.encode(category, "UTF-8")}"
-            apiClient.newCall(Request.Builder().url(fb).build()).execute().close()
-        } catch (_: Throwable) {}
+    suspend fun deleteDeadStation(uuid: String) = withContext(Dispatchers.IO) {
+        stationDao.deleteDeadStation(uuid)
     }
 
     suspend fun fetchStationsFromServer(): Int = withContext(Dispatchers.IO) {
@@ -206,12 +203,6 @@ class RadioRepository(
     }
 
     suspend fun toggleFavorite(uuid: String, currentStatus: Boolean) = stationDao.updateFavoriteStatus(uuid, !currentStatus)
-
-    fun wrapProxy(rawUrl: String): String {
-        if (rawUrl.isBlank()) return ""
-        if (rawUrl.contains("radio-joo-proxy")) return rawUrl
-        return try { "$PROXY_BASE_URL/?url=" + URLEncoder.encode(rawUrl, "UTF-8") } catch (t: Throwable) { "$PROXY_BASE_URL/?url=" + rawUrl }
-    }
 
     private fun parseStations(arr: org.json.JSONArray): List<StationEntity> {
         val list = mutableListOf<StationEntity>()
