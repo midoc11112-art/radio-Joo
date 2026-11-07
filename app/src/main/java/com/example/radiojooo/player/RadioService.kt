@@ -36,11 +36,11 @@ import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
 // ═══════════════════════════════════════════════════════════════════
-// كلاس الخنق الفيزيائي لمجرى البيانات (يكتم السرعة عند 12KB/s كحد أقصى)
+// كلاس الخنق الديناميكي المتكيف (يمنع التقطيع ويمنع سحب الميجابايت)
 // ═══════════════════════════════════════════════════════════════════
 class ThrottlingDataSource(
     private val upstream: DataSource,
-    private val maxBytesPerSec: Long = 12 * 1024L // 12 KB/s Max (~96 Kbps)
+    private val bitrateProvider: () -> Int
 ) : DataSource {
     private var bytesReadWindow = 0L
     private var windowStartMs = 0L
@@ -62,11 +62,15 @@ class ThrottlingDataSource(
             val now = SystemClock.elapsedRealtime()
             var elapsed = now - windowStartMs
             if (elapsed <= 0) elapsed = 1
-            
-            val expectedMs = (bytesReadWindow * 1000L) / maxBytesPerSec
+
+            // حساب السرعة المطلوبة ديناميكياً بناءً على البت ريت الحالي + هامش 20% منعاً للتقطيع
+            val currentBitrate = bitrateProvider()
+            val targetBytesPerSec = ((currentBitrate / 8) * 1.20).toLong().coerceAtLeast(6 * 1024L)
+
+            val expectedMs = (bytesReadWindow * 1000L) / targetBytesPerSec
             if (expectedMs > elapsed) {
                 val sleepMs = expectedMs - elapsed
-                if (sleepMs in 1..2000) {
+                if (sleepMs in 1..1500) {
                     try { Thread.sleep(sleepMs) } catch (_: Exception) {}
                 }
             }
@@ -222,8 +226,8 @@ class RadioService : Service() {
         }
 
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(1000, 2000, 500, 1000)
-            .setTargetBufferBytes(128 * 1024)
+            .setBufferDurationsMs(1500, 3000, 800, 1500)
+            .setTargetBufferBytes(256 * 1024)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
@@ -232,9 +236,8 @@ class RadioService : Service() {
             .setUserAgent("Mozilla/5.0 (Linux; Android 13) ExoPlayer/1.6.1")
             .setDefaultRequestProperties(mapOf("Accept" to "audio/*", "Icy-MetaData" to "0"))
 
-        // ربط الخنق الفيزيائي بـ ExoPlayer (سقف 12KB/sec كحد أقصى مطلق)
         val throttledFactory = DataSource.Factory {
-            ThrottlingDataSource(httpDataSourceFactory.createDataSource(), 12 * 1024L)
+            ThrottlingDataSource(httpDataSourceFactory.createDataSource()) { currentBitrateCap }
         }
 
         mediaSourceFactory = DefaultMediaSourceFactory(this).setDataSourceFactory(throttledFactory)
@@ -256,6 +259,11 @@ class RadioService : Service() {
                         acquireLocks()
                         bufferTimeoutHandler.removeCallbacks(bufferTimeoutRunnable)
                         hasPlayedSuccessfully = true
+
+                        // ترقية وتثبيت الرابط الناجح فوراً في قاعدة البيانات لمنع تكرار التحويل المرة القادمة
+                        if (currentUrlIndex > 0 && currentStationUuid.isNotBlank()) {
+                            promoteWorkingUrlToPrimary()
+                        }
                     }
                 } catch (t: Throwable) {}
             }
@@ -263,6 +271,25 @@ class RadioService : Service() {
                 try { if (state == Player.STATE_READY) bufferTimeoutHandler.removeCallbacks(bufferTimeoutRunnable) } catch (t: Throwable) {}
             }
         })
+    }
+
+    // دالة ترقية وتثبيت الرابط الشغال بصفة دائمة في الموبايل
+    private fun promoteWorkingUrlToPrimary() {
+        serviceScope.launch {
+            try {
+                val urls = synchronized(availableUrls) { availableUrls.toList() }
+                val workingUrl = urls.getOrNull(currentUrlIndex) ?: return@launch
+                val dao = AppDatabase.getDatabase(applicationContext).stationDao()
+                val station = dao.getStationById(currentStationUuid)
+                if (station != null) {
+                    val remainingUrls = urls.filter { it != workingUrl }.joinToString(",")
+                    dao.insertOrUpdate(station.copy(primaryUrl = workingUrl, fallbackUrl = remainingUrls))
+                    withContext(Dispatchers.Main) {
+                        toast("📌 تم تثبيت الرابط السريع كبث أساسي دائم")
+                    }
+                }
+            } catch (_: Exception) {}
+        }
     }
 
     private fun handlePlaybackError(error: PlaybackException) {
@@ -369,7 +396,7 @@ class RadioService : Service() {
             trackSelector.parameters = trackSelector.buildUponParameters().setMaxAudioBitrate(32000).build()
         }
 
-        toast("📻 $title (Hardware Rate Limited)")
+        toast("📻 $title")
 
         if (isAppInForeground) statsHandler.post(statsRunnable)
 
