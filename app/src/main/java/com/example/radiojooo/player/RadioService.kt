@@ -14,10 +14,7 @@ import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 import androidx.media3.common.*
-import androidx.media3.datasource.DataSource
-import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
-import androidx.media3.datasource.TransferListener
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
@@ -34,57 +31,6 @@ import java.net.URL
 import java.net.URLEncoder
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
-
-// ═══════════════════════════════════════════════════════════════════
-// كلاس الخنق الديناميكي المتكيف (يمنع التقطيع ويقلل استهلاك البيانات)
-// ═══════════════════════════════════════════════════════════════════
-class ThrottlingDataSource(
-    private val upstream: DataSource,
-    private val bitrateProvider: () -> Int
-) : DataSource {
-    private var bytesReadWindow = 0L
-    private var windowStartMs = 0L
-
-    override fun addTransferListener(transferListener: TransferListener) {
-        upstream.addTransferListener(transferListener)
-    }
-
-    override fun open(dataSpec: DataSpec): Long {
-        bytesReadWindow = 0L
-        windowStartMs = SystemClock.elapsedRealtime()
-        return upstream.open(dataSpec)
-    }
-
-    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
-        val read = upstream.read(buffer, offset, length)
-        if (read > 0) {
-            bytesReadWindow += read
-            val now = SystemClock.elapsedRealtime()
-            var elapsed = now - windowStartMs
-            if (elapsed <= 0) elapsed = 1
-
-            val currentBitrate = bitrateProvider()
-            val targetBytesPerSec = ((currentBitrate / 8) * 1.20).toLong().coerceAtLeast(6 * 1024L)
-
-            val expectedMs = (bytesReadWindow * 1000L) / targetBytesPerSec
-            if (expectedMs > elapsed) {
-                val sleepMs = expectedMs - elapsed
-                if (sleepMs in 1..1500) {
-                    try { Thread.sleep(sleepMs) } catch (_: Exception) {}
-                }
-            }
-            if (elapsed >= 1000) {
-                windowStartMs = SystemClock.elapsedRealtime()
-                bytesReadWindow = 0L
-            }
-        }
-        return read
-    }
-
-    override fun getUri(): Uri? = upstream.getUri()
-    override fun getResponseHeaders(): Map<String, List<String>> = upstream.getResponseHeaders()
-    override fun close() = upstream.close()
-}
 
 class RadioService : Service() {
 
@@ -225,21 +171,17 @@ class RadioService : Service() {
         }
 
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(1500, 3000, 800, 1500)
+            .setBufferDurationsMs(2000, 5000, 1000, 1500)
             .setTargetBufferBytes(256 * 1024)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
-        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+        val dataSourceFactory = DefaultHttpDataSource.Factory()
             .setConnectTimeoutMs(8000).setReadTimeoutMs(8000).setAllowCrossProtocolRedirects(true)
             .setUserAgent("Mozilla/5.0 (Linux; Android 13) ExoPlayer/1.6.1")
             .setDefaultRequestProperties(mapOf("Accept" to "audio/*", "Icy-MetaData" to "0"))
 
-        val throttledFactory = DataSource.Factory {
-            ThrottlingDataSource(httpDataSourceFactory.createDataSource()) { currentBitrateCap }
-        }
-
-        mediaSourceFactory = DefaultMediaSourceFactory(this).setDataSourceFactory(throttledFactory)
+        mediaSourceFactory = DefaultMediaSourceFactory(this).setDataSourceFactory(dataSourceFactory)
 
         player = ExoPlayer.Builder(this, renderersFactory)
             .setTrackSelector(trackSelector).setLoadControl(loadControl).setMediaSourceFactory(mediaSourceFactory)
@@ -271,7 +213,6 @@ class RadioService : Service() {
         })
     }
 
-    // ترقية وتثبيت الرابط الناجح باستخدام updateActiveStreamUrl المتاحة في StationDao
     private fun promoteWorkingUrlToPrimary() {
         serviceScope.launch {
             try {
@@ -397,7 +338,7 @@ class RadioService : Service() {
             trackSelector.parameters = trackSelector.buildUponParameters().setMaxAudioBitrate(32000).build()
         }
 
-        toast("📻 $title")
+        toast("📻 $title (32 Kbps Start)")
 
         if (isAppInForeground) statsHandler.post(statsRunnable)
 
