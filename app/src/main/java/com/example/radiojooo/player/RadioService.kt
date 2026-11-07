@@ -283,7 +283,7 @@ class RadioService : Service() {
                 val station = dao.getStationById(currentStationUuid)
                 if (station != null) {
                     val remainingUrls = urls.filter { it != workingUrl }.joinToString(",")
-                    dao.insertOrUpdate(station.copy(primaryUrl = workingUrl, fallbackUrl = remainingUrls))
+                    dao.insertStation(station.copy(primaryUrl = workingUrl, fallbackUrl = remainingUrls))
                     withContext(Dispatchers.Main) {
                         toast("📌 تم تثبيت الرابط السريع كبث أساسي دائم")
                     }
@@ -550,3 +550,4 @@ class RadioService : Service() {
         } catch (t: Throwable) {}
     }
 }
+
