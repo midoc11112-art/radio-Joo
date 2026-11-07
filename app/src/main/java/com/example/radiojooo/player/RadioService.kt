@@ -163,17 +163,17 @@ class RadioService : Service() {
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters()
                 .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
-                .setMaxAudioBitrate(48000)
+                .setMaxAudioBitrate(128000)
                 .build()
         }
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(1000, 3000, 1000, 1000)
-            .setTargetBufferBytes(256 * 1024)
+            .setBufferDurationsMs(2500, 8000, 1500, 2500)
+            .setTargetBufferBytes(1024 * 1024)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(8000).setReadTimeoutMs(8000).setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(10000).setReadTimeoutMs(10000).setAllowCrossProtocolRedirects(true)
             .setUserAgent("Mozilla/5.0 (Linux; Android 13) ExoPlayer/1.6.1")
             .setDefaultRequestProperties(mapOf("Accept" to "audio/*", "Icy-MetaData" to "0"))
         mediaSourceFactory = DefaultMediaSourceFactory(this).setDataSourceFactory(dataSourceFactory)
