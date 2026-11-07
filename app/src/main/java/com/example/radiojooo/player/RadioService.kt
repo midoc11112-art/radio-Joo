@@ -171,9 +171,10 @@ class RadioService : Service() {
                 .build()
         }
 
+        // تخفيض البافر لـ 128KB فقط لقتل الاندفاع الابتدائي للبيانات
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(1500, 4000, 1000, 1500)
-            .setTargetBufferBytes(512 * 1024)
+            .setBufferDurationsMs(1000, 2000, 500, 1000)
+            .setTargetBufferBytes(128 * 1024)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
@@ -210,7 +211,7 @@ class RadioService : Service() {
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    // محرك التدرج التكيفي ومنع ترحيل السقف عند التبديل للرابط الجديد
+    // سلم التدرج التكيفي (32k -> 64k -> 96k MAX) وتصفيره عند التبديل
     // ═══════════════════════════════════════════════════════════════════
     private fun handlePlaybackError(error: PlaybackException) {
         if (isHealing.get() || isDestroyed.get()) return
@@ -218,12 +219,12 @@ class RadioService : Service() {
         val urls = synchronized(availableUrls) { availableUrls.toList() }
         if (urls.isEmpty()) return
 
-        // 1. محاولة رفع السقف للرابط الحالي فقط (32k -> 64k -> 128k)
-        if (currentBitrateCap < 128000) {
-            currentBitrateCap = if (currentBitrateCap == 32000) 64000 else 128000
+        // 1. التدرج التكيفي للرابط الحالي حتى 96 Kbps كحد أقصى مطلق
+        if (currentBitrateCap < 96000) {
+            currentBitrateCap = if (currentBitrateCap == 32000) 64000 else 96000
             currentBitrate = currentBitrateCap / 1000
             
-            toast("📶 تجربة رفع الجودة إلى ${currentBitrate}Kbps للرابط الحالي")
+            toast("📶 ترفيع البت ريت إلى ${currentBitrate}Kbps")
             
             trackSelector.parameters = trackSelector.buildUponParameters()
                 .setMaxAudioBitrate(currentBitrateCap)
@@ -236,11 +237,10 @@ class RadioService : Service() {
             }
         }
 
-        // 2. إذا فشل الرابط الحالي حتى عند 128k، ننتقل للرابط البديل مع تصفير وإعادة ضبط السقف لـ 32k!
+        // 2. إذا فشل الرابط الحالي عند 96k، ننتقل للرابط البديل وتصفير السقف لـ 32k فوراً!
         if (currentUrlIndex < urls.size - 1) {
             currentUrlIndex++
             
-            // إعادة ضبط حاسمة ومباشرة للسقف لمنع ترحيل الـ 128K للرابط الجديد
             currentBitrateCap = 32000
             currentBitrate = 32
             
@@ -248,7 +248,7 @@ class RadioService : Service() {
                 .setMaxAudioBitrate(32000)
                 .build()
             
-            toast("🔄 الانتقال للرابط البديل (${currentUrlIndex + 1}/${urls.size}) وتصفير السقف إلى 32Kbps")
+            toast("🔄 الانتقال للرابط البديل (${currentUrlIndex + 1}/${urls.size}) وتصفير السقف لـ 32Kbps")
             statsHandler.post {
                 if (!isDestroyed.get()) startStream(urls[currentUrlIndex], useProxy = true)
             }
@@ -313,14 +313,14 @@ class RadioService : Service() {
         currentCategory = category; currentCountry = country
         retryCount = 0; hasPlayedSuccessfully = false
 
-        // تصفية السقف دائماً لـ 32K عند طلب تشغيل أي محطة جديدة
+        // تصفية السقف دائماً لـ 32K عند طلب أي محطة جديدة
         currentBitrateCap = 32000
         currentBitrate = 32
         if (::trackSelector.isInitialized) {
             trackSelector.parameters = trackSelector.buildUponParameters().setMaxAudioBitrate(32000).build()
         }
 
-        toast("📻 $title (32 Kbps Baseline)")
+        toast("📻 $title (32 Kbps Max Saver)")
 
         if (isAppInForeground) statsHandler.post(statsRunnable)
 
