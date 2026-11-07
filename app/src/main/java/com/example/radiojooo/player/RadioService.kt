@@ -66,7 +66,7 @@ class RadioService : Service() {
     private val availableUrls = mutableListOf<String>()
     private var currentUrlIndex = 0
 
-    // السقف الحالي للبت ريت - يبدأ دائماً بـ 32 Kbps
+    // السقف الحالي للبت ريت - يبدأ بـ 32 Kbps على جميع أنواع الاتصالات (Wi-Fi / Hotspot / Data)
     private var currentBitrateCap = 32000
 
     var currentTitle: String = "راديو جو PRO"
@@ -164,6 +164,7 @@ class RadioService : Service() {
     private fun initializePlayer() {
         val renderersFactory = DefaultRenderersFactory(this).apply { setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF) }
         
+        // تعطيل مسار الفيديو وتثبيت البت ريت الأقصى كأمر مطلق على أي شبكة
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters()
                 .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
@@ -171,7 +172,7 @@ class RadioService : Service() {
                 .build()
         }
 
-        // تخفيض البافر لـ 128KB فقط لقتل الاندفاع الابتدائي للبيانات
+        // قفل الـ Buffer الصارم عند 128KB فقط لجميع شبكات الواي فاي والموبايل داتا
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(1000, 2000, 500, 1000)
             .setTargetBufferBytes(128 * 1024)
@@ -210,16 +211,13 @@ class RadioService : Service() {
         })
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    // سلم التدرج التكيفي (32k -> 64k -> 96k MAX) وتصفيره عند التبديل
-    // ═══════════════════════════════════════════════════════════════════
     private fun handlePlaybackError(error: PlaybackException) {
         if (isHealing.get() || isDestroyed.get()) return
 
         val urls = synchronized(availableUrls) { availableUrls.toList() }
         if (urls.isEmpty()) return
 
-        // 1. التدرج التكيفي للرابط الحالي حتى 96 Kbps كحد أقصى مطلق
+        // رفع البت ريت تدريجياً بنفس الصرامة حتى 96Kbps كحد أقصى
         if (currentBitrateCap < 96000) {
             currentBitrateCap = if (currentBitrateCap == 32000) 64000 else 96000
             currentBitrate = currentBitrateCap / 1000
@@ -237,7 +235,7 @@ class RadioService : Service() {
             }
         }
 
-        // 2. إذا فشل الرابط الحالي عند 96k، ننتقل للرابط البديل وتصفير السقف لـ 32k فوراً!
+        // تصفية وإعادة ضبط السقف فوراً لـ 32K عند تجربة أي رابط بديل
         if (currentUrlIndex < urls.size - 1) {
             currentUrlIndex++
             
@@ -313,14 +311,13 @@ class RadioService : Service() {
         currentCategory = category; currentCountry = country
         retryCount = 0; hasPlayedSuccessfully = false
 
-        // تصفية السقف دائماً لـ 32K عند طلب أي محطة جديدة
         currentBitrateCap = 32000
         currentBitrate = 32
         if (::trackSelector.isInitialized) {
             trackSelector.parameters = trackSelector.buildUponParameters().setMaxAudioBitrate(32000).build()
         }
 
-        toast("📻 $title (32 Kbps Max Saver)")
+        toast("📻 $title (Universal 32K Saver)")
 
         if (isAppInForeground) statsHandler.post(statsRunnable)
 
@@ -395,7 +392,8 @@ class RadioService : Service() {
             }
             val wm = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
             if (wifiLock == null || wifiLock?.isHeld == false) {
-                wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "RadioJoo::WifiLock")
+                // وضع WifiManager عادي لمنع فتح أنابيب التدفق العالي بالخلفية
+                wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL, "RadioJoo::WifiLock")
                 wifiLock?.acquire()
             }
         } catch (t: Throwable) {}
