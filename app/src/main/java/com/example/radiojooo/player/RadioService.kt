@@ -161,11 +161,19 @@ class RadioService : Service() {
     private fun initializePlayer() {
         val renderersFactory = DefaultRenderersFactory(this).apply { setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF) }
         trackSelector = DefaultTrackSelector(this).apply {
-            parameters = buildUponParameters().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true).setMaxAudioBitrate(48000).build()
+            parameters = buildUponParameters()
+                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
+                .setMaxAudioBitrate(48000)
+                .build()
         }
-        val loadControl = DefaultLoadControl.Builder().setBufferDurationsMs(15000, 60000, 2500, 5000).setTargetBufferBytes(-1).build()
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(1500, 4000, 1000, 1500)
+            .setTargetBufferBytes(1024 * 1024)
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .build()
+
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(15000).setReadTimeoutMs(15000).setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(10000).setReadTimeoutMs(10000).setAllowCrossProtocolRedirects(true)
             .setUserAgent("Mozilla/5.0 (Linux; Android 13) ExoPlayer/1.6.1")
             .setDefaultRequestProperties(mapOf("Accept" to "audio/*", "Icy-MetaData" to "0"))
         mediaSourceFactory = DefaultMediaSourceFactory(this).setDataSourceFactory(dataSourceFactory)
@@ -198,10 +206,8 @@ class RadioService : Service() {
 
     private fun handlePlaybackError(error: PlaybackException) {
         if (isHealing.get() || isDestroyed.get()) return
-        
         val urls = synchronized(availableUrls) { availableUrls.toList() }
         
-        // 1. التجربة على الرابط البديل التالي إن وجد
         if (currentUrlIndex < urls.size - 1) {
             currentUrlIndex++
             toast("🔄 تجربة رابط بديل (${currentUrlIndex + 1}/${urls.size})")
@@ -211,39 +217,7 @@ class RadioService : Service() {
             return
         }
 
-        if (currentStationUuid.isBlank() || isDestroyed.get()) return
-        if (!isHealing.compareAndSet(false, true)) return
-
-        val uuidToHeal = currentStationUuid
-
-        serviceScope.launch {
-            try {
-                val dao = AppDatabase.getDatabase(applicationContext).stationDao()
-                val station = dao.getStationById(uuidToHeal) ?: run { isHealing.set(false); return@launch }
-
-                val healResult = withTimeoutOrNull(1000L) { runCatching { repoInstance.neuralHeal(station) }.getOrNull() }
-
-                if (healResult != null && !isDestroyed.get() && healResult.url.isNotBlank()) {
-                    val newUrl = healResult.url
-                    statsHandler.post {
-                        try {
-                            if (!isDestroyed.get() && ::player.isInitialized) {
-                                synchronized(availableUrls) { availableUrls.clear(); availableUrls.add(newUrl) }
-                                currentUrlIndex = 0; retryCount = 0; hasPlayedSuccessfully = false
-                                startStream(newUrl, useProxy = true)
-                            }
-                        } catch (t: Throwable) {} finally { isHealing.set(false) }
-                    }
-                } else {
-                    // 2. إذا فشلت جميع الروابط والرابط البديل من السيرفر: حذف المحطة نهائياً
-                    repoInstance.deleteDeadStation(uuidToHeal)
-                    toast("🗑️ تم حذف المحطة لعدم توفر رابط عمل")
-                    isHealing.set(false)
-                }
-            } catch (t: Throwable) {
-                isHealing.set(false)
-            }
-        }
+        toast("⚠️ انقطاع مؤقت للبث")
     }
 
     private fun createNotificationChannel() {
@@ -345,7 +319,7 @@ class RadioService : Service() {
         if (!::player.isInitialized || isDestroyed.get()) return
         try {
             player.stop(); player.clearMediaItems(); isUsingProxy = useProxy
-            val finalUrl = if (useProxy) cloudflareProxyBase + URLEncoder.encode(streamUrl, "UTF-8") + "&bitrate=48" else streamUrl
+            val finalUrl = if (useProxy) cloudflareProxyBase + URLEncoder.encode(streamUrl, "UTF-8") else streamUrl
             val mimeType = when {
                 streamUrl.contains(".m3u8", true) -> MimeTypes.APPLICATION_M3U8
                 streamUrl.contains(".aac", true) -> MimeTypes.AUDIO_AAC
