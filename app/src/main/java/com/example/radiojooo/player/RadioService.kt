@@ -167,6 +167,7 @@ class RadioService : Service() {
             parameters = buildUponParameters()
                 .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
                 .setMaxAudioBitrate(currentBitrateCap)
+                .setAudioChannelCount(1)
                 .build()
         }
 
@@ -338,7 +339,7 @@ class RadioService : Service() {
             trackSelector.parameters = trackSelector.buildUponParameters().setMaxAudioBitrate(32000).build()
         }
 
-        toast("📻 $title (32 Kbps Start)")
+        toast("📻 $title (32 Kbps Baseline)")
 
         if (isAppInForeground) statsHandler.post(statsRunnable)
 
