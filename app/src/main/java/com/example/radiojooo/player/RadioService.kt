@@ -66,8 +66,8 @@ class RadioService : Service() {
     private val availableUrls = mutableListOf<String>()
     private var currentUrlIndex = 0
 
-    // سلم التدرج التكيفي للبت ريت
-    private var currentBitrateCap = 32000 // البدء بـ 32 Kbps لتوفير أقصى انترنت
+    // السقف الحالي للبت ريت - يبدأ دائماً بـ 32 Kbps
+    private var currentBitrateCap = 32000
 
     var currentTitle: String = "راديو جو PRO"
     var currentBitrate: Int = 32
@@ -167,7 +167,7 @@ class RadioService : Service() {
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters()
                 .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
-                .setMaxAudioBitrate(currentBitrateCap) // تطبيق البت ريت الحالي
+                .setMaxAudioBitrate(currentBitrateCap)
                 .build()
         }
 
@@ -210,23 +210,25 @@ class RadioService : Service() {
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    // تطبيق التدرج التكيفي: 32K -> 64K -> 128K عند حدوث أخطاء تشغيل
+    // محرك التدرج التكيفي ومنع ترحيل السقف عند التبديل للرابط الجديد
     // ═══════════════════════════════════════════════════════════════════
     private fun handlePlaybackError(error: PlaybackException) {
         if (isHealing.get() || isDestroyed.get()) return
 
-        // الخطوة 1: الرفع التكيفي للبت ريت إذا كنا في المستوى الأدنى
+        val urls = synchronized(availableUrls) { availableUrls.toList() }
+        if (urls.isEmpty()) return
+
+        // 1. محاولة رفع السقف للرابط الحالي فقط (32k -> 64k -> 128k)
         if (currentBitrateCap < 128000) {
             currentBitrateCap = if (currentBitrateCap == 32000) 64000 else 128000
             currentBitrate = currentBitrateCap / 1000
             
-            toast("📶 ترفيع البت ريت إلى ${currentBitrate}Kbps لضمان الثبات")
+            toast("📶 تجربة رفع الجودة إلى ${currentBitrate}Kbps للرابط الحالي")
             
             trackSelector.parameters = trackSelector.buildUponParameters()
                 .setMaxAudioBitrate(currentBitrateCap)
                 .build()
 
-            val urls = synchronized(availableUrls) { availableUrls.toList() }
             val curUrl = urls.getOrNull(currentUrlIndex)
             if (curUrl != null) {
                 statsHandler.post { if (!isDestroyed.get()) startStream(curUrl, useProxy = true) }
@@ -234,15 +236,19 @@ class RadioService : Service() {
             }
         }
 
-        // الخطوة 2: تجربة الرابط البديل إذا استمرت المشكلة عند 128K
-        val urls = synchronized(availableUrls) { availableUrls.toList() }
+        // 2. إذا فشل الرابط الحالي حتى عند 128k، ننتقل للرابط البديل مع تصفير وإعادة ضبط السقف لـ 32k!
         if (currentUrlIndex < urls.size - 1) {
             currentUrlIndex++
-            currentBitrateCap = 32000 // إعادة التدرج من 32K للرابط الجديد
-            currentBitrate = 32
-            trackSelector.parameters = trackSelector.buildUponParameters().setMaxAudioBitrate(32000).build()
             
-            toast("🔄 تجربة رابط بديل (${currentUrlIndex + 1}/${urls.size})")
+            // إعادة ضبط حاسمة ومباشرة للسقف لمنع ترحيل الـ 128K للرابط الجديد
+            currentBitrateCap = 32000
+            currentBitrate = 32
+            
+            trackSelector.parameters = trackSelector.buildUponParameters()
+                .setMaxAudioBitrate(32000)
+                .build()
+            
+            toast("🔄 الانتقال للرابط البديل (${currentUrlIndex + 1}/${urls.size}) وتصفير السقف إلى 32Kbps")
             statsHandler.post {
                 if (!isDestroyed.get()) startStream(urls[currentUrlIndex], useProxy = true)
             }
@@ -307,14 +313,14 @@ class RadioService : Service() {
         currentCategory = category; currentCountry = country
         retryCount = 0; hasPlayedSuccessfully = false
 
-        // إعادة ضبط السلم عند فتح كل محطة جديدة (البدء فوراً بـ 32K)
+        // تصفية السقف دائماً لـ 32K عند طلب تشغيل أي محطة جديدة
         currentBitrateCap = 32000
         currentBitrate = 32
         if (::trackSelector.isInitialized) {
             trackSelector.parameters = trackSelector.buildUponParameters().setMaxAudioBitrate(32000).build()
         }
 
-        toast("📻 $title (32 Kbps Saver)")
+        toast("📻 $title (32 Kbps Baseline)")
 
         if (isAppInForeground) statsHandler.post(statsRunnable)
 
