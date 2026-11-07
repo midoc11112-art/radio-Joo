@@ -66,8 +66,11 @@ class RadioService : Service() {
     private val availableUrls = mutableListOf<String>()
     private var currentUrlIndex = 0
 
+    // السقف الحالي للبت ريت - يبدأ دائماً بـ 32 Kbps
+    private var currentBitrateCap = 32000
+
     var currentTitle: String = "راديو جو PRO"
-    var currentBitrate: Int = 0
+    var currentBitrate: Int = 32
     var currentCategory: String = ""
     var currentCountry: String = ""
     var currentStationUuid: String = ""
@@ -135,7 +138,7 @@ class RadioService : Service() {
                         it.getStringExtra("UUID") ?: "",
                         it.getStringExtra("PRIMARY_URL") ?: "",
                         it.getStringExtra("FALLBACK_URL") ?: "",
-                        it.getIntExtra("BITRATE", 0),
+                        it.getIntExtra("BITRATE", 32),
                         it.getStringExtra("CATEGORY") ?: "",
                         it.getStringExtra("COUNTRY") ?: ""
                     )
@@ -160,12 +163,23 @@ class RadioService : Service() {
 
     private fun initializePlayer() {
         val renderersFactory = DefaultRenderersFactory(this).apply { setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF) }
+        
         trackSelector = DefaultTrackSelector(this).apply {
-            parameters = buildUponParameters().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true).setMaxAudioBitrate(48000).build()
+            parameters = buildUponParameters()
+                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
+                .setMaxAudioBitrate(currentBitrateCap)
+                .build()
         }
-        val loadControl = DefaultLoadControl.Builder().setBufferDurationsMs(15000, 60000, 2500, 5000).setTargetBufferBytes(-1).build()
+
+        // تخفيض البافر لـ 128KB فقط لقتل الاندفاع الابتدائي للبيانات
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(1000, 2000, 500, 1000)
+            .setTargetBufferBytes(128 * 1024)
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .build()
+
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(15000).setReadTimeoutMs(15000).setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(8000).setReadTimeoutMs(8000).setAllowCrossProtocolRedirects(true)
             .setUserAgent("Mozilla/5.0 (Linux; Android 13) ExoPlayer/1.6.1")
             .setDefaultRequestProperties(mapOf("Accept" to "audio/*", "Icy-MetaData" to "0"))
         mediaSourceFactory = DefaultMediaSourceFactory(this).setDataSourceFactory(dataSourceFactory)
@@ -196,54 +210,52 @@ class RadioService : Service() {
         })
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    // سلم التدرج التكيفي (32k -> 64k -> 96k MAX) وتصفيره عند التبديل
+    // ═══════════════════════════════════════════════════════════════════
     private fun handlePlaybackError(error: PlaybackException) {
         if (isHealing.get() || isDestroyed.get()) return
-        
+
         val urls = synchronized(availableUrls) { availableUrls.toList() }
-        
-        // 1. التجربة على الرابط البديل التالي إن وجد
+        if (urls.isEmpty()) return
+
+        // 1. التدرج التكيفي للرابط الحالي حتى 96 Kbps كحد أقصى مطلق
+        if (currentBitrateCap < 96000) {
+            currentBitrateCap = if (currentBitrateCap == 32000) 64000 else 96000
+            currentBitrate = currentBitrateCap / 1000
+            
+            toast("📶 ترفيع البت ريت إلى ${currentBitrate}Kbps")
+            
+            trackSelector.parameters = trackSelector.buildUponParameters()
+                .setMaxAudioBitrate(currentBitrateCap)
+                .build()
+
+            val curUrl = urls.getOrNull(currentUrlIndex)
+            if (curUrl != null) {
+                statsHandler.post { if (!isDestroyed.get()) startStream(curUrl, useProxy = true) }
+                return
+            }
+        }
+
+        // 2. إذا فشل الرابط الحالي عند 96k، ننتقل للرابط البديل وتصفير السقف لـ 32k فوراً!
         if (currentUrlIndex < urls.size - 1) {
             currentUrlIndex++
-            toast("🔄 تجربة رابط بديل (${currentUrlIndex + 1}/${urls.size})")
+            
+            currentBitrateCap = 32000
+            currentBitrate = 32
+            
+            trackSelector.parameters = trackSelector.buildUponParameters()
+                .setMaxAudioBitrate(32000)
+                .build()
+            
+            toast("🔄 الانتقال للرابط البديل (${currentUrlIndex + 1}/${urls.size}) وتصفير السقف لـ 32Kbps")
             statsHandler.post {
                 if (!isDestroyed.get()) startStream(urls[currentUrlIndex], useProxy = true)
             }
             return
         }
 
-        if (currentStationUuid.isBlank() || isDestroyed.get()) return
-        if (!isHealing.compareAndSet(false, true)) return
-
-        val uuidToHeal = currentStationUuid
-
-        serviceScope.launch {
-            try {
-                val dao = AppDatabase.getDatabase(applicationContext).stationDao()
-                val station = dao.getStationById(uuidToHeal) ?: run { isHealing.set(false); return@launch }
-
-                val healResult = withTimeoutOrNull(1000L) { runCatching { repoInstance.neuralHeal(station) }.getOrNull() }
-
-                if (healResult != null && !isDestroyed.get() && healResult.url.isNotBlank()) {
-                    val newUrl = healResult.url
-                    statsHandler.post {
-                        try {
-                            if (!isDestroyed.get() && ::player.isInitialized) {
-                                synchronized(availableUrls) { availableUrls.clear(); availableUrls.add(newUrl) }
-                                currentUrlIndex = 0; retryCount = 0; hasPlayedSuccessfully = false
-                                startStream(newUrl, useProxy = true)
-                            }
-                        } catch (t: Throwable) {} finally { isHealing.set(false) }
-                    }
-                } else {
-                    // 2. إذا فشلت جميع الروابط والرابط البديل من السيرفر: حذف المحطة نهائياً
-                    repoInstance.deleteDeadStation(uuidToHeal)
-                    toast("🗑️ تم حذف المحطة لعدم توفر رابط عمل")
-                    isHealing.set(false)
-                }
-            } catch (t: Throwable) {
-                isHealing.set(false)
-            }
-        }
+        toast("⚠️ انقطاع مؤقت للبث")
     }
 
     private fun createNotificationChannel() {
@@ -288,7 +300,7 @@ class RadioService : Service() {
         else startForeground(NOTIFICATION_ID, buildNotification())
     }
 
-    private fun playStationInternal(title: String, uuid: String, pUrl: String, fUrl: String, bitrate: Int = 0, category: String = "", country: String = "") {
+    private fun playStationInternal(title: String, uuid: String, pUrl: String, fUrl: String, bitrate: Int = 32, category: String = "", country: String = "") {
         try {
             if (::player.isInitialized) {
                 player.stop()
@@ -297,11 +309,18 @@ class RadioService : Service() {
         } catch (_: Throwable) {}
 
         stopRecording()
-        currentTitle = title; currentStationUuid = uuid; currentBitrate = bitrate
+        currentTitle = title; currentStationUuid = uuid
         currentCategory = category; currentCountry = country
         retryCount = 0; hasPlayedSuccessfully = false
 
-        toast("📻 $title")
+        // تصفية السقف دائماً لـ 32K عند طلب أي محطة جديدة
+        currentBitrateCap = 32000
+        currentBitrate = 32
+        if (::trackSelector.isInitialized) {
+            trackSelector.parameters = trackSelector.buildUponParameters().setMaxAudioBitrate(32000).build()
+        }
+
+        toast("📻 $title (32 Kbps Max Saver)")
 
         if (isAppInForeground) statsHandler.post(statsRunnable)
 
@@ -345,7 +364,7 @@ class RadioService : Service() {
         if (!::player.isInitialized || isDestroyed.get()) return
         try {
             player.stop(); player.clearMediaItems(); isUsingProxy = useProxy
-            val finalUrl = if (useProxy) cloudflareProxyBase + URLEncoder.encode(streamUrl, "UTF-8") + "&bitrate=48" else streamUrl
+            val finalUrl = if (useProxy) cloudflareProxyBase + URLEncoder.encode(streamUrl, "UTF-8") else streamUrl
             val mimeType = when {
                 streamUrl.contains(".m3u8", true) -> MimeTypes.APPLICATION_M3U8
                 streamUrl.contains(".aac", true) -> MimeTypes.AUDIO_AAC
