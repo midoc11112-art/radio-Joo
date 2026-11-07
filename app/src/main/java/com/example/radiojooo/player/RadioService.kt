@@ -14,7 +14,10 @@ import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 import androidx.media3.common.*
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.TransferListener
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
@@ -31,6 +34,54 @@ import java.net.URL
 import java.net.URLEncoder
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
+
+// ═══════════════════════════════════════════════════════════════════
+// كلاس الخنق الفيزيائي لمجرى البيانات (يكتم السرعة عند 12KB/s كحد أقصى)
+// ═══════════════════════════════════════════════════════════════════
+class ThrottlingDataSource(
+    private val upstream: DataSource,
+    private val maxBytesPerSec: Long = 12 * 1024L // 12 KB/s Max (~96 Kbps)
+) : DataSource {
+    private var bytesReadWindow = 0L
+    private var windowStartMs = 0L
+
+    override fun addTransferListener(transferListener: TransferListener) {
+        upstream.addTransferListener(transferListener)
+    }
+
+    override fun open(dataSpec: DataSpec): Long {
+        bytesReadWindow = 0L
+        windowStartMs = SystemClock.elapsedRealtime()
+        return upstream.open(dataSpec)
+    }
+
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+        val read = upstream.read(buffer, offset, length)
+        if (read > 0) {
+            bytesReadWindow += read
+            val now = SystemClock.elapsedRealtime()
+            var elapsed = now - windowStartMs
+            if (elapsed <= 0) elapsed = 1
+            
+            val expectedMs = (bytesReadWindow * 1000L) / maxBytesPerSec
+            if (expectedMs > elapsed) {
+                val sleepMs = expectedMs - elapsed
+                if (sleepMs in 1..2000) {
+                    try { Thread.sleep(sleepMs) } catch (_: Exception) {}
+                }
+            }
+            if (elapsed >= 1000) {
+                windowStartMs = SystemClock.elapsedRealtime()
+                bytesReadWindow = 0L
+            }
+        }
+        return read
+    }
+
+    override fun getUri(): Uri? = upstream.getUri()
+    override fun getResponseHeaders(): Map<String, List<String>> = upstream.getResponseHeaders()
+    override fun close() = upstream.close()
+}
 
 class RadioService : Service() {
 
@@ -66,7 +117,6 @@ class RadioService : Service() {
     private val availableUrls = mutableListOf<String>()
     private var currentUrlIndex = 0
 
-    // السقف الحالي للبت ريت - يبدأ بـ 32 Kbps على جميع أنواع الاتصالات (Wi-Fi / Hotspot / Data)
     private var currentBitrateCap = 32000
 
     var currentTitle: String = "راديو جو PRO"
@@ -164,7 +214,6 @@ class RadioService : Service() {
     private fun initializePlayer() {
         val renderersFactory = DefaultRenderersFactory(this).apply { setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF) }
         
-        // تعطيل مسار الفيديو وتثبيت البت ريت الأقصى كأمر مطلق على أي شبكة
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters()
                 .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
@@ -172,18 +221,23 @@ class RadioService : Service() {
                 .build()
         }
 
-        // قفل الـ Buffer الصارم عند 128KB فقط لجميع شبكات الواي فاي والموبايل داتا
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(1000, 2000, 500, 1000)
             .setTargetBufferBytes(128 * 1024)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
-        val dataSourceFactory = DefaultHttpDataSource.Factory()
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
             .setConnectTimeoutMs(8000).setReadTimeoutMs(8000).setAllowCrossProtocolRedirects(true)
             .setUserAgent("Mozilla/5.0 (Linux; Android 13) ExoPlayer/1.6.1")
             .setDefaultRequestProperties(mapOf("Accept" to "audio/*", "Icy-MetaData" to "0"))
-        mediaSourceFactory = DefaultMediaSourceFactory(this).setDataSourceFactory(dataSourceFactory)
+
+        // ربط الخنق الفيزيائي بـ ExoPlayer (سقف 12KB/sec كحد أقصى مطلق)
+        val throttledFactory = DataSource.Factory {
+            ThrottlingDataSource(httpDataSourceFactory.createDataSource(), 12 * 1024L)
+        }
+
+        mediaSourceFactory = DefaultMediaSourceFactory(this).setDataSourceFactory(throttledFactory)
 
         player = ExoPlayer.Builder(this, renderersFactory)
             .setTrackSelector(trackSelector).setLoadControl(loadControl).setMediaSourceFactory(mediaSourceFactory)
@@ -217,7 +271,6 @@ class RadioService : Service() {
         val urls = synchronized(availableUrls) { availableUrls.toList() }
         if (urls.isEmpty()) return
 
-        // رفع البت ريت تدريجياً بنفس الصرامة حتى 96Kbps كحد أقصى
         if (currentBitrateCap < 96000) {
             currentBitrateCap = if (currentBitrateCap == 32000) 64000 else 96000
             currentBitrate = currentBitrateCap / 1000
@@ -235,7 +288,6 @@ class RadioService : Service() {
             }
         }
 
-        // تصفية وإعادة ضبط السقف فوراً لـ 32K عند تجربة أي رابط بديل
         if (currentUrlIndex < urls.size - 1) {
             currentUrlIndex++
             
@@ -317,7 +369,7 @@ class RadioService : Service() {
             trackSelector.parameters = trackSelector.buildUponParameters().setMaxAudioBitrate(32000).build()
         }
 
-        toast("📻 $title (Universal 32K Saver)")
+        toast("📻 $title (Hardware Rate Limited)")
 
         if (isAppInForeground) statsHandler.post(statsRunnable)
 
@@ -392,7 +444,6 @@ class RadioService : Service() {
             }
             val wm = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
             if (wifiLock == null || wifiLock?.isHeld == false) {
-                // وضع WifiManager عادي لمنع فتح أنابيب التدفق العالي بالخلفية
                 wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL, "RadioJoo::WifiLock")
                 wifiLock?.acquire()
             }
