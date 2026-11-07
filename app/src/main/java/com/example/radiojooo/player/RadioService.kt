@@ -66,8 +66,11 @@ class RadioService : Service() {
     private val availableUrls = mutableListOf<String>()
     private var currentUrlIndex = 0
 
+    // سلم التدرج التكيفي للبت ريت
+    private var currentBitrateCap = 32000 // البدء بـ 32 Kbps لتوفير أقصى انترنت
+
     var currentTitle: String = "راديو جو PRO"
-    var currentBitrate: Int = 0
+    var currentBitrate: Int = 32
     var currentCategory: String = ""
     var currentCountry: String = ""
     var currentStationUuid: String = ""
@@ -135,7 +138,7 @@ class RadioService : Service() {
                         it.getStringExtra("UUID") ?: "",
                         it.getStringExtra("PRIMARY_URL") ?: "",
                         it.getStringExtra("FALLBACK_URL") ?: "",
-                        it.getIntExtra("BITRATE", 0),
+                        it.getIntExtra("BITRATE", 32),
                         it.getStringExtra("CATEGORY") ?: "",
                         it.getStringExtra("COUNTRY") ?: ""
                     )
@@ -160,20 +163,22 @@ class RadioService : Service() {
 
     private fun initializePlayer() {
         val renderersFactory = DefaultRenderersFactory(this).apply { setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF) }
+        
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters()
                 .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
-                .setMaxAudioBitrate(128000)
+                .setMaxAudioBitrate(currentBitrateCap) // تطبيق البت ريت الحالي
                 .build()
         }
+
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(2500, 8000, 1500, 2500)
-            .setTargetBufferBytes(1024 * 1024)
+            .setBufferDurationsMs(1500, 4000, 1000, 1500)
+            .setTargetBufferBytes(512 * 1024)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(10000).setReadTimeoutMs(10000).setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(8000).setReadTimeoutMs(8000).setAllowCrossProtocolRedirects(true)
             .setUserAgent("Mozilla/5.0 (Linux; Android 13) ExoPlayer/1.6.1")
             .setDefaultRequestProperties(mapOf("Accept" to "audio/*", "Icy-MetaData" to "0"))
         mediaSourceFactory = DefaultMediaSourceFactory(this).setDataSourceFactory(dataSourceFactory)
@@ -204,12 +209,39 @@ class RadioService : Service() {
         })
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    // تطبيق التدرج التكيفي: 32K -> 64K -> 128K عند حدوث أخطاء تشغيل
+    // ═══════════════════════════════════════════════════════════════════
     private fun handlePlaybackError(error: PlaybackException) {
         if (isHealing.get() || isDestroyed.get()) return
+
+        // الخطوة 1: الرفع التكيفي للبت ريت إذا كنا في المستوى الأدنى
+        if (currentBitrateCap < 128000) {
+            currentBitrateCap = if (currentBitrateCap == 32000) 64000 else 128000
+            currentBitrate = currentBitrateCap / 1000
+            
+            toast("📶 ترفيع البت ريت إلى ${currentBitrate}Kbps لضمان الثبات")
+            
+            trackSelector.parameters = trackSelector.buildUponParameters()
+                .setMaxAudioBitrate(currentBitrateCap)
+                .build()
+
+            val urls = synchronized(availableUrls) { availableUrls.toList() }
+            val curUrl = urls.getOrNull(currentUrlIndex)
+            if (curUrl != null) {
+                statsHandler.post { if (!isDestroyed.get()) startStream(curUrl, useProxy = true) }
+                return
+            }
+        }
+
+        // الخطوة 2: تجربة الرابط البديل إذا استمرت المشكلة عند 128K
         val urls = synchronized(availableUrls) { availableUrls.toList() }
-        
         if (currentUrlIndex < urls.size - 1) {
             currentUrlIndex++
+            currentBitrateCap = 32000 // إعادة التدرج من 32K للرابط الجديد
+            currentBitrate = 32
+            trackSelector.parameters = trackSelector.buildUponParameters().setMaxAudioBitrate(32000).build()
+            
             toast("🔄 تجربة رابط بديل (${currentUrlIndex + 1}/${urls.size})")
             statsHandler.post {
                 if (!isDestroyed.get()) startStream(urls[currentUrlIndex], useProxy = true)
@@ -262,7 +294,7 @@ class RadioService : Service() {
         else startForeground(NOTIFICATION_ID, buildNotification())
     }
 
-    private fun playStationInternal(title: String, uuid: String, pUrl: String, fUrl: String, bitrate: Int = 0, category: String = "", country: String = "") {
+    private fun playStationInternal(title: String, uuid: String, pUrl: String, fUrl: String, bitrate: Int = 32, category: String = "", country: String = "") {
         try {
             if (::player.isInitialized) {
                 player.stop()
@@ -271,11 +303,18 @@ class RadioService : Service() {
         } catch (_: Throwable) {}
 
         stopRecording()
-        currentTitle = title; currentStationUuid = uuid; currentBitrate = bitrate
+        currentTitle = title; currentStationUuid = uuid
         currentCategory = category; currentCountry = country
         retryCount = 0; hasPlayedSuccessfully = false
 
-        toast("📻 $title")
+        // إعادة ضبط السلم عند فتح كل محطة جديدة (البدء فوراً بـ 32K)
+        currentBitrateCap = 32000
+        currentBitrate = 32
+        if (::trackSelector.isInitialized) {
+            trackSelector.parameters = trackSelector.buildUponParameters().setMaxAudioBitrate(32000).build()
+        }
+
+        toast("📻 $title (32 Kbps Saver)")
 
         if (isAppInForeground) statsHandler.post(statsRunnable)
 
