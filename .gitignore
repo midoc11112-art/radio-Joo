@@ -1,0 +1,16 @@
+# Android / Gradle
+.gradle/
+build/
+local.properties
+*.apk
+*.aab
+.idea/
+*.iml
+captures/
+# Cloudflare / local
+.wrangler/
+node_modules/
+worker/wrangler.toml
+.admin-key
+stations_report.txt
+__pycache__/
