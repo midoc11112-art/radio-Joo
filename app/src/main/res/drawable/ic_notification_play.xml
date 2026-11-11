@@ -1,0 +1,18 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    
+    <!-- مستطيل بحدود زرقاء -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#1976D2"
+        android:strokeWidth="2"
+        android:pathData="M4,4h40v40h-40z"/>
+    
+    <!-- أيقونة Play (مثلث أزرق غامق) -->
+    <path
+        android:fillColor="#0D47A1"
+        android:pathData="M16,12L16,36L36,24Z"/>
+</vector>
