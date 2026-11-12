@@ -32,6 +32,8 @@ class Repo(context: Context) {
     private val deleted: MutableSet<String> = HashSet(delPrefs.getStringSet("ids", emptySet()) ?: emptySet())
     private val deletedNames: MutableMap<String, String> = HashMap()
     private val namePrefs = app.getSharedPreferences("custom_names_v1", Context.MODE_PRIVATE)
+    private val catPrefs = app.getSharedPreferences("custom_categories_v1", Context.MODE_PRIVATE)
+    private val customCats: MutableMap<String, String> = HashMap<String, String>().also { m -> for ((k, v) in catPrefs.all) if (v is String && v.isNotBlank()) m[k] = v }
     private val customNames: MutableMap<String, String> = HashMap<String, String>().also { m -> for ((k, v) in namePrefs.all) if (v is String && v.isNotBlank()) m[k] = v }
 
     init {
@@ -63,6 +65,20 @@ class Repo(context: Context) {
                     if (id.isNotEmpty() && id !in deleted) {
                         ranks[id] = i
                         ed.putInt(id, i)
+                    }
+                }
+                ed.commit()
+            }
+            val catObj = obj.optJSONObject("categories")
+            if (catObj != null) {
+                val ed = catPrefs.edit()
+                val keys = catObj.keys()
+                while (keys.hasNext()) {
+                    val id = keys.next()
+                    val ct = catObj.optString(id).trim()
+                    if (id.isNotEmpty() && ct.isNotEmpty() && !customCats.containsKey(id)) {
+                        customCats[id] = ct
+                        ed.putString(id, ct)
                     }
                 }
                 ed.commit()
@@ -99,6 +115,7 @@ class Repo(context: Context) {
                 .put("deleted", delArr)
                 .put("order", ordArr)
                 .put("renamed", JSONObject(customNames as Map<*, *>))
+                .put("categories", JSONObject(customCats as Map<*, *>))
             val tmp = File(extBackupDir, "radiojoo_user_prefs.tmp")
             tmp.writeText(root.toString(2))
             if (!tmp.renameTo(extBackupFile)) {
@@ -279,11 +296,26 @@ class Repo(context: Context) {
         }
     }
 
-    fun find(id: String): Station? = raw.firstOrNull { it.id == id }?.let { it.copy(name = customNames[it.id] ?: it.name) }
+    fun changeStationCategory(id: String, newCategory: String) {
+        val clean = newCategory.trim()
+        synchronized(lock) {
+            if (clean.isEmpty()) {
+                customCats.remove(id)
+                catPrefs.edit().remove(id).commit()
+            } else {
+                customCats[id] = clean
+                catPrefs.edit().putString(id, clean).commit()
+            }
+            syncToExternalBackup()
+            publish(raw)
+        }
+    }
+
+    fun find(id: String): Station? = raw.firstOrNull { it.id == id }?.let { it.copy(name = customNames[it.id] ?: it.name, category = customCats[it.id] ?: it.category) }
 
     private fun publish(list: List<Station>) = synchronized(lock) {
         raw = list.filter { it.id !in deleted }
-        _stations.value = arrange(raw).map { it.copy(name = customNames[it.id] ?: it.name, isFavorite = it.id in favorites) }
+        _stations.value = arrange(raw).map { it.copy(name = customNames[it.id] ?: it.name, category = customCats[it.id] ?: it.category, isFavorite = it.id in favorites) }
     }
 
     private fun save(list: List<Station>) {

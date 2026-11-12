@@ -67,7 +67,8 @@ class MainActivity : AppCompatActivity() {
             onClick = { RadioService.play(this, it.id) },
             onFavorite = { vm.toggleFavorite(it.id) },
             onMenu = { id, name -> showStationMenu(id, name) },
-            onOrder = { ids -> vm.commitOrder(ids) }
+            onOrder = { ids -> vm.commitOrder(ids) },
+            onDragState = { dragging -> binding.swipeRefreshLayout.isEnabled = !dragging }
         )
         layoutManager = LinearLayoutManager(this)
         binding.rvStations.layoutManager = layoutManager
@@ -265,11 +266,13 @@ class MainActivity : AppCompatActivity() {
             .setItems(arrayOf(
                 "\u062A\u062D\u062F\u064A\u062B \u062E\u0648\u0627\u062F\u0645 \u0647\u0630\u0647 \u0627\u0644\u0625\u0630\u0627\u0639\u0629 \uD83D\uDD04",
                 "\u0625\u0639\u0627\u062F\u0629 \u062A\u0633\u0645\u064A\u0629 \u0627\u0644\u0625\u0630\u0627\u0639\u0629 \u270F\uFE0F",
+                "\u0646\u0642\u0644 \u0644\u0642\u0633\u0645 \u0622\u062E\u0631 \uD83D\uDCC2",
                 "\u062D\u0630\u0641 \u0627\u0644\u0625\u0630\u0627\u0639\u0629 \u0646\u0647\u0627\u0626\u064A\u0627\u064B \uD83D\uDDD1\uFE0F"
             )) { _, which ->
                 when (which) {
                     0 -> vm.refreshStation(id)
                     1 -> showRenameDialog(id, name)
+                    2 -> showMoveCategoryDialog(id, name)
                     else -> confirmDeleteStation(id, name)
                 }
             }
@@ -290,6 +293,21 @@ class MainActivity : AppCompatActivity() {
             .setTitle("\u0625\u0639\u0627\u062F\u0629 \u062A\u0633\u0645\u064A\u0629 \u0627\u0644\u0625\u0630\u0627\u0639\u0629")
             .setView(input)
             .setPositiveButton("\u062D\u0641\u0638") { _, _ -> vm.renameStation(id, input.text.toString()) }
+            .setNegativeButton("\u0625\u0644\u063A\u0627\u0621", null)
+            .show()
+    }
+
+    private fun showMoveCategoryDialog(id: String, name: String) {
+        val keys = arrayOf("EGYPT", "QURAN", "NEWS", "MUSIC", "SPORTS", "TALK")
+        val labels = keys.map { com.example.radiojooo.data.CategoryStyle.arabicName(it) }.toTypedArray()
+        val currentCat = vm.stationCategory(id)
+        var selectedIdx = keys.indexOf(currentCat).coerceAtLeast(0)
+        MaterialAlertDialogBuilder(this, R.style.RadioDialog)
+            .setTitle("\u0646\u0642\u0644: $name")
+            .setSingleChoiceItems(labels, selectedIdx) { _, which -> selectedIdx = which }
+            .setPositiveButton("\u0645\u0648\u0627\u0641\u0642") { _, _ ->
+                if (selectedIdx in keys.indices) vm.changeStationCategory(id, keys[selectedIdx])
+            }
             .setNegativeButton("\u0625\u0644\u063A\u0627\u0621", null)
             .show()
     }

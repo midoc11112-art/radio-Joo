@@ -17,7 +17,8 @@ class StationAdapter(
     private val onClick: (Station) -> Unit,
     private val onFavorite: (Station) -> Unit,
     private val onMenu: (String, String) -> Unit,
-    private val onOrder: (List<String>) -> Unit
+    private val onOrder: (List<String>) -> Unit,
+    private val onDragState: (Boolean) -> Unit = {}
 ) : RecyclerView.Adapter<StationAdapter.VH>() {
 
     private var items: MutableList<Station> = ArrayList()
@@ -45,7 +46,7 @@ class StationAdapter(
     }
 
     fun stationAt(pos: Int): Station? = items.getOrNull(pos)
-    fun beginDrag() { dragging = true }
+    fun beginDrag() { dragging = true; onDragState(true) }
 
     fun move(from: Int, to: Int): Boolean {
         if (from !in items.indices || to !in items.indices) return false
@@ -57,6 +58,7 @@ class StationAdapter(
 
     fun endDrag(moved: Boolean) {
         dragging = false
+        onDragState(false)
         if (moved) {
             pending = null
             onOrder(items.map { it.id })
