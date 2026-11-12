@@ -25,6 +25,12 @@ class Repo(context: Context) {
     private val _stations = MutableStateFlow<List<Station>>(emptyList())
     val stations: StateFlow<List<Station>> = _stations.asStateFlow()
 
+    /** Outcome of the manual "update servers" button, shown to the user as a clear message. */
+    data class RefreshResult(
+        val ok: Boolean, val warming: Boolean, val total: Int, val added: Int, val removed: Int,
+        val servers: Int, val verified: Int, val throttled: Boolean
+    )
+
     enum class SyncState { IDLE, SYNCING, WARMING, UPDATED, UNCHANGED, FAILED }
     private val _sync = MutableStateFlow(SyncState.IDLE)
     val sync: StateFlow<SyncState> = _sync.asStateFlow()
@@ -58,6 +64,32 @@ class Repo(context: Context) {
                 is Api.Fetch.NotModified -> { prefs.edit().putLong("last", System.currentTimeMillis()).apply(); _sync.value = SyncState.UNCHANGED; 0 }
                 is Api.Fetch.Warming -> { _sync.value = SyncState.WARMING; r.retrySeconds }
                 is Api.Fetch.Failed -> { _sync.value = SyncState.FAILED; 0 }
+            }
+        }
+    }
+
+    /**
+     * Real refresh: the cloud re-checks its servers first (so the answer is fresh), then the full list is downloaded
+     * WITHOUT the ETag shortcut, compared with what we had, and every server gets a clean slate locally.
+     */
+    suspend fun forceRefresh(health: Health): RefreshResult = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            _sync.value = SyncState.SYNCING
+            val before = raw.map { it.id }.toSet()
+            val info = Api.refresh()
+            when (val r = Api.fetchStations(null)) {
+                is Api.Fetch.Fresh -> {
+                    save(r.stations)
+                    prefs.edit().putString("etag", r.etag).putLong("last", System.currentTimeMillis()).apply()
+                    publish(r.stations)
+                    health.resetCooldowns()
+                    _sync.value = SyncState.UPDATED
+                    val ids = r.stations.map { it.id }.toSet()
+                    RefreshResult(true, false, r.stations.size, (ids - before).size, (before - ids).size,
+                        r.stations.sumOf { it.servers.size }, info?.verified ?: 0, info?.throttled ?: false)
+                }
+                is Api.Fetch.Warming -> { _sync.value = SyncState.WARMING; RefreshResult(false, true, raw.size, 0, 0, 0, 0, false) }
+                else -> { _sync.value = SyncState.FAILED; RefreshResult(false, false, raw.size, 0, 0, 0, 0, false) }
             }
         }
     }

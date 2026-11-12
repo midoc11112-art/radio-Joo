@@ -47,14 +47,6 @@ class StationAdapter(
     }
 
     companion object {
-        fun categoryName(c: String) = when (c) {
-            "QURAN" -> "القرآن الكريم"
-            "NEWS" -> "الأخبار"
-            "MUSIC" -> "الموسيقى"
-            "SPORTS" -> "الرياضة"
-            "TALK" -> "توك شو"
-            "EGYPT" -> "مصر"
-            else -> c
-        }
+        fun categoryName(c: String) = com.example.radiojooo.data.CategoryStyle.arabicName(c)
     }
 }

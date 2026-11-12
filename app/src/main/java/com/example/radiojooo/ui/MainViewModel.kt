@@ -7,7 +7,10 @@ import com.example.radiojooo.Graph
 import com.example.radiojooo.data.Repo
 import com.example.radiojooo.data.Station
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -17,6 +20,13 @@ import kotlinx.coroutines.launch
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = Graph.repo(app)
+    private val health = Graph.health(app)
+
+    /** True while the manual "update servers" is running (the button shows progress and ignores extra taps). */
+    val refreshing = MutableStateFlow(false)
+    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    /** One-shot messages for the user: result of the manual refresh. */
+    val messages: SharedFlow<String> = _messages.asSharedFlow()
 
     val searchQuery = MutableStateFlow("")
     val category = MutableStateFlow("ALL")
@@ -52,8 +62,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Button "تحديث الخوادم": pulls the newest catalog now. */
-    fun refresh() { viewModelScope.launch { syncWithRetry(force = true) } }
+    /** Button "تحديث الخوادم": the cloud re-checks servers now, then the real list is downloaded and compared. */
+    fun refresh() {
+        if (refreshing.value) return
+        viewModelScope.launch {
+            refreshing.value = true
+            val r = repo.forceRefresh(health)
+            refreshing.value = false
+            val msg = when {
+                r.ok && (r.added > 0 || r.removed > 0) ->
+                    "✅ تم التحديث: ${r.total} إذاعة (+${r.added} جديدة، −${r.removed} محذوفة) • ${r.servers} خادم"
+                r.ok && r.throttled ->
+                    "✅ القائمة محدّثة قبل لحظات: ${r.total} إذاعة • ${r.servers} خادم"
+                r.ok ->
+                    "✅ تم الفحص والتحديث: ${r.total} إذاعة • ${r.servers} خادم (${r.verified} مؤكَّد)"
+                r.warming -> "⏳ السحابة لسه بتجهّز القائمة، جرّب بعد دقيقة"
+                else -> "❌ تعذر التحديث، تأكد من الاتصال بالإنترنت"
+            }
+            _messages.emit(msg)
+        }
+    }
 
     fun toggleFavorite(id: String) = repo.toggleFavorite(id)
 

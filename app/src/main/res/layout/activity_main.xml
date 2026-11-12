@@ -616,4 +616,19 @@
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/fabScrollTop"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_above="@id/miniPlayerContainer"
+        android:layout_alignParentEnd="true"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="12dp"
+        android:contentDescription="الذهاب لأول القائمة"
+        android:src="@drawable/ic_arrow_up"
+        android:visibility="gone"
+        app:backgroundTint="#8B5CF6"
+        app:fabSize="mini"
+        app:tint="#FFFFFF" />
+
 </RelativeLayout>

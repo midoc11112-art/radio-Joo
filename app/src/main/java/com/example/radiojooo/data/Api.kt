@@ -19,6 +19,11 @@ object Api {
         .retryOnConnectionFailure(true)
         .build()
 
+    private val longClient = client.newBuilder().readTimeout(55, TimeUnit.SECONDS).build()
+
+    /** What the cloud reports after it re-checked its servers on our request. */
+    data class RefreshInfo(val stations: Int, val servers: Int, val verified: Int, val throttled: Boolean)
+
     sealed class Fetch {
         data class Fresh(val etag: String?, val stations: List<Station>) : Fetch()
         object NotModified : Fetch()
@@ -39,6 +44,17 @@ object Api {
                 else Fetch.Fresh(r.header("ETag"), list)
             }
         } catch (e: Exception) { Fetch.Failed }
+    }
+
+    /** "Update servers" button: the cloud re-discovers and re-verifies servers right now (throttled to once per ~45 s). */
+    fun refresh(): RefreshInfo? {
+        return try {
+            longClient.newCall(Request.Builder().url("$BASE/v2/refresh").build()).execute().use { r ->
+                if (!r.isSuccessful) return null
+                val o = JSONObject(r.body?.string() ?: return null)
+                RefreshInfo(o.optInt("stations"), o.optInt("servers"), o.optInt("verified"), o.optBoolean("throttled", false))
+            }
+        } catch (e: Exception) { null }
     }
 
     /** Asks the cloud to find fresh servers for a station whose servers all failed. */

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="RadioDialog" parent="ThemeOverlay.MaterialComponents.MaterialAlertDialog">
+        <item name="colorSurface">#111827</item>
+        <item name="colorOnSurface">#FFFFFF</item>
+        <item name="colorPrimary">#8B5CF6</item>
+        <item name="android:textColorPrimary">#FFFFFF</item>
+        <item name="android:textColorSecondary">#94A3B8</item>
+    </style>
+</resources>

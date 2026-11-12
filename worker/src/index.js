@@ -9,8 +9,8 @@ const UA = "RadioJoo-Cloud/3.0";
 const MAX_SERVERS = 5;
 const REDISCOVER_MS = 6 * 3600e3;
 const ARAB_CC = ["EG", "SA", "AE", "KW", "QA", "BH", "OM", "JO", "LB", "SY", "IQ", "PS", "YE", "SD", "LY", "TN", "DZ", "MA", "MR", "SO", "DJ", "KM"];
-const TAGS = ["quran", "news", "talk", "tarab", "sports", "islam"];
-const MIN_VOTES = { QURAN: 120, NEWS: 50, TALK: 50, SPORTS: 50, MUSIC: 300, EGYPT: 0 };
+const TAGS = ["quran", "news", "talk", "tarab", "sports", "islam", "islamic", "religion", "music", "oriental", "arabic", "pop", "hits", "egypt", "cairo", "khaleeji", "classical", "nasheed", "sufi", "podcast"];
+const MIN_VOTES = { QURAN: 60, NEWS: 30, TALK: 30, SPORTS: 30, MUSIC: 150, EGYPT: 0 };
 const POP_BASE = { QURAN: 1000, EGYPT: 960, NEWS: 900, TALK: 860, SPORTS: 850, MUSIC: 800 };
 const CORS = { "Access-Control-Allow-Origin": "*" };
 
@@ -19,7 +19,8 @@ const TASKS = [
   { k: "cc", cc: "EG" },
   ...SEEDS.map((_, i) => ({ k: "seed", i })),
   ...ARAB_CC.filter((c) => c !== "EG").map((cc) => ({ k: "cc", cc })),
-  { k: "lang" },
+  ...[0, 700, 1400, 2100].map((offset) => ({ k: "lang", offset })),
+  ...["egyptian arabic", "arabic (egypt)"].map((language) => ({ k: "lang", offset: 0, language })),
   ...TAGS.map((tag) => ({ k: "tag", tag })),
 ];
 
@@ -108,7 +109,7 @@ export function analyzeHls(text) {
   return audio.length ? { ok: true, kbps: Math.min(...audio) } : { ok: false, why: "hls-video-only" };
 }
 // -> { ok, hard, kbps, hls }. hard=false means inconclusive (timeout / network / unusual server) and must not count as a failure
-export async function probe(url, ms = 6500) {
+export async function probe(url, ms = 5000) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), ms);
   try {
@@ -205,7 +206,7 @@ function addPool(cat, idx, recs, ccDefault) {
 }
 async function runTask(cat, idx, task, budget) {
   if (task.k === "cc") addPool(cat, idx, await rb(`/json/stations/bycountrycodeexact/${task.cc}?` + q({ limit: 600 }), budget), task.cc);
-  else if (task.k === "lang") addPool(cat, idx, await rb("/json/stations/search?" + q({ language: "arabic", limit: 800 }), budget), "");
+  else if (task.k === "lang") addPool(cat, idx, await rb("/json/stations/search?" + q({ language: task.language || "arabic", limit: 700, offset: task.offset || 0 }), budget), "");
   else if (task.k === "tag") addPool(cat, idx, await rb("/json/stations/search?" + q({ tag: task.tag, language: "arabic", limit: 300 }), budget), "");
   else if (task.k === "seed") await seedTask(cat, idx, task.i, budget);
 }
@@ -233,8 +234,9 @@ export async function cycle(env, opts = {}) {
   const limit = parseInt(env.SUBREQ_LIMIT || "45", 10);
   const budget = { left: limit };
   const cat = await load(env);
-  const idx = urlIndex(cat);
   const now = Date.now();
+  if (opts.refresh && now - (cat.cur.lr || 0) < 45000) return { throttled: true, ...summary(cat) };   // refreshed moments ago
+  const idx = urlIndex(cat);
   let did = 0;
   if (cat.cur.d >= TASKS.length && now > cat.cur.nd) cat.cur.d = 0;                     // time to re-discover
   while (cat.cur.d < TASKS.length && budget.left > (opts.keepForProbe ?? 14)) {
@@ -242,17 +244,46 @@ export async function cycle(env, opts = {}) {
     cat.cur.d++; did++;
     if (cat.cur.d >= TASKS.length) cat.cur.nd = now + REDISCOVER_MS;
   }
-  // probe the least-recently-checked servers with the remaining budget
+  // stations with fewer than 5 servers get extra searches so every station reaches 5 backup sources over time
+  await enrichThin(cat, idx, budget, opts.refresh ? 4 : 3);
+  // probe: servers that are failing or never checked first, then the least recently checked
   const flat = [];
   cat.st.forEach((st) => st.s.forEach((s) => flat.push([st, s])));
-  flat.sort((a, b) => a[1].t - b[1].t);
+  const pr = (s) => (s.f > 0 ? 0 : s.t === 0 ? 1 : 2);
+  flat.sort((a, b) => pr(a[1]) - pr(b[1]) || a[1].t - b[1].t);
   const batch = flat.slice(0, Math.max(0, budget.left - 1));
   budget.left -= batch.length;
   const results = await Promise.all(batch.map(([, s]) => probe(s.u)));
   batch.forEach(([, s], i) => applyProbe(s, results[i]));
   prune(cat);
+  if (opts.refresh) cat.cur.lr = Date.now();
   await save(env, cat);
-  return { tasksDone: did, cursor: cat.cur.d, tasks: TASKS.length, probed: batch.length, stations: cat.st.length };
+  return { tasksDone: did, cursor: cat.cur.d, tasks: TASKS.length, probed: batch.length, ...summary(cat) };
+}
+function summary(cat) {
+  let servers = 0, verified = 0;
+  for (const st of cat.st) for (const s of st.s) { servers++; if (s.ok > 0 && s.f < 3) verified++; }
+  return { stations: cat.st.length, servers, verified };
+}
+async function enrichThin(cat, idx, budget, n) {
+  const day = 12 * 3600e3;
+  const thin = cat.st.filter((s) => s.s.length < MAX_SERVERS && Date.now() - (s.en || 0) > day)
+    .sort((a, b) => a.s.length - b.s.length || (a.en || 0) - (b.en || 0)).slice(0, n);
+  for (const st of thin) {
+    if (budget.left < 22) break;
+    st.en = Date.now();
+    const seed = SEEDS.find((x) => x[0] === st.id);
+    const queries = seed ? seed[3] : [st.n];
+    let res = [];
+    try { res = await rb("/json/stations/search?" + q({ name: queries[queries.length > 1 ? 1 : 0], limit: 25 }), budget); } catch { continue; }
+    for (const r of res) {
+      if (nameScore(r.name, queries) < 0.9) continue;
+      for (const [u, kbps] of recUrls(r)) {
+        const k = ukey(u);
+        if (!idx.has(k) && st.s.length < 12) { st.s.push(newServer(u, kbps, "enrich")); idx.set(k, st); }
+      }
+    }
+  }
 }
 function applyProbe(s, r) {
   s.t = Date.now();
@@ -387,6 +418,11 @@ export default {
         const stations = publicStations(cat);
         return json({ v: cat.v, t: cat.t, n: stations.length, stations }, 200, { ETag: etag, "Cache-Control": "public, max-age=300" });
       }
+      if (p === "/v2/refresh") {
+        const before = summary(await load(env));
+        const r = await cycle(env, { refresh: true, keepForProbe: 20 });
+        return json({ ok: true, before, ...r }, 200, { "Cache-Control": "no-store" });
+      }
       if (p === "/v2/heal") return await heal(env, url.searchParams.get("id") || "");
       if (p === "/v2/report" && request.method === "POST") return json({ applied: await report(env, await request.json().catch(() => ({}))) });
       if (p === "/r") return await relay(url.searchParams.get("u") || "", request);
@@ -399,7 +435,7 @@ export default {
         if (env.ADMIN_KEY && url.searchParams.get("key") !== env.ADMIN_KEY) return json({ error: "forbidden" }, 403);
         return json(await cycle(env, { keepForProbe: parseInt(url.searchParams.get("probe") || "14", 10) }));
       }
-      return json({ name: "radio-joo-cloud", endpoints: ["/v2/stations", "/v2/heal?id=", "/v2/report", "/r?u=", "/v2/health"] });
+      return json({ name: "radio-joo-cloud", endpoints: ["/v2/stations", "/v2/refresh", "/v2/heal?id=", "/v2/report", "/r?u=", "/v2/health"] });
     } catch (e) {
       return json({ error: String(e && e.message || e) }, 500);
     }
