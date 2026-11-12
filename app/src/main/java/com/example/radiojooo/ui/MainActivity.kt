@@ -319,38 +319,45 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupSelectionBar() {
         val rootGroup = binding.root as? android.view.ViewGroup ?: return
+        
+        // إزالة الشريط القديم إن وجد لمنع التكرار
+        selectionBarView?.let { rootGroup.removeView(it) }
+
         val bar = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
-            setBackgroundColor(android.graphics.Color.parseColor("#0F172A"))
-            setPadding(24, 20, 24, 20)
-            elevation = 16f
+            setBackgroundColor(android.graphics.Color.parseColor("#1E1B4B")) // لون خلفية بنفسجي داكن وواضح
+            setPadding(32, 28, 32, 28)
+            elevation = 32f
             visibility = View.GONE
         }
+        
         val tvCount = android.widget.TextView(this).apply {
             setTextColor(android.graphics.Color.WHITE)
-            textSize = 14f
+            textSize = 15f
             setTypeface(null, android.graphics.Typeface.BOLD)
             layoutParams = android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
+
         fun mkBtn(label: String, bgHex: String, onClick: () -> Unit): android.widget.TextView {
             return android.widget.TextView(this).apply {
                 text = label
                 setTextColor(android.graphics.Color.WHITE)
-                textSize = 13f
+                textSize = 14f
                 setTypeface(null, android.graphics.Typeface.BOLD)
-                setPadding(22, 14, 22, 14)
+                setPadding(24, 16, 24, 16)
                 val gd = android.graphics.drawable.GradientDrawable().apply {
-                    cornerRadius = 18f
+                    cornerRadius = 20f
                     setColor(android.graphics.Color.parseColor(bgHex))
                 }
                 background = gd
-                val lp = android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
-                lp.marginStart = 12
+                val lp = android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT)
+                lp.marginStart = 14
                 layoutParams = lp
                 setOnClickListener { onClick() }
             }
         }
+
         val btnAll = mkBtn("\u0627\u0644\u0643\u0644", "#334155") { adapter.selectAllVisible() }
         val btnMoveCat = mkBtn("\u0646\u0642\u0644 \uD83D\uDCC2", "#2563EB") {
             val sel = adapter.getSelectedIds()
@@ -369,10 +376,16 @@ class MainActivity : AppCompatActivity() {
         bar.addView(btnCancel)
 
         if (rootGroup is android.widget.FrameLayout) {
-            val lp = android.widget.FrameLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.Gravity.BOTTOM)
+            val lp = android.widget.FrameLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT, 
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 
+                android.view.Gravity.BOTTOM
+            )
+            // إضافة مسافة أمان من الأسفل لتجنب تغطية شريط التنقل
+            lp.bottomMargin = 120
             rootGroup.addView(bar, lp)
         } else {
-            rootGroup.addView(bar, 0)
+            rootGroup.addView(bar)
         }
         selectionBarView = bar
         selectionCountTv = tvCount

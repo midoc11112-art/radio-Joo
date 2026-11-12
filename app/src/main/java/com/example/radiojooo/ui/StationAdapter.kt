@@ -66,9 +66,14 @@ class StationAdapter(
         if (selectedIds.isEmpty() || targetIndex !in items.indices) return false
         val selectedItems = items.filter { it.id in selectedIds }
         if (selectedItems.isEmpty()) return false
+        
+        // إزالة العناصر المحددة من أماكنها القديمة
         items.removeAll(selectedItems)
+        
+        // حساب المؤشر الجديد بدقة بعد الحذف لضمان نزول المجموعة ككتلة واحدة
         var newIdx = targetIndex.coerceIn(0, items.size)
         items.addAll(newIdx, selectedItems)
+        
         notifyDataSetChanged()
         onOrder(items.map { it.id })
         return true
