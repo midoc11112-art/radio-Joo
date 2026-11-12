@@ -36,9 +36,9 @@ class StationAdapter(
     override fun onBindViewHolder(h: VH, position: Int) {
         val s = getItem(position)
         h.b.tvStationName.text = s.name
-        h.b.tvServersBadge.text = "${s.servers.size} خوادم"
+        h.b.tvServersBadge.text = "${s.servers.size} \u062E\u0648\u0627\u062F\u0645"
         h.b.tvCountryBadge.text = if (s.countryCode.isEmpty()) "AR" else s.countryCode
-        h.b.tvBitrateBadge.text = if (s.bitrate > 0) "${s.bitrate} Kbps" else "— Kbps"
+        h.b.tvBitrateBadge.text = if (s.bitrate > 0) "${s.bitrate} Kbps" else "\u2014 Kbps"
         h.b.tvCategoryBadge.text = categoryName(s.category)
         h.b.btnFavorite.setImageResource(if (s.isFavorite) R.drawable.ic_star_filled else R.drawable.ic_star_outline)
         h.b.btnFavorite.setOnClickListener { onFavorite(s) }
