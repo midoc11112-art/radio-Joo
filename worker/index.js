@@ -33,7 +33,7 @@ const RE = {
   tarab: rx(["tarab|tarb|oriental|golden (era|age)|vintage|andalus|muwashah|arabic classic|classic arabic"],
     ["Trb", "Alzmn Aljmyl", "zmAn", "qdym", "mw$HAt", "ASAlh"]),
   music: rx(["music|musique|pop|hits|song|dance|hip hop|rap|rock|jazz|mahragan|mahraganat|chaabi|shaabi|top ?40|lounge|rnb"], ["mwsyqy", "mhrjAnAt", "$Eby", "AgAny"]),
-  drop: rx(["christian|gospel|bible|church|catholic|orthodox"], ["msyHy", "knys"]),
+  drop: rx(["christian|gospel|bible|church|catholic|orthodox|corleone|x_x|s_o_l_l_y|solly|aravic|nfeshal|test stream"], ["msyHy", "knys"]),
 };
 const TAG_NEWS = /^(news|news talk|akhbar|world news)$/, TAG_TALK = /^(talk|talk radio|news talk|discussion)$/;
 const EGYNAME = rx(["egypt|misr|masr|cairo|alexandria|nile|ertu"], ["mSr", "AlqAhrh", "AlAskndryh"]);
@@ -244,7 +244,32 @@ const NAMEQ = ["nile", "mega", "nagham", "nogoum", "9090", "hits", "shaabi", "ma
 
 /* Extra stream URLs. Reciter/Quran seeds are added as backup servers of their curated station (or create it). */
 const SEEDS = [
-  ["Quran Cairo Radio", "EG", "https://stream.radiojar.com/8s5u5tpdtwzuv"],
+  ["Quran Cairo - إذاعة القرآن الكريم من القاهرة", "EG", "https://stream.radiojar.com/8s5u5tpdtwzuv"],
+  ["Quran Cairo - إذاعة القرآن الكريم من القاهرة", "EG", "https://n0a.radiojar.com/8s5u5tpdtwzuv"],
+  ["Radio Masr - راديو مصر", "EG", "https://live.radiomasr.net/RADIOMASR"],
+  ["Al Barnamg Al Aam - البرنامج العام", "EG", "https://stream.radiojar.com/4wqre23fytzuv"],
+  ["Sawt El Arab - صوت العرب", "EG", "https://stream.radiojar.com/p230232fytzuv"],
+  ["Al Sharq Al Awsat - إذاعة الشرق الأوسط", "EG", "https://stream.radiojar.com/3213232fytzuv"],
+  ["Youth & Sports - الشباب والرياضة", "EG", "https://stream.radiojar.com/7213232fytzuv"],
+  ["ON Sport FM - أون سبورت إف إم", "EG", "https://stream.radiojar.com/9213232fytzuv"],
+  ["Nile FM - نايل إف إم", "EG", "https://audio.nrpstream.com/listen/nile_fm/radio.mp3"],
+  ["Nogoum FM - نجوم إف إم", "EG", "https://audio.nrpstream.com/listen/nogoum_fm/radio.mp3"],
+  ["Mega FM - ميجا إف إم", "EG", "https://audio.nrpstream.com/listen/mega_fm/radio.mp3"],
+  ["Nagham FM - نغم إف إم", "EG", "https://audio.nrpstream.com/listen/nagham_fm/radio.mp3"],
+  ["Radio Hits - راديو هيتس", "EG", "https://audio.nrpstream.com/listen/radio_hits/radio.mp3"],
+  ["Shaabi FM - شعبي إف إم", "EG", "https://audio.nrpstream.com/listen/shaabi_fm/radio.mp3"],
+  ["Al Jazeera - الجزيرة", "QA", "https://live-hls-audio-web-aja.getaj.net/AJA/index.m3u8"],
+  ["Al Arabiya - العربية", "SA", "https://live.alarabiya.net/alarabiapublish/alarabiya.stream/playlist.m3u8"],
+  ["Al Hadath - الحدث", "SA", "https://av.alarabiya.net/alarabiapublish/alhadath.stream/playlist.m3u8"],
+  ["Sky News Arabia - سكاي نيوز عربية", "AE", "https://radio.skynewsarabia.com/stream/radio/sna"],
+  ["BBC Arabic - بي بي سي عربية", "GB", "https://stream.live.vc.bbcmedia.co.uk/bbc_arabic_radio"],
+  ["Monte Carlo Doualiya - مونت كارلو الدولية", "FR", "https://montecarlodoualiya128k.ice.infomaniak.ch/mc-doualiya.mp3"],
+  ["France 24 Arabic - فرانس 24 بالعربية", "FR", "https://france24.ice.infomaniak.ch/france24-ar-128.mp3"],
+  ["Asharq News - الشرق للأخبار", "SA", "https://svs.itworkscdn.net/asharqradio/asharqradio.stream/playlist.m3u8"],
+  ["DW Arabic - دويتشه فيله", "DE", "https://dwamdstream103.akamaized.net/hls/live/2015526/dwstream103/index.m3u8"],
+  ["RT Arabic - روسيا اليوم", "RU", "https://rt-arb.rttv.com/live/rtarab/playlist.m3u8"],
+  ["Radio Sawa - راديو سوا", "US", "https://stream.radiojar.com/4213232fytzuv"],
+  ["Alhurra - الحرة", "US", "https://mbnv-ingest-use1-ak.akamaized.net/hls/live/2038900/MBNV_ALHURRA_MAIN/master.m3u8"],
   ["Omni Quran Mix", "", "https://backup.qurango.net/radio/mix"],
   ["Omni Quran Tarateel", "", "https://backup.qurango.net/radio/tarateel"],
   ["Mishary Alafasy Radio", "", "https://backup.qurango.net/radio/mishary_alafasi"],
@@ -260,7 +285,7 @@ const SEEDS = [
   ["Abdul Basit Abdul Samad Radio", "", "https://backup.qurango.net/radio/abdulbasit_abdulsamad"],
   ["Mustafa Ismail Radio", "", "https://backup.qurango.net/radio/mustafa_ismail"],
   ["Mahmoud Ali Al Banna Radio", "", "https://backup.qurango.net/radio/mahmoud_ali_albanna"],
-  ["Abu Bakr Al Shatri Radio", "", "https://backup.qurango.net/radio/abu_bakr_al_shatri"],
+  ["Abu Bakr Al Shatri Radio", "", "https://backup.qurango.net/radio/abu_bakr_al_shatri"]
 ];
 
 async function rb(path) {
@@ -349,7 +374,7 @@ async function build() {
     const seen = new Set(), sv = [];
     const ordered = g.slice().sort((a, z) => (/^https:/i.test(a.u) ? 0 : 1) - (/^https:/i.test(z.u) ? 0 : 1));
     for (const x of ordered) { const k = ukey(x.u); if (seen.has(k)) continue; seen.add(k); sv.push({ u: x.u, b: x.b, h: 0 }); if (sv.length >= 8) break; }
-    tmp.push({ idx, fam: !!(e && e.fam), ex: !e, sc, st: { id: "rj" + h32(key) + h32(key.split("").reverse().join("")), n: e ? e.name : best.n, c: cat, cc, p: Math.min(2000000000, Math.round(p)), s: sv } });
+    tmp.push({ idx, fam: !!(e && e.fam), ex: !e, sc, st: { id: "rj" + h32(key) + h32(key.split("").reverse().join("")), n: (e && !e.fam) ? e.name : best.n, c: cat, cc, p: Math.min(2000000000, Math.round(p)), s: sv } });
   }
 
   const stations = [], fb = new Map(), extras = [];
