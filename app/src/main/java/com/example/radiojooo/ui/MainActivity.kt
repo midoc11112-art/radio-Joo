@@ -75,6 +75,7 @@ class MainActivity : AppCompatActivity() {
         binding.rvStations.layoutManager = layoutManager
         binding.rvStations.adapter = adapter
         androidx.recyclerview.widget.ItemTouchHelper(StationAdapter.TouchCallback(adapter, android.view.ViewConfiguration.get(this).scaledTouchSlop)).attachToRecyclerView(binding.rvStations)
+        setupSelectionBar()
 
         // jump back to the top of the list in one tap
         binding.rvStations.addOnScrollListener(object : RecyclerView.OnScrollListener() {
@@ -335,14 +336,18 @@ class MainActivity : AppCompatActivity() {
         val bar = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
-            setBackgroundColor(android.graphics.Color.parseColor("#1E1B4B"))
-            setPadding(20, 22, 20, 22)
-            elevation = 48f
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 28f
+                setColor(android.graphics.Color.parseColor("#0F172A"))
+                setStroke(3, android.graphics.Color.parseColor("#8B5CF6"))
+            }
+            setPadding(20, 20, 20, 20)
+            elevation = 64f
             visibility = View.GONE
         }
 
         val tvCount = android.widget.TextView(this).apply {
-            setTextColor(android.graphics.Color.WHITE)
+            setTextColor(android.graphics.Color.parseColor("#38BDF8"))
             textSize = 13f
             setTypeface(null, android.graphics.Typeface.BOLD)
             layoutParams = android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
@@ -352,18 +357,18 @@ class MainActivity : AppCompatActivity() {
             return android.widget.TextView(this).apply {
                 text = label
                 setTextColor(android.graphics.Color.WHITE)
-                textSize = 12f
+                textSize = 11f
                 setTypeface(null, android.graphics.Typeface.BOLD)
-                setPadding(16, 14, 16, 14)
+                setPadding(14, 14, 14, 14)
                 background = android.graphics.drawable.GradientDrawable().apply {
-                    cornerRadius = 18f
+                    cornerRadius = 16f
                     setColor(android.graphics.Color.parseColor(bgHex))
                 }
                 val lp = android.widget.LinearLayout.LayoutParams(
                     android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
                     android.view.ViewGroup.LayoutParams.WRAP_CONTENT
                 )
-                lp.marginStart = 8
+                lp.marginStart = 6
                 layoutParams = lp
                 setOnClickListener { onClick() }
             }
@@ -404,14 +409,6 @@ class MainActivity : AppCompatActivity() {
             lp.marginStart = 12
             lp.marginEnd = 12
             rootGroup.addView(bar, lp)
-        } else if (rootGroup is android.widget.FrameLayout) {
-            val lp = android.widget.FrameLayout.LayoutParams(
-                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
-                android.view.Gravity.BOTTOM
-            )
-            lp.bottomMargin = 16
-            rootGroup.addView(bar, lp)
         } else {
             rootGroup.addView(bar)
         }
@@ -421,10 +418,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateSelectionBar(count: Int) {
+        if (selectionBarView == null) setupSelectionBar()
         val bar = selectionBarView ?: return
         if (!adapter.selectionMode) {
             bar.visibility = View.GONE
             return
+        }
+        val lp = bar.layoutParams as? android.widget.RelativeLayout.LayoutParams
+        if (lp != null) {
+            lp.bottomMargin = if (binding.miniPlayerContainer.visibility == View.VISIBLE) {
+                (binding.miniPlayerContainer.height.takeIf { it > 0 } ?: 135) + 20
+            } else {
+                16
+            }
+            bar.layoutParams = lp
         }
         bar.visibility = View.VISIBLE
         bar.bringToFront()

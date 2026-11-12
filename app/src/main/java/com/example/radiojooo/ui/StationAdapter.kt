@@ -62,18 +62,18 @@ class StationAdapter(
 
     fun getSelectedIds(): List<String> = selectedIds.toList()
 
-    fun moveSelectedTo(targetIndex: Int): Boolean {
-        if (selectedIds.isEmpty() || targetIndex !in items.indices) return false
+    fun moveSelectedAround(anchorId: String): Boolean {
+        if (selectedIds.isEmpty()) return false
+        val anchorPos = items.indexOfFirst { it.id == anchorId }
+        if (anchorPos < 0) return false
         val selectedItems = items.filter { it.id in selectedIds }
-        if (selectedItems.isEmpty()) return false
-        
-        // إزالة العناصر المحددة من أماكنها القديمة
-        items.removeAll(selectedItems)
-        
-        // حساب المؤشر الجديد بدقة بعد الحذف لضمان نزول المجموعة ككتلة واحدة
-        var newIdx = targetIndex.coerceIn(0, items.size)
-        items.addAll(newIdx, selectedItems)
-        
+        if (selectedItems.size <= 1) return false
+
+        val beforeAnchor = items.subList(0, anchorPos).count { it.id !in selectedIds }
+        items.removeAll { it.id in selectedIds }
+        val insertPos = beforeAnchor.coerceIn(0, items.size)
+        items.addAll(insertPos, selectedItems)
+
         notifyDataSetChanged()
         onOrder(items.map { it.id })
         return true
@@ -159,8 +159,6 @@ class StationAdapter(
         private var maxDisp = 0f
         private var heldId: String? = null
         private var heldName = ""
-        private var lastTargetPos = -1
-        private var groupDrag = false
 
         override fun isLongPressDragEnabled() = true
         override fun isItemViewSwipeEnabled() = false
@@ -168,14 +166,9 @@ class StationAdapter(
             makeMovementFlags(ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0)
 
         override fun onMove(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder, target: RecyclerView.ViewHolder): Boolean {
-            val from = viewHolder.adapterPosition
-            val to = target.adapterPosition
-            if (from < 0 || to < 0) return false
-            if (groupDrag) {
-                lastTargetPos = to
-                moved = true
-                return true
-            }
+            val from = viewHolder.bindingAdapterPosition
+            val to = target.bindingAdapterPosition
+            if (from == RecyclerView.NO_POSITION || to == RecyclerView.NO_POSITION) return false
             val ok = adapter.move(from, to)
             if (ok) moved = true
             return ok
@@ -186,13 +179,11 @@ class StationAdapter(
         override fun onSelectedChanged(viewHolder: RecyclerView.ViewHolder?, actionState: Int) {
             super.onSelectedChanged(viewHolder, actionState)
             if (actionState == ItemTouchHelper.ACTION_STATE_DRAG && viewHolder != null) {
-                val s = adapter.stationAt(viewHolder.adapterPosition)
+                val pos = viewHolder.bindingAdapterPosition
+                val s = if (pos != RecyclerView.NO_POSITION) adapter.stationAt(pos) else null
                 active = s != null
                 moved = false; maxDisp = 0f; heldId = s?.id; heldName = s?.name ?: ""
-                lastTargetPos = viewHolder.adapterPosition
                 if (!active) return
-                val sel = adapter.getSelectedIds()
-                groupDrag = adapter.selectionMode && sel.size > 1 && s!!.id in sel
                 adapter.beginDrag()
                 viewHolder.itemView.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                 viewHolder.itemView.alpha = 0.92f
@@ -202,13 +193,11 @@ class StationAdapter(
                 active = false
                 val id = heldId
                 val name = heldName
-                val wasGroup = groupDrag
-                val dropPos = lastTargetPos
-                groupDrag = false
                 val didMove = moved || maxDisp >= slop
-                if (wasGroup && moved && dropPos >= 0) {
+                val sel = adapter.getSelectedIds()
+                if (moved && id != null && adapter.selectionMode && sel.size > 1 && id in sel) {
                     adapter.endDrag(false)
-                    adapter.moveSelectedTo(dropPos)
+                    adapter.moveSelectedAround(id)
                 } else {
                     adapter.endDrag(moved)
                 }
