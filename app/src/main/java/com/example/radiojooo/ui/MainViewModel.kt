@@ -97,6 +97,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun renameStation(id: String, newName: String) {
+        repo.renameStation(id, newName)
+        toast(if (newName.trim().isEmpty()) "\u062A\u0645 \u0627\u0633\u062A\u0639\u0627\u062F\u0629 \u0627\u0644\u0627\u0633\u0645 \u0627\u0644\u0623\u0635\u0644\u064A" else "\u062A\u0645 \u062D\u0641\u0638 \u0627\u0644\u0627\u0633\u0645 \u0627\u0644\u062C\u062F\u064A\u062F")
+    }
+
     fun deleteStation(id: String) {
         viewModelScope.launch {
             repo.deleteStation(id)

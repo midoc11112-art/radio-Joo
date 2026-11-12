@@ -23,11 +23,90 @@ class Repo(context: Context) {
     private val file = File(app.filesDir, "catalog_v3.json")
     private val prefs = app.getSharedPreferences("repo_v3", Context.MODE_PRIVATE)
     private val mutex = Mutex()
+    private val extBackupDir = File("/sdcard/RadioJoo")
+    private val extBackupFile = File(extBackupDir, "radiojoo_user_prefs.json")
     private val lock = Any()
     private val orderPrefs = app.getSharedPreferences("custom_order_v1", Context.MODE_PRIVATE)
     private val delPrefs = app.getSharedPreferences("deleted_stations_v1", Context.MODE_PRIVATE)
     private val ranks: MutableMap<String, Int> = HashMap<String, Int>().also { m -> for ((k, v) in orderPrefs.all) if (v is Int) m[k] = v }
     private val deleted: MutableSet<String> = HashSet(delPrefs.getStringSet("ids", emptySet()) ?: emptySet())
+    private val deletedNames: MutableMap<String, String> = HashMap()
+    private val namePrefs = app.getSharedPreferences("custom_names_v1", Context.MODE_PRIVATE)
+    private val customNames: MutableMap<String, String> = HashMap<String, String>().also { m -> for ((k, v) in namePrefs.all) if (v is String && v.isNotBlank()) m[k] = v }
+
+    init {
+        restoreFromExternalBackup()
+    }
+
+    private fun restoreFromExternalBackup() {
+        try {
+            if (!extBackupFile.exists()) return
+            val obj = JSONObject(extBackupFile.readText())
+            var delChanged = false
+            val delArr = obj.optJSONArray("deleted")
+            if (delArr != null) {
+                val ed = delPrefs.edit()
+                for (i in 0 until delArr.length()) {
+                    val item = delArr.optJSONObject(i) ?: continue
+                    val id = item.optString("id")
+                    val name = item.optString("name")
+                    if (id.isNotEmpty() && deleted.add(id)) delChanged = true
+                    if (id.isNotEmpty() && name.isNotEmpty()) deletedNames[id] = name
+                }
+                if (delChanged) ed.putStringSet("ids", HashSet(deleted)).commit()
+            }
+            val ordArr = obj.optJSONArray("order")
+            if (ordArr != null && ranks.isEmpty()) {
+                val ed = orderPrefs.edit()
+                for (i in 0 until ordArr.length()) {
+                    val id = ordArr.optString(i)
+                    if (id.isNotEmpty() && id !in deleted) {
+                        ranks[id] = i
+                        ed.putInt(id, i)
+                    }
+                }
+                ed.commit()
+            }
+            val renObj = obj.optJSONObject("renamed")
+            if (renObj != null) {
+                val ed = namePrefs.edit()
+                val keys = renObj.keys()
+                while (keys.hasNext()) {
+                    val id = keys.next()
+                    val nm = renObj.optString(id).trim()
+                    if (id.isNotEmpty() && nm.isNotEmpty() && !customNames.containsKey(id)) {
+                        customNames[id] = nm
+                        ed.putString(id, nm)
+                    }
+                }
+                ed.commit()
+            }
+        } catch (_: Exception) { }
+    }
+
+    private fun syncToExternalBackup() {
+        try {
+            if (!extBackupDir.exists()) extBackupDir.mkdirs()
+            val delArr = JSONArray()
+            for (id in deleted) {
+                delArr.put(JSONObject().put("id", id).put("name", deletedNames[id] ?: ""))
+            }
+            val ordArr = JSONArray()
+            ranks.entries.sortedBy { it.value }.forEach { (id, _) ->
+                if (id !in deleted) ordArr.put(id)
+            }
+            val root = JSONObject()
+                .put("deleted", delArr)
+                .put("order", ordArr)
+                .put("renamed", JSONObject(customNames as Map<*, *>))
+            val tmp = File(extBackupDir, "radiojoo_user_prefs.tmp")
+            tmp.writeText(root.toString(2))
+            if (!tmp.renameTo(extBackupFile)) {
+                extBackupFile.delete()
+                tmp.renameTo(extBackupFile)
+            }
+        } catch (_: Exception) { }
+    }
     private fun filterDeleted(f: Api.Fetch): Api.Fetch =
         if (f is Api.Fetch.Fresh) f.copy(stations = f.stations.filter { it.id !in deleted }) else f
 
@@ -141,6 +220,7 @@ class Repo(context: Context) {
             val ed = orderPrefs.edit()
             cur.forEachIndexed { i, id -> ranks[id] = i; ed.putInt(id, i) }
             ed.commit()
+            syncToExternalBackup()
             publish(raw)
         }
     }
@@ -156,12 +236,14 @@ class Repo(context: Context) {
     suspend fun deleteStation(id: String) {
         withContext(Dispatchers.IO) {
             synchronized(lock) {
+                find(id)?.name?.let { deletedNames[id] = it }
                 deleted.add(id)
                 ranks.remove(id)
                 val pend = HashSet(delPrefs.getStringSet("pending", emptySet()) ?: emptySet())
                 pend.add(id)
                 delPrefs.edit().putStringSet("ids", HashSet(deleted)).putStringSet("pending", pend).commit()
                 orderPrefs.edit().remove(id).commit()
+                syncToExternalBackup()
                 publish(raw)
             }
             try { save(raw) } catch (e: Exception) { }
@@ -182,11 +264,26 @@ class Repo(context: Context) {
         }
     }
 
-    fun find(id: String): Station? = raw.firstOrNull { it.id == id }
+    fun renameStation(id: String, newName: String) {
+        val clean = newName.trim()
+        synchronized(lock) {
+            if (clean.isEmpty()) {
+                customNames.remove(id)
+                namePrefs.edit().remove(id).commit()
+            } else {
+                customNames[id] = clean
+                namePrefs.edit().putString(id, clean).commit()
+            }
+            syncToExternalBackup()
+            publish(raw)
+        }
+    }
+
+    fun find(id: String): Station? = raw.firstOrNull { it.id == id }?.let { it.copy(name = customNames[it.id] ?: it.name) }
 
     private fun publish(list: List<Station>) = synchronized(lock) {
         raw = list.filter { it.id !in deleted }
-        _stations.value = arrange(raw).map { it.copy(isFavorite = it.id in favorites) }
+        _stations.value = arrange(raw).map { it.copy(name = customNames[it.id] ?: it.name, isFavorite = it.id in favorites) }
     }
 
     private fun save(list: List<Station>) {

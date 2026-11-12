@@ -212,60 +212,34 @@ class MainActivity : AppCompatActivity() {
                 val pinnedNow = health.isPinned(s.url)
                 MaterialAlertDialogBuilder(this, R.style.RadioDialog)
                     .setTitle(host)
-                    .setItems(arrayOf(if (pinnedNow) "\u0625\u0644\u063A\u0627\u0621 \u0627\u0644\u062A\u062B\u0628\u064A\u062A" else "\u062A\u062B\u0628\u064A\u062A \u2705 (\u0623\u0648\u0644\u0648\u064A\u0629 \u0645\u0637\u0644\u0642\u0629)", "\u062D\u0638\u0631 \u274C (\u062A\u062C\u0627\u0647\u0644 \u062F\u0627\u0626\u0645)")) { _, which ->
-                        if (which == 0) {
-                            health.setPinned(s.url, !pinnedNow)
-                            Toast.makeText(this, if (pinnedNow) "\u062A\u0645 \u0625\u0644\u063A\u0627\u0621 \u0627\u0644\u062A\u062B\u0628\u064A\u062A" else "\u062A\u0645 \u062A\u062B\u0628\u064A\u062A \u0627\u0644\u062E\u0627\u062F\u0645 \u2705", Toast.LENGTH_SHORT).show()
-                        } else {
-                            health.setBanned(s.url, true)
-                            Toast.makeText(this, "\u062A\u0645 \u062D\u0638\u0631 \u0627\u0644\u062E\u0627\u062F\u0645 \u274C \u0648\u0644\u0646 \u064A\u064F\u0633\u062A\u062E\u062F\u0645 \u0628\u0639\u062F \u0627\u0644\u0622\u0646", Toast.LENGTH_SHORT).show()
-                        }
-                        reopen()
-                    }
-                    .setNegativeButton("\u0625\u0644\u063A\u0627\u0621", null)
-                    .show()
-                true
+                    .setItems(arrayOf(
+                "\u062A\u062D\u062F\u064A\u062B \u062E\u0648\u0627\u062F\u0645 \u0647\u0630\u0647 \u0627\u0644\u0625\u0630\u0627\u0639\u0629 \uD83D\uDD04",
+                "\u0625\u0639\u0627\u062F\u0629 \u062A\u0633\u0645\u064A\u0629 \u0627\u0644\u0625\u0630\u0627\u0639\u0629 \u270F\uFE0F",
+                "\u062D\u0630\u0641 \u0627\u0644\u0625\u0630\u0627\u0639\u0629 \u0646\u0647\u0627\u0626\u064A\u0627\u064B \uD83D\uDDD1\uFE0F"
+            )) { _, which ->
+                when (which) {
+                    0 -> vm.refreshStation(id)
+                    1 -> showRenameDialog(id, name)
+                    else -> confirmDeleteStation(id, name)
+                }
             }
-            list.addView(row.root)
-        }
-
-        // banned servers stay visible at the bottom so they can be un-banned with one tap
-        (ui.servers + st.servers).distinctBy { it.url }.filter { health.isBanned(it.url) }.forEach { s ->
-            val row = ItemServerBinding.inflate(LayoutInflater.from(this), list, false)
-            row.tvSrvIndex.text = "-"
-            row.tvSrvHost.text = Uri.parse(s.url).host ?: s.url
-            row.tvSrvKbps.text = if (s.kbps > 0) "${s.kbps} Kbps" else "\u2014 Kbps"
-            row.tvSrvState.text = "\u274C"
-            row.root.alpha = 0.55f
-            row.root.setOnClickListener {
-                health.setBanned(s.url, false)
-                Toast.makeText(this, "\u062A\u0645 \u0625\u0644\u063A\u0627\u0621 \u0627\u0644\u062D\u0638\u0631\u060C \u0633\u064A\u0639\u0648\u062F \u0627\u0644\u062E\u0627\u062F\u0645 \u0644\u0644\u062A\u0631\u062A\u064A\u0628 \u0639\u0646\u062F \u0627\u0644\u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0642\u0627\u062F\u0645", Toast.LENGTH_SHORT).show()
-                reopen()
-            }
-            list.addView(row.root)
-        }
-
-        if (list.childCount == 0) {
-            val empty = TextView(this)
-            empty.text = "\u0644\u0627 \u062A\u0648\u062C\u062F \u062E\u0648\u0627\u062F\u0645 \u0644\u0647\u0630\u0647 \u0627\u0644\u0625\u0630\u0627\u0639\u0629"
-            empty.setTextColor(0xFFE2E8F0.toInt())
-            list.addView(empty)
-        }
-
-        dialog = MaterialAlertDialogBuilder(this, R.style.RadioDialog)
-            .setTitle("\u0627\u0644\u062E\u0648\u0627\u062F\u0645 \u2022 ${st.name}")
-            .setView(root)
-            .setPositiveButton("\u0625\u063A\u0644\u0627\u0642", null)
+            .setNegativeButton("\u0625\u0644\u063A\u0627\u0621", null)
             .show()
     }
 
-    private fun showStationMenu(id: String, name: String) {
+    private fun showRenameDialog(id: String, currentName: String) {
+        val input = android.widget.EditText(this).apply {
+            setText(currentName)
+            setSelection(currentName.length)
+            setTextColor(android.graphics.Color.WHITE)
+            setHintTextColor(android.graphics.Color.GRAY)
+            hint = "\u0627\u0643\u062A\u0628 \u0627\u0644\u0627\u0633\u0645 \u0627\u0644\u062C\u062F\u064A\u062F (\u0623\u0648 \u0627\u062A\u0631\u0643\u0647 \u0641\u0627\u0631\u063A\u0627\u064B \u0644\u0644\u0623\u0635\u0644\u064A)"
+            setPadding(48, 32, 48, 32)
+        }
         MaterialAlertDialogBuilder(this, R.style.RadioDialog)
-            .setTitle(name)
-            .setItems(arrayOf(
-                "\u062A\u062D\u062F\u064A\u062B \u062E\u0648\u0627\u062F\u0645 \u0647\u0630\u0647 \u0627\u0644\u0625\u0630\u0627\u0639\u0629 \uD83D\uDD04",
-                "\u062D\u0630\u0641 \u0627\u0644\u0625\u0630\u0627\u0639\u0629 \u0646\u0647\u0627\u0626\u064A\u0627\u064B \uD83D\uDDD1\uFE0F"
-            )) { _, which -> if (which == 0) vm.refreshStation(id) else confirmDeleteStation(id, name) }
+            .setTitle("\u0625\u0639\u0627\u062F\u0629 \u062A\u0633\u0645\u064A\u0629 \u0627\u0644\u0625\u0630\u0627\u0639\u0629")
+            .setView(input)
+            .setPositiveButton("\u062D\u0641\u0638") { _, _ -> vm.renameStation(id, input.text.toString()) }
             .setNegativeButton("\u0625\u0644\u063A\u0627\u0621", null)
             .show()
     }
