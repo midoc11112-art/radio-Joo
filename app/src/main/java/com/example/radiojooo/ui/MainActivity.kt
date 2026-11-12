@@ -68,7 +68,8 @@ class MainActivity : AppCompatActivity() {
             onFavorite = { vm.toggleFavorite(it.id) },
             onMenu = { id, name -> showStationMenu(id, name) },
             onOrder = { ids -> vm.commitOrder(ids) },
-            onDragState = { dragging -> binding.swipeRefreshLayout.isEnabled = !dragging }
+            onDragState = { dragging -> binding.swipeRefreshLayout.isEnabled = !dragging },
+            onSelectionChanged = { count -> updateSelectionBar(count) }
         )
         layoutManager = LinearLayoutManager(this)
         binding.rvStations.layoutManager = layoutManager
@@ -267,14 +268,16 @@ class MainActivity : AppCompatActivity() {
                 "\u062A\u062D\u062F\u064A\u062B \u062E\u0648\u0627\u062F\u0645 \u0647\u0630\u0647 \u0627\u0644\u0625\u0630\u0627\u0639\u0629 \uD83D\uDD04",
                 "\u0625\u0639\u0627\u062F\u0629 \u062A\u0633\u0645\u064A\u0629 \u0627\u0644\u0625\u0630\u0627\u0639\u0629 \u270F\uFE0F",
                 "\u0646\u0642\u0644 \u0644\u0642\u0633\u0645 \u0622\u062E\u0631 \uD83D\uDCC2",
+                "\u0625\u0632\u0627\u0644\u0629 \u0645\u0646 \u0627\u0644\u0642\u0633\u0645 (\u062A\u0631\u0643\u0647\u0627 \u0641\u064A \u0627\u0644\u0643\u0644) \uD83D\uDCE4",
                 "\u062A\u062D\u062F\u064A\u062F \u2611\uFE0F",
-                "\u062D\u0630\u0641 \u0627\u0644\u0625\u0630\u0627\u0639\u0629 \u0646\u0647\u0627\u064A\u0627\u064B \uD83D\uDDD1\uFE0F"
+                "\u062D\u0630\u0641 \u0627\u0644\u0625\u0630\u0627\u0639\u0629 \u0646\u0647\u0627\u0626\u064A\u0627\u064B \uD83D\uDDD1\uFE0F"
             )) { _, which ->
                 when (which) {
                     0 -> vm.refreshStation(id)
                     1 -> showRenameDialog(id, name)
                     2 -> showMoveCategoryDialog(id, name)
-                    3 -> adapter.enterSelectionMode(id)
+                    3 -> vm.changeStationsCategoryBatch(listOf(id), "ALL")
+                    4 -> adapter.enterSelectionMode(id)
                     else -> confirmDeleteStation(id, name)
                 }
             }
@@ -300,8 +303,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showMoveCategoryDialog(id: String, name: String) {
-        val keys = arrayOf("EGYPT", "QURAN", "NEWS", "MUSIC", "SPORTS", "TALK")
-        val labels = keys.map { com.example.radiojooo.data.CategoryStyle.arabicName(it) }.toTypedArray()
+        val keys = arrayOf("EGYPT", "QURAN", "NEWS", "MUSIC", "SPORTS", "TALK", "ALL")
+        val labels = arrayOf(
+            com.example.radiojooo.data.CategoryStyle.arabicName("EGYPT"),
+            com.example.radiojooo.data.CategoryStyle.arabicName("QURAN"),
+            com.example.radiojooo.data.CategoryStyle.arabicName("NEWS"),
+            com.example.radiojooo.data.CategoryStyle.arabicName("MUSIC"),
+            com.example.radiojooo.data.CategoryStyle.arabicName("SPORTS"),
+            com.example.radiojooo.data.CategoryStyle.arabicName("TALK"),
+            "\u0625\u0632\u0627\u0644\u0629 \u0645\u0646 \u0627\u0644\u0642\u0633\u0645 (\u062A\u0631\u0643\u0647\u0627 \u0641\u064A \u0627\u0644\u0643\u0644 \u0641\u0642\u0637)"
+        )
         val currentCat = vm.stationCategory(id)
         var selectedIdx = keys.indexOf(currentCat).coerceAtLeast(0)
         MaterialAlertDialogBuilder(this, R.style.RadioDialog)
@@ -319,22 +330,20 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupSelectionBar() {
         val rootGroup = binding.root as? android.view.ViewGroup ?: return
-        
-        // إزالة الشريط القديم إن وجد لمنع التكرار
         selectionBarView?.let { rootGroup.removeView(it) }
 
         val bar = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
-            setBackgroundColor(android.graphics.Color.parseColor("#1E1B4B")) // لون خلفية بنفسجي داكن وواضح
-            setPadding(32, 28, 32, 28)
-            elevation = 32f
+            setBackgroundColor(android.graphics.Color.parseColor("#1E1B4B"))
+            setPadding(20, 22, 20, 22)
+            elevation = 48f
             visibility = View.GONE
         }
-        
+
         val tvCount = android.widget.TextView(this).apply {
             setTextColor(android.graphics.Color.WHITE)
-            textSize = 15f
+            textSize = 13f
             setTypeface(null, android.graphics.Typeface.BOLD)
             layoutParams = android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
@@ -343,16 +352,18 @@ class MainActivity : AppCompatActivity() {
             return android.widget.TextView(this).apply {
                 text = label
                 setTextColor(android.graphics.Color.WHITE)
-                textSize = 14f
+                textSize = 12f
                 setTypeface(null, android.graphics.Typeface.BOLD)
-                setPadding(24, 16, 24, 16)
-                val gd = android.graphics.drawable.GradientDrawable().apply {
-                    cornerRadius = 20f
+                setPadding(16, 14, 16, 14)
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = 18f
                     setColor(android.graphics.Color.parseColor(bgHex))
                 }
-                background = gd
-                val lp = android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT)
-                lp.marginStart = 14
+                val lp = android.widget.LinearLayout.LayoutParams(
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+                lp.marginStart = 8
                 layoutParams = lp
                 setOnClickListener { onClick() }
             }
@@ -363,6 +374,13 @@ class MainActivity : AppCompatActivity() {
             val sel = adapter.getSelectedIds()
             if (sel.isNotEmpty()) showBatchMoveCategoryDialog(sel)
         }
+        val btnUnassign = mkBtn("\u0625\u0632\u0627\u0644\u0629 \u0642\u0633\u0645 \uD83D\uDCE4", "#D97706") {
+            val sel = adapter.getSelectedIds()
+            if (sel.isNotEmpty()) {
+                vm.changeStationsCategoryBatch(sel, "ALL")
+                adapter.exitSelectionMode()
+            }
+        }
         val btnDel = mkBtn("\u062D\u0630\u0641 \uD83D\uDDD1\uFE0F", "#DC2626") {
             val sel = adapter.getSelectedIds()
             if (sel.isNotEmpty()) confirmBatchDeleteStations(sel)
@@ -372,21 +390,32 @@ class MainActivity : AppCompatActivity() {
         bar.addView(tvCount)
         bar.addView(btnAll)
         bar.addView(btnMoveCat)
+        bar.addView(btnUnassign)
         bar.addView(btnDel)
         bar.addView(btnCancel)
 
-        if (rootGroup is android.widget.FrameLayout) {
+        if (rootGroup is android.widget.RelativeLayout) {
+            val lp = android.widget.RelativeLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            lp.addRule(android.widget.RelativeLayout.ALIGN_PARENT_BOTTOM)
+            lp.bottomMargin = 16
+            lp.marginStart = 12
+            lp.marginEnd = 12
+            rootGroup.addView(bar, lp)
+        } else if (rootGroup is android.widget.FrameLayout) {
             val lp = android.widget.FrameLayout.LayoutParams(
-                android.view.ViewGroup.LayoutParams.MATCH_PARENT, 
-                android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
                 android.view.Gravity.BOTTOM
             )
-            // إضافة مسافة أمان من الأسفل لتجنب تغطية شريط التنقل
-            lp.bottomMargin = 120
+            lp.bottomMargin = 16
             rootGroup.addView(bar, lp)
         } else {
             rootGroup.addView(bar)
         }
+        bar.bringToFront()
         selectionBarView = bar
         selectionCountTv = tvCount
     }
@@ -398,6 +427,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         bar.visibility = View.VISIBLE
+        bar.bringToFront()
         selectionCountTv?.text = "\u0645\u062D\u062F\u062F: \$count"
     }
 

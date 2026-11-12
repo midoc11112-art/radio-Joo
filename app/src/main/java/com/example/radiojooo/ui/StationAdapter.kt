@@ -134,7 +134,7 @@ class StationAdapter(
     override fun onBindViewHolder(h: VH, position: Int) {
         val s = items[position]
         val isSel = selectionMode && s.id in selectedIds
-        h.b.tvStationName.text = if (selectionMode) (if (isSel) "☑️ ${s.name}" else "⬜ ${s.name}") else s.name
+        h.b.tvStationName.text = if (selectionMode) (if (isSel) "\u2611\uFE0F ${s.name}" else "\u2B1C ${s.name}") else s.name
         h.b.tvServersBadge.text = "${s.servers.size} \u062E\u0648\u0627\u062F\u0645"
         h.b.tvCountryBadge.text = if (s.countryCode.isEmpty()) "AR" else s.countryCode
         h.b.tvBitrateBadge.text = if (s.bitrate > 0) "${s.bitrate} Kbps" else "\u2014 Kbps"
@@ -144,7 +144,13 @@ class StationAdapter(
         h.b.root.setOnClickListener {
             if (selectionMode) toggleSelection(s.id) else onClick(s)
         }
-        h.b.root.setStrokeColor(if (s.id == playingId) Color.parseColor("#8B5CF6") else Color.parseColor("#1E293B"))
+        h.b.root.setStrokeColor(
+            when {
+                isSel -> Color.parseColor("#10B981")
+                s.id == playingId -> Color.parseColor("#8B5CF6")
+                else -> Color.parseColor("#1E293B")
+            }
+        )
     }
 
     class TouchCallback(private val adapter: StationAdapter, private val slop: Int) : ItemTouchHelper.Callback() {
@@ -153,6 +159,8 @@ class StationAdapter(
         private var maxDisp = 0f
         private var heldId: String? = null
         private var heldName = ""
+        private var lastTargetPos = -1
+        private var groupDrag = false
 
         override fun isLongPressDragEnabled() = true
         override fun isItemViewSwipeEnabled() = false
@@ -163,6 +171,11 @@ class StationAdapter(
             val from = viewHolder.adapterPosition
             val to = target.adapterPosition
             if (from < 0 || to < 0) return false
+            if (groupDrag) {
+                lastTargetPos = to
+                moved = true
+                return true
+            }
             val ok = adapter.move(from, to)
             if (ok) moved = true
             return ok
@@ -176,7 +189,10 @@ class StationAdapter(
                 val s = adapter.stationAt(viewHolder.adapterPosition)
                 active = s != null
                 moved = false; maxDisp = 0f; heldId = s?.id; heldName = s?.name ?: ""
+                lastTargetPos = viewHolder.adapterPosition
                 if (!active) return
+                val sel = adapter.getSelectedIds()
+                groupDrag = adapter.selectionMode && sel.size > 1 && s!!.id in sel
                 adapter.beginDrag()
                 viewHolder.itemView.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                 viewHolder.itemView.alpha = 0.92f
@@ -186,8 +202,16 @@ class StationAdapter(
                 active = false
                 val id = heldId
                 val name = heldName
+                val wasGroup = groupDrag
+                val dropPos = lastTargetPos
+                groupDrag = false
                 val didMove = moved || maxDisp >= slop
-                adapter.endDrag(moved)
+                if (wasGroup && moved && dropPos >= 0) {
+                    adapter.endDrag(false)
+                    adapter.moveSelectedTo(dropPos)
+                } else {
+                    adapter.endDrag(moved)
+                }
                 if (!didMove && id != null) adapter.requestMenu(id, name)
             }
         }
