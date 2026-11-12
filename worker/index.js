@@ -1,4 +1,4 @@
-/* RADIO-JOO Autonomous Flagship Worker (v3) - Open Arab/Egypt/Quran Discovery + MP3Quran + Self-Healing */
+/* RADIO-JOO Balanced Autonomous Worker (v4) - 100% Live API Discovery, Zero Hardcoded URLs, Quality Capped, Live Probed */
 const MIRRORS = [
   "https://de1.api.radio-browser.info",
   "https://fi1.api.radio-browser.info",
@@ -7,7 +7,8 @@ const MIRRORS = [
   "https://nl1.api.radio-browser.info"
 ];
 const ARAB_CC = new Set("EG SA AE KW QA BH OM YE IQ SY LB JO PS LY TN DZ MA MR SD SO DJ KM".split(" "));
-const TTL = 6 * 3600 * 1000, THROTTLE = 30000, MAXSRV = 15, BADMS = 3 * 86400000, HSMS = 7 * 86400000;
+const TTL = 6 * 3600 * 1000, THROTTLE = 30000, MAXSRV = 12, BADMS = 3 * 86400000, HSMS = 7 * 86400000;
+const CAT_CAPS = { QURAN: 140, NEWS: 60, MUSIC: 75, SPORTS: 25, TALK: 25, EGYPT: 65 };
 let MEM = null, BUILDING = null, LASTREF = 0;
 
 function norm(s) {
@@ -32,10 +33,10 @@ const RE_NEWS = /news|akhbar|jazeera|arabiya|hadath|france ?24|dw arabic|rt arab
 const RE_TALK = /talk|hewar|discussion|call ?in|حوار|برنامج|توك|نقاش|مصر الجديدة|ميدي 1/;
 const RE_TARAB = /tarab|tarb|oriental|golden (era|age)|vintage|andalus|muwashah|classic arabic|kalthoum|halim|fairuz|fayrouz|wahab|atrash|asmahan|warda|najat|طرب|الزمن الجميل|زمان|قدیم|موشحات|ام كلثوم|عبد الحليم|فيروز|عبد الوهاب|فريد الاطرش|اسمهان|وردة|نجاة|صباح فخري|سيد درويش/;
 const RE_MUSIC = /music|musique|pop|hits|song|dance|hip hop|rap|rock|jazz|mahragan|chaabi|shaabi|top ?40|lounge|rnb|nogoum|nile fm|mega fm|nagham|9090|mix fm|nrj|rotana|mbc fm|mosaique|tes3enat|aghani|masriyat|rehab|hawak|موسيقى|مهرجانات|شعبي|اغاني|نجوم|نايل|ميجا|نغم|روتانا|تسعينات|مصريات|رحاب|هواك|ميكس|انرجي/;
-const RE_DROP = /christian|gospel|bible|church|catholic|orthodox|corleone|x_x|s_o_l_l_y|solly|nfeshal|test stream|مسيحي|كنيسة|انجيل/;
+const RE_DROP = /christian|gospel|bible|church|catholic|orthodox|corleone|x_x|s_o_l_l_y|solly|nfeshal|test stream|english|espanol|francais|deutsch|مسيحي|كنيسة|انجيل/;
 const RE_EGYPT = /egypt|misr|masr|cairo|alexandria|nile|ertu|nogoum|mega|nagham|9090|shaabi|masriyat|tes3enat|rehab|hawak|barnamg|sawt el arab|shabab|on sport|مصر|القاهرة|الاسكندرية|النيل|نجوم|ميجا|نغم|شعبي|مصريات|تسعينات|رحاب|هواك|البرنامج العام|صوت العرب|الشباب والرياضة|اون سبورت/;
 
-/* Strict Pure-Audio Guard: ZERO TV, ZERO Video */
+/* Strict Pure-Audio Guard */
 const VID_EXT = /\.(?:mp4|m4v|mkv|webm|flv|avi|mov|wmv|mpd|3gp|ts)(?:[?#]|$)/i;
 const VID_CODEC = /264|265|hevc|avc|vp[89]|mpeg-?ts|mp2t|video/i;
 const TV_WORD = /\btv\b|television|\bhdtv\b|\bvideo\b|تلفزيون|تليفزيون|قناة فضائية|مباشر فيديو/i;
@@ -49,7 +50,7 @@ function isPureAudio(u, name, codec, tags) {
   return true;
 }
 
-/* Priority Boosters for Iconic Stations so they always appear at the top of each tab */
+/* Priority Boosters for Iconic Stations (Name normalization & ranking only — ZERO hardcoded URLs) */
 const BOOST = [
   [/quran.{0,20}(cairo|egypt|misr|masr)|القرآن.{0,20}القاهرة|القران.{0,20}القاهرة/, 990000000, "Quran Cairo - إذاعة القرآن الكريم من القاهرة", "QURAN", "EG"],
   [/makkah|mecca|الحرم المكي|مكة المكرمة/, 980000000, "Saudi Quran Makkah - إذاعة القرآن الكريم من مكة المكرمة", "QURAN", "SA"],
@@ -91,34 +92,6 @@ const BOOST = [
   [/wahab|عبد الوهاب/, 945000000, "Mohamed Abdel Wahab - محمد عبد الوهاب", "MUSIC", "EG"],
   [/rotana|روتانا/, 940000000, "Rotana FM - روتانا إف إم", "MUSIC", "SA"],
   [/mbc ?fm/, 935000000, "MBC FM - إم بي سي إف إم", "MUSIC", "SA"]
-];
-
-const SEEDS = [
-  ["Quran Cairo - إذاعة القرآن الكريم من القاهرة", "QURAN", "EG", "https://stream.radiojar.com/8s5u5tpdtwzuv", 64],
-  ["Quran Cairo - إذاعة القرآن الكريم من القاهرة", "QURAN", "EG", "https://n0a.radiojar.com/8s5u5tpdtwzuv", 64],
-  ["Nogoum FM - نجوم إف إم", "MUSIC", "EG", "https://audio.nrpstream.com/listen/nogoum_fm/radio.mp3", 64],
-  ["Nile FM - نايل إف إم", "MUSIC", "EG", "https://audio.nrpstream.com/listen/nile_fm/radio.mp3", 64],
-  ["Mega FM - ميجا إف إم", "MUSIC", "EG", "https://audio.nrpstream.com/listen/mega_fm/radio.mp3", 64],
-  ["Nagham FM - نغم إف إم", "MUSIC", "EG", "https://ahram.radioca.st/stream", 64],
-  ["Radio 9090 - الراديو 9090", "MUSIC", "EG", "https://9090streaming.mobtada.com/9090FMEGYPT", 64],
-  ["Radio Hits - راديو هيتس", "MUSIC", "EG", "https://n02.radiojar.com/8s5u5tpdtwzuv", 64],
-  ["Shaabi FM - شعبي إف إم", "MUSIC", "EG", "https://radio95.radioca.st/stream", 64],
-  ["Tes3enat FM - تسعينات إف إم", "MUSIC", "EG", "https://eu1.fastcast4u.com/proxy/tes3enat?mp=/1", 64],
-  ["Aghani Aghani - أغاني أغاني", "MUSIC", "EG", "https://streaming.cdn.customchannels.net/aghani_aghani/playlist.m3u8", 64],
-  ["Radio Masr - راديو مصر", "NEWS", "EG", "https://live.radiomasr.net/RADIOMASR", 64],
-  ["ON Sport FM - أون سبورت إف إم", "SPORTS", "EG", "https://carina.streamerr.co:2020/stream/onsportfm", 64],
-  ["Al Jazeera - الجزيرة", "NEWS", "QA", "https://live-hls-audio-web-aja.getaj.net/AJA/index.m3u8", 48],
-  ["Al Arabiya - العربية", "NEWS", "SA", "https://live.alarabiya.net/alarabiapublish/alarabiya.stream/playlist.m3u8", 48],
-  ["BBC Arabic - بي بي سي عربي", "NEWS", "GB", "https://stream.live.vc.bbcmedia.co.uk/bbc_arabic_radio", 48],
-  ["Sky News Arabia - سكاي نيوز عربية", "NEWS", "AE", "https://radio.skynewsarabia.com/stream/radio/sna", 64],
-  ["Monte Carlo Doualiya - مونت كارلو الدولية", "NEWS", "FR", "https://montecarlodoualiya128k.ice.infomaniak.ch/mc-doualiya-128.mp3", 64],
-  ["France 24 Arabic - فرانس 24", "NEWS", "FR", "https://france24.ice.infomaniak.ch/france24-ar-64.mp3", 64],
-  ["Asharq News - الشرق للأخبار", "NEWS", "SA", "https://svs.itworkscdn.net/asharqradio/asharqradio.stream/playlist.m3u8", 48],
-  ["Sputnik Arabic - سبوتنيك عربي", "NEWS", "RU", "https://icecast-rian.cdnvideo.ru/voicearb", 64],
-  ["RT Arabic - روسيا اليوم", "NEWS", "RU", "https://rt-arb.rttv.com/live/rtarab/playlist.m3u8", 64],
-  ["DW Arabic - دويتشه فيله", "NEWS", "DE", "https://dwamdstream103.akamaized.net/hls/live/2015526/dwstream103/index.m3u8", 48],
-  ["Omni Quran - إذاعة القرآن المنوعة", "QURAN", "SA", "https://backup.qurango.net/radio/mix", 64],
-  ["Omni Quran Tarateel - تراتيل خاشعة", "QURAN", "SA", "https://backup.qurango.net/radio/tarateel", 64]
 ];
 
 const NOISE = new Set(["fm","radio","live","stream","streaming","online","hd","mp3","aac","official","station","channel","the","mhz","khz","kbps","www","com","net","http","https","el","al","اذاعة","راديو","بث","مباشر","اونلاين"]);
@@ -169,12 +142,33 @@ function kbOf(x, hs) { return x.b > 0 ? x.b : (hs.kb.get(h32(ukey(x.u))) || 0); 
 function srvRank(x, hs) {
   const k = h32(ukey(x.u)), kb = kbOf(x, hs);
   const bucket = kb <= 0 ? 3 : kb <= 48 ? 0 : kb <= 80 ? 1 : kb <= 128 ? 2 : 3;
-  return (hs.bad.has(k) ? 5000 : 0) + (/^https:/i.test(x.u) ? 0 : 150) + bucket * 25 + (x.seed ? 10 : 0);
+  return (hs.bad.has(k) ? 5000 : 0) + (/^https:/i.test(x.u) ? 0 : 150) + bucket * 25;
+}
+
+async function probe(u) {
+  try {
+    const hls = /\.m3u8(?:[?#]|$)/i.test(u);
+    const hd = { "Icy-MetaData": "0", "User-Agent": "RadioJoo/4.0" };
+    if (!hls) hd.Range = "bytes=0-1023";
+    const r = await fetch(u, { headers: hd, signal: AbortSignal.timeout(4000) });
+    const ct = (r.headers.get("content-type") || "").toLowerCase();
+    const drop = () => { try { r.body && r.body.cancel(); } catch (e) { } };
+    if (!(r.ok || r.status === 206)) { drop(); return "dead"; }
+    if (/^video\//.test(ct) || /mp2t|x-flv|x-matroska/.test(ct)) { drop(); return "video"; }
+    if (hls || /mpegurl/.test(ct)) {
+      const t = (await r.text()).slice(0, 15000);
+      if (!/#EXTM3U/.test(t)) return "dead";
+      if (/RESOLUTION=|CODECS="[^"]*(?:avc|hvc|hev|vp0|av01)|#EXT-X-I-FRAME/i.test(t)) return "video";
+      return "ok";
+    }
+    drop();
+    return /audio|ogg|octet-stream|aac|mpeg|binary|stream/.test(ct) ? "ok" : "dead";
+  } catch (e) { return "dead"; }
 }
 
 async function fetchJSON(url, timeout = 20000) {
   try {
-    const r = await fetch(url, { headers: { "User-Agent": "RadioJoo/3.0", "Accept": "application/json" }, signal: AbortSignal.timeout(timeout) });
+    const r = await fetch(url, { headers: { "User-Agent": "RadioJoo/4.0", "Accept": "application/json" }, signal: AbortSignal.timeout(timeout) });
     if (r.ok) return await r.json();
   } catch (e) { }
   return null;
@@ -193,18 +187,17 @@ async function build(env) {
   const hs = await loadHS(env);
   const b = "/json/stations/search?hidebroken=true&order=clickcount&reverse=true&limit=";
   const queries = [
-    b + "2000&language=arabic",
-    b + "1000&countrycode=EG",
-    b + "1000&tag=quran",
-    b + "500&tag=arabic",
-    b + "300&countrycode=SA",
-    b + "300&countrycode=AE",
-    b + "300&countrycode=LB",
-    b + "300&countrycode=QA",
-    b + "200&name=qurango",
-    b + "200&name=mp3quran",
-    b + "200&name=tarab",
-    b + "200&name=sputnik"
+    b + "1500&language=arabic",
+    b + "800&countrycode=EG",
+    b + "800&tag=quran",
+    b + "250&countrycode=SA",
+    b + "200&countrycode=AE",
+    b + "200&countrycode=LB",
+    b + "200&countrycode=QA",
+    b + "150&name=qurango",
+    b + "150&name=tarab",
+    b + "100&name=sputnik",
+    b + "100&name=tes3enat"
   ];
 
   const [rbResults, mp3Quran] = await Promise.all([
@@ -214,7 +207,6 @@ async function build(env) {
 
   const rawItems = [];
 
-  // 1. Ingest Radio-Browser stations
   for (const arr of rbResults) {
     for (const r of arr) {
       const u = r.url_resolved || r.url;
@@ -228,16 +220,14 @@ async function build(env) {
       const lang = String(r.language || "").toLowerCase();
       const isArab = ARAB_CC.has(cc) || lang.includes("arab") || /[\u0600-\u06FF]/.test(n) || RE_QURAN.test(nn) || RE_NEWS.test(nn) || RE_TARAB.test(nn);
       if (!isArab) continue;
-      rawItems.push({
-        n, nn, u, cc, tags,
-        b: r.bitrate | 0,
-        sc: (r.clickcount | 0) + (r.votes | 0) * 10,
-        seed: false
-      });
+      const clicks = r.clickcount | 0, votes = r.votes | 0;
+      const isBoosted = BOOST.some(br => br[0].test(nn));
+      // Filter out dead/junk low-popularity filler stations unless boosted or Egyptian
+      if (!isBoosted && cc !== "EG" && clicks < 80 && votes < 3) continue;
+      rawItems.push({ n, nn, u, cc, tags, b: r.bitrate | 0, sc: clicks + votes * 10, boost: isBoosted });
     }
   }
 
-  // 2. Ingest MP3Quran Live Radios (100+ pure-audio low-bitrate Quran stations)
   if (mp3Quran && Array.isArray(mp3Quran.radios)) {
     for (const q of mp3Quran.radios) {
       const n = String(q.name || "").trim();
@@ -245,25 +235,13 @@ async function build(env) {
       if (!n || !isPureAudio(u, n, "MP3", ["quran"])) continue;
       rawItems.push({
         n: n.includes("إذاعة") ? n : ("إذاعة " + n),
-        nn: norm(n),
-        u,
+        nn: norm(n), u,
         cc: RE_EGYPT.test(norm(n)) ? "EG" : "SA",
-        tags: ["quran", "arabic"],
-        b: 64,
-        sc: 5000,
-        seed: false
+        tags: ["quran", "arabic"], b: 64, sc: 4000, boost: false
       });
     }
   }
 
-  // 3. Ingest Curated Seeds
-  for (const [n, cat, cc, u, b] of SEEDS) {
-    rawItems.push({
-      n, nn: norm(n), u, cc, tags: [cat.toLowerCase()], b, sc: 1000, seed: true, forcedCat: cat
-    });
-  }
-
-  // Group & Deduplicate by Canonical Name (merging all servers under one station)
   const groups = new Map();
   for (const item of rawItems) {
     let matchedBoost = null;
@@ -277,17 +255,16 @@ async function build(env) {
     g.items.push(item);
   }
 
-  const stations = [];
+  const allStations = [];
   for (const [key, g] of groups) {
     g.items.sort((a, z) => z.sc - a.sc);
-    const best = g.items.find(x => !x.seed) || g.items[0];
+    const best = g.items[0];
     const bRule = g.boost;
     const name = bRule ? bRule[2] : best.n;
     const cc = bRule ? bRule[4] : (g.items.map(x => x.cc).find(c => c && c.length === 2) || (RE_EGYPT.test(best.nn) ? "EG" : "AR"));
     const allTags = [...new Set(g.items.flatMap(x => x.tags))];
-    const cat = bRule ? bRule[3] : (best.forcedCat || classifyStation(name, allTags, cc));
+    const cat = bRule ? bRule[3] : classifyStation(name, allTags, cc);
 
-    // Merge & sort servers: working first, HTTPS first, cheapest bitrate first
     const ranked = g.items.slice().sort((a, z) => srvRank(a, hs) - srvRank(z, hs));
     const seenUrls = new Set(), servers = [];
     for (const x of ranked) {
@@ -302,11 +279,40 @@ async function build(env) {
     let pop = bRule ? bRule[1] : g.items.reduce((acc, x) => acc + x.sc, 0);
     pop += servers.length * 500;
     const id = "rj" + h32(key) + h32(key.split("").reverse().join(""));
-    stations.push({ id, n: name, c: cat, cc, p: Math.min(2000000000, pop), s: servers });
+    allStations.push({ id, n: name, c: cat, cc, p: Math.min(2000000000, pop), s: servers, boosted: !!bRule });
   }
 
+  // Apply smart per-category quality caps so there is ZERO filler
+  allStations.sort((a, z) => z.p - a.p);
+  const catCount = {};
+  let stations = [];
+  for (const st of allStations) {
+    const cap = CAT_CAPS[st.c] || 50;
+    const cur = catCount[st.c] || 0;
+    if (!st.boosted && cur >= cap) continue;
+    catCount[st.c] = cur + 1;
+    stations.push({ id: st.id, n: st.n, c: st.c, cc: st.cc, p: st.p, s: st.s });
+  }
+
+  // Live probe primary servers of top stations within subrequest budget (max 36 probes)
+  const toProbe = [];
+  for (const st of stations) {
+    if (st.s.length && toProbe.length < 36) toProbe.push({ st, srv: st.s[0] });
+  }
+  for (let i = 0; i < toProbe.length; i += 6) {
+    const batch = toProbe.slice(i, i + 6);
+    const res = await Promise.all(batch.map(x => probe(x.srv.u)));
+    batch.forEach((x, idx) => {
+      if (res[idx] === "video") {
+        x.st.s = x.st.s.filter(s => s.u !== x.srv.u);
+      } else if (res[idx] === "dead" && x.st.s.length > 1) {
+        // Demote dead primary server to the end automatically
+        x.st.s = x.st.s.slice(1).concat(x.srv);
+      }
+    });
+  }
+  stations = stations.filter(st => st.s.length > 0);
   if (stations.length < 50) return null;
-  stations.sort((a, z) => z.p - a.p);
 
   const cats = {}; let totalServers = 0;
   for (const s of stations) { cats[s.c] = (cats[s.c] || 0) + 1; totalServers += s.s.length; }
@@ -371,12 +377,18 @@ export default {
       const q0 = st.n.split(" - ")[0].trim();
       const found = await fetchRB("/json/stations/search?hidebroken=true&limit=60&order=clickcount&reverse=true&name=" + encodeURIComponent(q0));
       const have = new Set(st.s.map(x => ukey(x.u)));
+      const cands = [];
       for (const r of found) {
         const u = r.url_resolved || r.url;
         if (!isPureAudio(u, r.name, r.codec, []) || have.has(ukey(u))) continue;
         have.add(ukey(u));
-        st.s.push({ u, b: r.bitrate | 0, h: 0 });
-        if (st.s.length >= MAXSRV) break;
+        cands.push({ u, b: r.bitrate | 0, h: 0 });
+        if (cands.length >= 6) break;
+      }
+      if (cands.length) {
+        const res = await Promise.all(cands.map(x => probe(x.u)));
+        cands.forEach((x, i) => { if (res[i] === "ok") st.s.unshift(x); });
+        st.s = st.s.slice(0, MAXSRV);
       }
       return json({ station: st });
     }
@@ -402,7 +414,7 @@ export default {
       } catch (e) { }
       return json({ ok: true });
     }
-    return json({ ok: true, service: "radio-joo-proxy", v: 3 });
+    return json({ ok: true, service: "radio-joo-proxy", v: 4 });
   },
   async scheduled(event, env, ctx) { ctx.waitUntil(rebuild(env)); },
 };
