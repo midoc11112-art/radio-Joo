@@ -202,6 +202,7 @@ class RadioService : Service() {
             ACTION_SLEEP -> {
                 val min = intent?.getIntExtra(EXTRA_MIN, 0) ?: 0
                 sleepEndAt = if (min > 0) SystemClock.elapsedRealtime() + min * 60_000L else 0L
+                scheduleSleepAlarm(min)
                 lastNotifKey = ""
                 publish()
             }
@@ -268,6 +269,7 @@ class RadioService : Service() {
     }
 
     private fun stopEverything() {
+        cancelSleepAlarm()
         main.removeCallbacksAndMessages(null)
         Recorder.stop()
         try { player.stop() } catch (e: Exception) { }
@@ -281,6 +283,7 @@ class RadioService : Service() {
     }
 
     private fun exitApp() {
+        cancelSleepAlarm()
         main.removeCallbacksAndMessages(null)
         Recorder.stop()
         try { player.stop() } catch (e: Exception) { }
@@ -293,10 +296,35 @@ class RadioService : Service() {
         try { getSystemService(ActivityManager::class.java)?.appTasks?.forEach { it.finishAndRemoveTask() } } catch (e: Exception) { }
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
-        main.postDelayed({ Process.killProcess(Process.myPid()) }, 400L)
+        Thread { try { Thread.sleep(400L) } catch (e: Exception) { }; Process.killProcess(Process.myPid()) }.start()
     }
 
-    private fun startAttempt(i: Int) {
+    private fun sleepPendingIntent(): PendingIntent =
+        PendingIntent.getService(
+            this, 4, Intent(this, RadioService::class.java).setAction(ACTION_EXIT),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+    /** Safety net: the alarm fires the very same ACTION_EXIT as the notification X button, even if the CPU was asleep. */
+    private fun scheduleSleepAlarm(minutes: Int) {
+        val am = getSystemService(android.app.AlarmManager::class.java) ?: return
+        val pi = sleepPendingIntent()
+        try { am.cancel(pi) } catch (e: Exception) { }
+        if (minutes <= 0) return
+        val at = SystemClock.elapsedRealtime() + minutes * 60_000L
+        try {
+            am.setExactAndAllowWhileIdle(android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi)
+        } catch (e: Exception) {
+            try { am.setAndAllowWhileIdle(android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi) } catch (e2: Exception) { }
+        }
+    }
+
+    private fun cancelSleepAlarm() {
+        try { getSystemService(android.app.AlarmManager::class.java)?.cancel(sleepPendingIntent()) } catch (e: Exception) { }
+    }
+
+    
+private fun startAttempt(i: Int) {
         main.removeCallbacks(watchdog)
         if (i >= order.size) { allServersFailed(); return }
         index = i
