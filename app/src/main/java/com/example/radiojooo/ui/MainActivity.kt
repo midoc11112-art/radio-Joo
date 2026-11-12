@@ -267,12 +267,14 @@ class MainActivity : AppCompatActivity() {
                 "\u062A\u062D\u062F\u064A\u062B \u062E\u0648\u0627\u062F\u0645 \u0647\u0630\u0647 \u0627\u0644\u0625\u0630\u0627\u0639\u0629 \uD83D\uDD04",
                 "\u0625\u0639\u0627\u062F\u0629 \u062A\u0633\u0645\u064A\u0629 \u0627\u0644\u0625\u0630\u0627\u0639\u0629 \u270F\uFE0F",
                 "\u0646\u0642\u0644 \u0644\u0642\u0633\u0645 \u0622\u062E\u0631 \uD83D\uDCC2",
-                "\u062D\u0630\u0641 \u0627\u0644\u0625\u0630\u0627\u0639\u0629 \u0646\u0647\u0627\u0626\u064A\u0627\u064B \uD83D\uDDD1\uFE0F"
+                "\u062A\u062D\u062F\u064A\u062F \u2611\uFE0F",
+                "\u062D\u0630\u0641 \u0627\u0644\u0625\u0630\u0627\u0639\u0629 \u0646\u0647\u0627\u064A\u0627\u064B \uD83D\uDDD1\uFE0F"
             )) { _, which ->
                 when (which) {
                     0 -> vm.refreshStation(id)
                     1 -> showRenameDialog(id, name)
                     2 -> showMoveCategoryDialog(id, name)
+                    3 -> adapter.enterSelectionMode(id)
                     else -> confirmDeleteStation(id, name)
                 }
             }
@@ -307,6 +309,109 @@ class MainActivity : AppCompatActivity() {
             .setSingleChoiceItems(labels, selectedIdx) { _, which -> selectedIdx = which }
             .setPositiveButton("\u0645\u0648\u0627\u0641\u0642") { _, _ ->
                 if (selectedIdx in keys.indices) vm.changeStationCategory(id, keys[selectedIdx])
+            }
+            .setNegativeButton("\u0625\u0644\u063A\u0627\u0621", null)
+            .show()
+    }
+
+    private var selectionBarView: android.widget.LinearLayout? = null
+    private var selectionCountTv: android.widget.TextView? = null
+
+    private fun setupSelectionBar() {
+        val rootGroup = binding.root as? android.view.ViewGroup ?: return
+        val bar = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setBackgroundColor(android.graphics.Color.parseColor("#0F172A"))
+            setPadding(24, 20, 24, 20)
+            elevation = 16f
+            visibility = View.GONE
+        }
+        val tvCount = android.widget.TextView(this).apply {
+            setTextColor(android.graphics.Color.WHITE)
+            textSize = 14f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            layoutParams = android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        fun mkBtn(label: String, bgHex: String, onClick: () -> Unit): android.widget.TextView {
+            return android.widget.TextView(this).apply {
+                text = label
+                setTextColor(android.graphics.Color.WHITE)
+                textSize = 13f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                setPadding(22, 14, 22, 14)
+                val gd = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = 18f
+                    setColor(android.graphics.Color.parseColor(bgHex))
+                }
+                background = gd
+                val lp = android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
+                lp.marginStart = 12
+                layoutParams = lp
+                setOnClickListener { onClick() }
+            }
+        }
+        val btnAll = mkBtn("\u0627\u0644\u0643\u0644", "#334155") { adapter.selectAllVisible() }
+        val btnMoveCat = mkBtn("\u0646\u0642\u0644 \uD83D\uDCC2", "#2563EB") {
+            val sel = adapter.getSelectedIds()
+            if (sel.isNotEmpty()) showBatchMoveCategoryDialog(sel)
+        }
+        val btnDel = mkBtn("\u062D\u0630\u0641 \uD83D\uDDD1\uFE0F", "#DC2626") {
+            val sel = adapter.getSelectedIds()
+            if (sel.isNotEmpty()) confirmBatchDeleteStations(sel)
+        }
+        val btnCancel = mkBtn("\u2716\uFE0F", "#475569") { adapter.exitSelectionMode() }
+
+        bar.addView(tvCount)
+        bar.addView(btnAll)
+        bar.addView(btnMoveCat)
+        bar.addView(btnDel)
+        bar.addView(btnCancel)
+
+        if (rootGroup is android.widget.FrameLayout) {
+            val lp = android.widget.FrameLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.Gravity.BOTTOM)
+            rootGroup.addView(bar, lp)
+        } else {
+            rootGroup.addView(bar, 0)
+        }
+        selectionBarView = bar
+        selectionCountTv = tvCount
+    }
+
+    private fun updateSelectionBar(count: Int) {
+        val bar = selectionBarView ?: return
+        if (!adapter.selectionMode) {
+            bar.visibility = View.GONE
+            return
+        }
+        bar.visibility = View.VISIBLE
+        selectionCountTv?.text = "\u0645\u062D\u062F\u062F: \$count"
+    }
+
+    private fun showBatchMoveCategoryDialog(ids: List<String>) {
+        val keys = arrayOf("EGYPT", "QURAN", "NEWS", "MUSIC", "SPORTS", "TALK")
+        val labels = keys.map { com.example.radiojooo.data.CategoryStyle.arabicName(it) }.toTypedArray()
+        var selectedIdx = 0
+        MaterialAlertDialogBuilder(this, R.style.RadioDialog)
+            .setTitle("\u0646\u0642\u0644 \$ids.size \u0625\u0630\u0627\u0639\u0627\u062A \u0625\u0644\u0649 \u0642\u0633\u0645:")
+            .setSingleChoiceItems(labels, selectedIdx) { _, which -> selectedIdx = which }
+            .setPositiveButton("\u0645\u0648\u0627\u0641\u0642") { _, _ ->
+                if (selectedIdx in keys.indices) {
+                    vm.changeStationsCategoryBatch(ids, keys[selectedIdx])
+                    adapter.exitSelectionMode()
+                }
+            }
+            .setNegativeButton("\u0625\u0644\u063A\u0627\u0621", null)
+            .show()
+    }
+
+    private fun confirmBatchDeleteStations(ids: List<String>) {
+        MaterialAlertDialogBuilder(this, R.style.RadioDialog)
+            .setTitle("\u062D\u0630\u0641 \$ids.size \u0625\u0630\u0627\u0639\u0627\u062A \u0646\u0647\u0627\u0646\u064A\u0627\u064B\u061F")
+            .setMessage("\u0633\u064A\u062A\u0645 \u062D\u0630\u0641 \u0643\u0644 \u0627\u0644\u0625\u0630\u0627\u0639\u0627\u062A \u0627\u0644\u0645\u062D\u062F\u062F\u0629 \u0645\u0646 \u0627\u0644\u062A\u0637\u0628\u064A\u062F \u0648\u0627\u0644\u0633\u064A\u0641\u0631 \u0648\u0644\u0646 \u062A\u0638\u0647\u0631 \u0645\u0631\u0629 \u0623\u062E\u0631\u0649.")
+            .setPositiveButton("\u062D\u0630\u0641 \u0627\u0644\u0643\u0644") { _, _ ->
+                vm.deleteStationsBatch(ids)
+                adapter.exitSelectionMode()
             }
             .setNegativeButton("\u0625\u0644\u063A\u0627\u0621", null)
             .show()

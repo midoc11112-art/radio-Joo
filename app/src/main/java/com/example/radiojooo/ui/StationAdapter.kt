@@ -18,13 +18,61 @@ class StationAdapter(
     private val onFavorite: (Station) -> Unit,
     private val onMenu: (String, String) -> Unit,
     private val onOrder: (List<String>) -> Unit,
-    private val onDragState: (Boolean) -> Unit = {}
+    private val onDragState: (Boolean) -> Unit = {},
+    private val onSelectionChanged: (Int) -> Unit = {}
 ) : RecyclerView.Adapter<StationAdapter.VH>() {
 
     private var items: MutableList<Station> = ArrayList()
     private var playingId: String? = null
     private var dragging = false
     private var pending: List<Station>? = null
+    var selectionMode: Boolean = false
+        private set
+    private val selectedIds = LinkedHashSet<String>()
+
+    fun enterSelectionMode(initialId: String? = null) {
+        selectionMode = true
+        selectedIds.clear()
+        if (initialId != null) selectedIds.add(initialId)
+        notifyDataSetChanged()
+        onSelectionChanged(selectedIds.size)
+    }
+
+    fun exitSelectionMode() {
+        if (!selectionMode && selectedIds.isEmpty()) return
+        selectionMode = false
+        selectedIds.clear()
+        notifyDataSetChanged()
+        onSelectionChanged(0)
+    }
+
+    fun toggleSelection(id: String) {
+        if (!selectedIds.add(id)) selectedIds.remove(id)
+        val idx = items.indexOfFirst { it.id == id }
+        if (idx >= 0) notifyItemChanged(idx)
+        onSelectionChanged(selectedIds.size)
+    }
+
+    fun selectAllVisible() {
+        if (!selectionMode) selectionMode = true
+        for (s in items) selectedIds.add(s.id)
+        notifyDataSetChanged()
+        onSelectionChanged(selectedIds.size)
+    }
+
+    fun getSelectedIds(): List<String> = selectedIds.toList()
+
+    fun moveSelectedTo(targetIndex: Int): Boolean {
+        if (selectedIds.isEmpty() || targetIndex !in items.indices) return false
+        val selectedItems = items.filter { it.id in selectedIds }
+        if (selectedItems.isEmpty()) return false
+        items.removeAll(selectedItems)
+        var newIdx = targetIndex.coerceIn(0, items.size)
+        items.addAll(newIdx, selectedItems)
+        notifyDataSetChanged()
+        onOrder(items.map { it.id })
+        return true
+    }
 
     fun setPlaying(id: String?) {
         if (id == playingId) return
@@ -80,14 +128,17 @@ class StationAdapter(
 
     override fun onBindViewHolder(h: VH, position: Int) {
         val s = items[position]
-        h.b.tvStationName.text = s.name
+        val isSel = selectionMode && s.id in selectedIds
+        h.b.tvStationName.text = if (selectionMode) (if (isSel) "☑️ ${s.name}" else "⬜ ${s.name}") else s.name
         h.b.tvServersBadge.text = "${s.servers.size} \u062E\u0648\u0627\u062F\u0645"
         h.b.tvCountryBadge.text = if (s.countryCode.isEmpty()) "AR" else s.countryCode
         h.b.tvBitrateBadge.text = if (s.bitrate > 0) "${s.bitrate} Kbps" else "\u2014 Kbps"
         h.b.tvCategoryBadge.text = categoryName(s.category)
         h.b.btnFavorite.setImageResource(if (s.isFavorite) R.drawable.ic_star_filled else R.drawable.ic_star_outline)
         h.b.btnFavorite.setOnClickListener { onFavorite(s) }
-        h.b.root.setOnClickListener { onClick(s) }
+        h.b.root.setOnClickListener {
+            if (selectionMode) toggleSelection(s.id) else onClick(s)
+        }
         h.b.root.setStrokeColor(if (s.id == playingId) Color.parseColor("#8B5CF6") else Color.parseColor("#1E293B"))
     }
 
