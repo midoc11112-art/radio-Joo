@@ -250,6 +250,55 @@ class Repo(context: Context) {
         st
     }
 
+    suspend fun deleteStationsBatch(ids: List<String>) {
+        if (ids.isEmpty()) return
+        withContext(Dispatchers.IO) {
+            synchronized(lock) {
+                val pend = HashSet(delPrefs.getStringSet("pending", emptySet()) ?: emptySet())
+                for (id in ids) {
+                    find(id)?.name?.let { deletedNames[id] = it }
+                    deleted.add(id)
+                    ranks.remove(id)
+                    pend.add(id)
+                }
+                delPrefs.edit().putStringSet("ids", HashSet(deleted)).putStringSet("pending", pend).commit()
+                val oEd = orderPrefs.edit()
+                for (id in ids) oEd.remove(id)
+                oEd.commit()
+                syncToExternalBackup()
+                publish(raw)
+            }
+            try { save(raw) } catch (_: Exception) { }
+            if (Api.deleteStationsBatch(ids)) {
+                synchronized(lock) {
+                    val cur = HashSet(delPrefs.getStringSet("pending", emptySet()) ?: emptySet())
+                    cur.removeAll(ids.toSet())
+                    delPrefs.edit().putStringSet("pending", cur).commit()
+                }
+            } else {
+                flushPendingDeletes()
+            }
+        }
+    }
+
+    suspend fun changeStationsCategoryBatch(ids: List<String>, newCategory: String) {
+        val clean = newCategory.trim()
+        if (ids.isEmpty() || clean.isEmpty()) return
+        withContext(Dispatchers.IO) {
+            synchronized(lock) {
+                val ed = catPrefs.edit()
+                for (id in ids) {
+                    customCats[id] = clean
+                    ed.putString(id, clean)
+                }
+                ed.commit()
+                syncToExternalBackup()
+                publish(raw)
+            }
+            Api.categorizeStationsBatch(ids, clean)
+        }
+    }
+
     suspend fun deleteStation(id: String) {
         withContext(Dispatchers.IO) {
             synchronized(lock) {
@@ -333,6 +382,26 @@ class Repo(context: Context) {
 
 private val deleteHttpClient by lazy {
     OkHttpClient.Builder().connectTimeout(12, TimeUnit.SECONDS).readTimeout(15, TimeUnit.SECONDS).build()
+}
+
+fun Api.deleteStationsBatch(stationIds: List<String>): Boolean {
+    return try {
+        val arr = JSONArray()
+        for (id in stationIds) arr.put(id)
+        val body = JSONObject().put("ids", arr).toString().toRequestBody("application/json".toMediaType())
+        val req = Request.Builder().url("$BASE/v2/delete-batch").post(body).build()
+        deleteHttpClient.newCall(req).execute().use { it.isSuccessful }
+    } catch (e: Exception) { false }
+}
+
+fun Api.categorizeStationsBatch(stationIds: List<String>, category: String): Boolean {
+    return try {
+        val arr = JSONArray()
+        for (id in stationIds) arr.put(id)
+        val body = JSONObject().put("ids", arr).put("category", category).toString().toRequestBody("application/json".toMediaType())
+        val req = Request.Builder().url("$BASE/v2/categorize-batch").post(body).build()
+        deleteHttpClient.newCall(req).execute().use { it.isSuccessful }
+    } catch (e: Exception) { false }
 }
 
 fun Api.deleteStation(stationId: String): Boolean {
