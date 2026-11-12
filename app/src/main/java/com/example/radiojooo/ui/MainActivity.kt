@@ -339,72 +339,121 @@ class MainActivity : AppCompatActivity() {
     private fun setupSelectionBar() {
         val rootGroup = binding.root as? android.view.ViewGroup ?: return
         selectionBarView?.let { rootGroup.removeView(it) }
+        val d = resources.displayMetrics.density
+        fun dp(v: Int) = (v * d).toInt()
 
         val bar = android.widget.LinearLayout(this).apply {
-            orientation = android.widget.LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
+            orientation = android.widget.LinearLayout.VERTICAL
             background = android.graphics.drawable.GradientDrawable().apply {
-                cornerRadius = 28f
+                cornerRadius = 24f * d
                 setColor(android.graphics.Color.parseColor("#0F172A"))
-                setStroke(3, android.graphics.Color.parseColor("#8B5CF6"))
+                setStroke(dp(2), android.graphics.Color.parseColor("#8B5CF6"))
             }
-            setPadding(20, 20, 20, 20)
+            setPadding(dp(14), dp(12), dp(14), dp(14))
             elevation = 64f
             visibility = View.GONE
         }
 
+        // Top row: Selected count + Select All + Close
+        val topRow = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(10) }
+        }
+
         val tvCount = android.widget.TextView(this).apply {
             setTextColor(android.graphics.Color.parseColor("#38BDF8"))
-            textSize = 13f
+            textSize = 15f
             setTypeface(null, android.graphics.Typeface.BOLD)
             layoutParams = android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
 
-        fun mkBtn(label: String, bgHex: String, onClick: () -> Unit): android.widget.TextView {
+        fun mkTopBtn(label: String, bgHex: String, onClick: () -> Unit): android.widget.TextView {
             return android.widget.TextView(this).apply {
                 text = label
                 setTextColor(android.graphics.Color.WHITE)
-                textSize = 11f
+                textSize = 13f
                 setTypeface(null, android.graphics.Typeface.BOLD)
-                setPadding(14, 14, 14, 14)
+                gravity = android.view.Gravity.CENTER
+                setPadding(dp(14), dp(8), dp(14), dp(8))
                 background = android.graphics.drawable.GradientDrawable().apply {
-                    cornerRadius = 16f
+                    cornerRadius = 12f * d
                     setColor(android.graphics.Color.parseColor(bgHex))
                 }
-                val lp = android.widget.LinearLayout.LayoutParams(
+                layoutParams = android.widget.LinearLayout.LayoutParams(
                     android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
                     android.view.ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-                lp.marginStart = 6
-                layoutParams = lp
+                ).apply { marginStart = dp(8) }
                 setOnClickListener { onClick() }
             }
         }
 
-        val btnAll = mkBtn("\u0627\u0644\u0643\u0644", "#334155") { adapter.selectAllVisible() }
-        val btnMoveCat = mkBtn("\u0646\u0642\u0644 \uD83D\uDCC2", "#2563EB") {
+        val btnAll = mkTopBtn("☑️ تحديد الكل", "#334155") { adapter.selectAllVisible() }
+        val btnCancel = mkTopBtn("✕ إلغاء", "#475569") { adapter.exitSelectionMode() }
+
+        topRow.addView(tvCount)
+        topRow.addView(btnAll)
+        topRow.addView(btnCancel)
+
+        // Bottom row: 3 large, well-spaced action buttons with clear labels
+        val actionsRow = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        fun mkActionBtn(label: String, bgHex: String, addMarginStart: Boolean, onClick: () -> Unit): android.widget.TextView {
+            return android.widget.TextView(this).apply {
+                text = label
+                setTextColor(android.graphics.Color.WHITE)
+                textSize = 13.5f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                gravity = android.view.Gravity.CENTER
+                maxLines = 1
+                setPadding(dp(8), dp(12), dp(8), dp(12))
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = 14f * d
+                    setColor(android.graphics.Color.parseColor(bgHex))
+                }
+                layoutParams = android.widget.LinearLayout.LayoutParams(
+                    0,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                    1f
+                ).apply {
+                    if (addMarginStart) marginStart = dp(10)
+                }
+                setOnClickListener { onClick() }
+            }
+        }
+
+        val btnMoveCat = mkActionBtn("📁 نقل لقسم", "#2563EB", false) {
             val sel = adapter.getSelectedIds()
             if (sel.isNotEmpty()) showBatchMoveCategoryDialog(sel)
         }
-        val btnUnassign = mkBtn("\u0625\u0632\u0627\u0644\u0629 \u0642\u0633\u0645 \uD83D\uDCE4", "#D97706") {
+        val btnUnassign = mkActionBtn("📤 للكل فقط", "#D97706", true) {
             val sel = adapter.getSelectedIds()
             if (sel.isNotEmpty()) {
                 vm.changeStationsCategoryBatch(sel, "ALL")
                 adapter.exitSelectionMode()
             }
         }
-        val btnDel = mkBtn("\u062D\u0630\u0641 \uD83D\uDDD1\uFE0F", "#DC2626") {
+        val btnDel = mkActionBtn("🗑️ حذف", "#DC2626", true) {
             val sel = adapter.getSelectedIds()
             if (sel.isNotEmpty()) confirmBatchDeleteStations(sel)
         }
-        val btnCancel = mkBtn("\u2716\uFE0F", "#475569") { adapter.exitSelectionMode() }
 
-        bar.addView(tvCount)
-        bar.addView(btnAll)
-        bar.addView(btnMoveCat)
-        bar.addView(btnUnassign)
-        bar.addView(btnDel)
-        bar.addView(btnCancel)
+        actionsRow.addView(btnMoveCat)
+        actionsRow.addView(btnUnassign)
+        actionsRow.addView(btnDel)
+
+        bar.addView(topRow)
+        bar.addView(actionsRow)
 
         if (rootGroup is android.widget.RelativeLayout) {
             val lp = android.widget.RelativeLayout.LayoutParams(
@@ -412,9 +461,9 @@ class MainActivity : AppCompatActivity() {
                 android.view.ViewGroup.LayoutParams.WRAP_CONTENT
             )
             lp.addRule(android.widget.RelativeLayout.ALIGN_PARENT_BOTTOM)
-            lp.bottomMargin = 16
-            lp.marginStart = 12
-            lp.marginEnd = 12
+            lp.bottomMargin = dp(12)
+            lp.marginStart = dp(12)
+            lp.marginEnd = dp(12)
             rootGroup.addView(bar, lp)
         } else {
             rootGroup.addView(bar)
@@ -431,18 +480,19 @@ class MainActivity : AppCompatActivity() {
             bar.visibility = View.GONE
             return
         }
+        val d = resources.displayMetrics.density
         val lp = bar.layoutParams as? android.widget.RelativeLayout.LayoutParams
         if (lp != null) {
             lp.bottomMargin = if (binding.miniPlayerContainer.visibility == View.VISIBLE) {
-                (binding.miniPlayerContainer.height.takeIf { it > 0 } ?: 135) + 20
+                (binding.miniPlayerContainer.height.takeIf { it > 0 } ?: (68 * d).toInt()) + (14 * d).toInt()
             } else {
-                16
+                (12 * d).toInt()
             }
             bar.layoutParams = lp
         }
         bar.visibility = View.VISIBLE
         bar.bringToFront()
-        selectionCountTv?.text = "\u0645\u062D\u062F\u062F: \$count"
+        selectionCountTv?.text = "المحدد: $count إذاعة"
     }
 
     private fun showBatchMoveCategoryDialog(ids: List<String>) {
@@ -450,7 +500,7 @@ class MainActivity : AppCompatActivity() {
         val labels = keys.map { com.example.radiojooo.data.CategoryStyle.arabicName(it) }.toTypedArray()
         var selectedIdx = 0
         MaterialAlertDialogBuilder(this, R.style.RadioDialog)
-            .setTitle("\u0646\u0642\u0644 \$ids.size \u0625\u0630\u0627\u0639\u0627\u062A \u0625\u0644\u0649 \u0642\u0633\u0645:")
+            .setTitle("\u0646\u0642\u0644 ${ids.size} \u0625\u0630\u0627\u0639\u0627\u062A \u0625\u0644\u0649 \u0642\u0633\u0645:")
             .setSingleChoiceItems(labels, selectedIdx) { _, which -> selectedIdx = which }
             .setPositiveButton("\u0645\u0648\u0627\u0641\u0642") { _, _ ->
                 if (selectedIdx in keys.indices) {
