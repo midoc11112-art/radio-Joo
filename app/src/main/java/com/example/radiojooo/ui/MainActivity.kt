@@ -65,11 +65,14 @@ class MainActivity : AppCompatActivity() {
 
         adapter = StationAdapter(
             onClick = { RadioService.play(this, it.id) },
-            onFavorite = { vm.toggleFavorite(it.id) }
+            onFavorite = { vm.toggleFavorite(it.id) },
+            onMenu = { id, name -> showStationMenu(id, name) },
+            onOrder = { ids -> vm.commitOrder(ids) }
         )
         layoutManager = LinearLayoutManager(this)
         binding.rvStations.layoutManager = layoutManager
         binding.rvStations.adapter = adapter
+        androidx.recyclerview.widget.ItemTouchHelper(StationAdapter.TouchCallback(adapter, android.view.ViewConfiguration.get(this).scaledTouchSlop)).attachToRecyclerView(binding.rvStations)
 
         // jump back to the top of the list in one tap
         binding.rvStations.addOnScrollListener(object : RecyclerView.OnScrollListener() {
@@ -253,6 +256,26 @@ class MainActivity : AppCompatActivity() {
             .setTitle("\u0627\u0644\u062E\u0648\u0627\u062F\u0645 \u2022 ${st.name}")
             .setView(root)
             .setPositiveButton("\u0625\u063A\u0644\u0627\u0642", null)
+            .show()
+    }
+
+    private fun showStationMenu(id: String, name: String) {
+        MaterialAlertDialogBuilder(this, R.style.RadioDialog)
+            .setTitle(name)
+            .setItems(arrayOf(
+                "\u062A\u062D\u062F\u064A\u062B \u062E\u0648\u0627\u062F\u0645 \u0647\u0630\u0647 \u0627\u0644\u0625\u0630\u0627\u0639\u0629 \uD83D\uDD04",
+                "\u062D\u0630\u0641 \u0627\u0644\u0625\u0630\u0627\u0639\u0629 \u0646\u0647\u0627\u0626\u064A\u0627\u064B \uD83D\uDDD1\uFE0F"
+            )) { _, which -> if (which == 0) vm.refreshStation(id) else confirmDeleteStation(id, name) }
+            .setNegativeButton("\u0625\u0644\u063A\u0627\u0621", null)
+            .show()
+    }
+
+    private fun confirmDeleteStation(id: String, name: String) {
+        MaterialAlertDialogBuilder(this, R.style.RadioDialog)
+            .setTitle("\u062D\u0630\u0641 \u0627\u0644\u0625\u0630\u0627\u0639\u0629 \u0646\u0647\u0627\u0626\u064A\u0627\u064B\u061F")
+            .setMessage("$name\n\n\u0633\u064A\u062A\u0645 \u062D\u0630\u0641 \u0627\u0644\u0625\u0630\u0627\u0639\u0629 \u0646\u0647\u0627\u0626\u064A\u0627\u064B \u0648\u0644\u0646 \u062A\u0638\u0647\u0631 \u0645\u0631\u0629 \u0623\u062E\u0631\u0649.")
+            .setPositiveButton("\u062D\u0630\u0641") { _, _ -> vm.deleteStation(id) }
+            .setNegativeButton("\u0625\u0644\u063A\u0627\u0621", null)
             .show()
     }
 

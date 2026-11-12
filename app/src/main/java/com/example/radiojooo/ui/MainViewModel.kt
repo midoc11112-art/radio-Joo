@@ -83,6 +83,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun commitOrder(ids: List<String>) = repo.applyVisibleOrder(ids)
+
+    private val healing = HashSet<String>()
+    fun refreshStation(id: String) {
+        if (!healing.add(id)) return
+        viewModelScope.launch {
+            toast("\u062C\u0627\u0631\u064A \u062A\u062D\u062F\u064A\u062B \u062E\u0648\u0627\u062F\u0645 \u0627\u0644\u0625\u0630\u0627\u0639\u0629...")
+            val st = repo.healStation(id)
+            healing.remove(id)
+            if (st != null) toast("\u062A\u0645 \u062A\u062D\u062F\u064A\u062B \u062E\u0648\u0627\u062F\u0645 \u0627\u0644\u0625\u0630\u0627\u0639\u0629: ${st.servers.size} \u062E\u0648\u0627\u062F\u0645 \u0645\u062A\u0627\u062D\u0629")
+            else toast("\u062A\u0639\u0630\u0631 \u062A\u062D\u062F\u064A\u062B \u062E\u0648\u0627\u062F\u0645 \u0627\u0644\u0625\u0630\u0627\u0639\u0629\u060C \u062A\u062D\u0642\u0642 \u0645\u0646 \u0627\u0644\u0627\u062A\u0635\u0627\u0644")
+        }
+    }
+
+    fun deleteStation(id: String) {
+        viewModelScope.launch {
+            repo.deleteStation(id)
+            toast("\u062A\u0645 \u062D\u0630\u0641 \u0627\u0644\u0625\u0630\u0627\u0639\u0629 \u0646\u0647\u0627\u0626\u064A\u0627\u064B")
+        }
+    }
+
+    private fun toast(msg: String) {
+        android.widget.Toast.makeText(getApplication<Application>(), msg, android.widget.Toast.LENGTH_SHORT).show()
+    }
+
     fun toggleFavorite(id: String) = repo.toggleFavorite(id)
 
     private suspend fun syncWithRetry(force: Boolean) {

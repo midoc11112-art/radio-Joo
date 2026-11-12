@@ -1,6 +1,11 @@
 package com.example.radiojooo.data
 
 import android.content.Context
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,6 +23,13 @@ class Repo(context: Context) {
     private val file = File(app.filesDir, "catalog_v3.json")
     private val prefs = app.getSharedPreferences("repo_v3", Context.MODE_PRIVATE)
     private val mutex = Mutex()
+    private val lock = Any()
+    private val orderPrefs = app.getSharedPreferences("custom_order_v1", Context.MODE_PRIVATE)
+    private val delPrefs = app.getSharedPreferences("deleted_stations_v1", Context.MODE_PRIVATE)
+    private val ranks: MutableMap<String, Int> = HashMap<String, Int>().also { m -> for ((k, v) in orderPrefs.all) if (v is Int) m[k] = v }
+    private val deleted: MutableSet<String> = HashSet(delPrefs.getStringSet("ids", emptySet()) ?: emptySet())
+    private fun filterDeleted(f: Api.Fetch): Api.Fetch =
+        if (f is Api.Fetch.Fresh) f.copy(stations = f.stations.filter { it.id !in deleted }) else f
 
     private var favorites: MutableSet<String> = (prefs.getStringSet("fav", emptySet()) ?: emptySet()).toMutableSet()
     private var raw: List<Station> = emptyList()
@@ -54,9 +66,9 @@ class Repo(context: Context) {
     /** One sync with the cloud. ETag makes "nothing changed" nearly free. Returns seconds to wait if the cloud is still warming up. */
     suspend fun sync(): Int = mutex.withLock {
         withContext(Dispatchers.IO) {
-            _sync.value = SyncState.SYNCING
+            _sync.value = SyncState.SYNCING; flushPendingDeletes()
             val etag = prefs.getString("etag", null).takeIf { raw.isNotEmpty() }
-            when (val r = Api.fetchStations(etag)) {
+            when (val r = filterDeleted(Api.fetchStations(etag))) {
                 is Api.Fetch.Fresh -> {
                     save(r.stations); prefs.edit().putString("etag", r.etag).putLong("last", System.currentTimeMillis()).apply()
                     publish(r.stations); _sync.value = SyncState.UPDATED; 0
@@ -74,10 +86,10 @@ class Repo(context: Context) {
      */
     suspend fun forceRefresh(health: Health): RefreshResult = mutex.withLock {
         withContext(Dispatchers.IO) {
-            _sync.value = SyncState.SYNCING
+            _sync.value = SyncState.SYNCING; flushPendingDeletes()
             val before = raw.map { it.id }.toSet()
             val info = Api.refresh()
-            when (val r = Api.fetchStations(null)) {
+            when (val r = filterDeleted(Api.fetchStations(null))) {
                 is Api.Fetch.Fresh -> {
                     save(r.stations)
                     prefs.edit().putString("etag", r.etag).putLong("last", System.currentTimeMillis()).apply()
@@ -108,11 +120,73 @@ class Repo(context: Context) {
         publish(raw)
     }
 
+    private fun arrange(list: List<Station>): List<Station> {
+        if (ranks.isEmpty()) return list
+        val ranked = ArrayList<Station>(); val rest = ArrayList<Station>()
+        for (s in list) if (ranks.containsKey(s.id)) ranked.add(s) else rest.add(s)
+        ranked.sortBy { ranks[it.id] ?: Int.MAX_VALUE }
+        ranked.addAll(rest)
+        return ranked
+    }
+
+    fun applyVisibleOrder(visibleIds: List<String>) {
+        synchronized(lock) {
+            val cur = arrange(raw).map { it.id }.toMutableList()
+            val curSet = cur.toHashSet()
+            val ordered = visibleIds.filter { it in curSet }.distinct()
+            val orderedSet = ordered.toHashSet()
+            val slots = cur.indices.filter { cur[it] in orderedSet }
+            if (slots.size != ordered.size) { publish(raw); return }
+            slots.forEachIndexed { k, pos -> cur[pos] = ordered[k] }
+            val ed = orderPrefs.edit()
+            cur.forEachIndexed { i, id -> ranks[id] = i; ed.putInt(id, i) }
+            ed.commit()
+            publish(raw)
+        }
+    }
+
+    suspend fun healStation(id: String): Station? = withContext(Dispatchers.IO) {
+        val fresh = Api.heal(id) ?: return@withContext null
+        val ranked = fresh.servers.sortedWith(compareBy<Server>({ if (it.kbps > 0) 0 else 1 }, { it.kbps }))
+        val st = fresh.copy(servers = ranked)
+        updateStation(st)
+        st
+    }
+
+    suspend fun deleteStation(id: String) {
+        withContext(Dispatchers.IO) {
+            synchronized(lock) {
+                deleted.add(id)
+                ranks.remove(id)
+                val pend = HashSet(delPrefs.getStringSet("pending", emptySet()) ?: emptySet())
+                pend.add(id)
+                delPrefs.edit().putStringSet("ids", HashSet(deleted)).putStringSet("pending", pend).commit()
+                orderPrefs.edit().remove(id).commit()
+                publish(raw)
+            }
+            try { save(raw) } catch (e: Exception) { }
+            flushPendingDeletes()
+        }
+    }
+
+    private fun flushPendingDeletes() {
+        val pend = delPrefs.getStringSet("pending", null)?.toList() ?: return
+        if (pend.isEmpty()) return
+        val done = ArrayList<String>()
+        for (id in pend) if (Api.deleteStation(id)) done.add(id)
+        if (done.isEmpty()) return
+        synchronized(lock) {
+            val cur = HashSet(delPrefs.getStringSet("pending", emptySet()) ?: emptySet())
+            cur.removeAll(done.toSet())
+            delPrefs.edit().putStringSet("pending", cur).commit()
+        }
+    }
+
     fun find(id: String): Station? = raw.firstOrNull { it.id == id }
 
-    private fun publish(list: List<Station>) {
-        raw = list
-        _stations.value = list.map { it.copy(isFavorite = it.id in favorites) }
+    private fun publish(list: List<Station>) = synchronized(lock) {
+        raw = list.filter { it.id !in deleted }
+        _stations.value = arrange(raw).map { it.copy(isFavorite = it.id in favorites) }
     }
 
     private fun save(list: List<Station>) {
@@ -126,4 +200,16 @@ class Repo(context: Context) {
         tmp.writeText(JSONObject().put("s", arr).toString())
         if (!tmp.renameTo(file)) { file.delete(); tmp.renameTo(file) }
     }
+}
+
+private val deleteHttpClient by lazy {
+    OkHttpClient.Builder().connectTimeout(12, TimeUnit.SECONDS).readTimeout(15, TimeUnit.SECONDS).build()
+}
+
+fun Api.deleteStation(stationId: String): Boolean {
+    return try {
+        val body = JSONObject().put("id", stationId).toString().toRequestBody("application/json".toMediaType())
+        val req = Request.Builder().url("$BASE/v2/delete").post(body).build()
+        deleteHttpClient.newCall(req).execute().use { it.isSuccessful }
+    } catch (e: Exception) { false }
 }
