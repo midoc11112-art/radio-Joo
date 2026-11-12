@@ -1,11 +1,12 @@
+/* RADIO-JOO flagship catalog worker (schema v2). ASCII-only source: Arabic is produced from Buckwalter via B()/AR(). */
 const MIRRORS = ["https://de1.api.radio-browser.info", "https://fi1.api.radio-browser.info", "https://at1.api.radio-browser.info", "https://de2.api.radio-browser.info"];
 const ARAB = new Set("EG SA AE KW QA BH OM YE IQ SY LB JO PS LY TN DZ MA MR SD SO DJ KM".split(" "));
-const TTL = 6 * 3600 * 1000, THROTTLE = 45000;
+const TTL = 6 * 3600 * 1000, THROTTLE = 45000, SUBCAP = 48, MAXSRV = 8, BADMS = 3 * 86400000;
 let MEM = null, BUILDING = null, LASTREF = 0;
 
 const BW = { A: "\u0627", b: "\u0628", t: "\u062A", v: "\u062B", j: "\u062C", H: "\u062D", x: "\u062E", d: "\u062F", "*": "\u0630", r: "\u0631", z: "\u0632", s: "\u0633", "$": "\u0634", S: "\u0635", D: "\u0636", T: "\u0637", Z: "\u0638", E: "\u0639", g: "\u063A", f: "\u0641", q: "\u0642", k: "\u0643", l: "\u0644", m: "\u0645", n: "\u0646", h: "\u0647", w: "\u0648", y: "\u064A", "'": "\u0621" };
 const B = s => s.replace(/[A-Za-z*$']/g, c => BW[c] || c);
-/* display-only Arabic: O=ta marbuta, U=alef hamza above, I=alef hamza below, Q=alef madda */
+/* display Arabic: O=ta marbuta, U=alef hamza above, I=alef hamza below, Q=alef madda */
 const AR = s => B(s).replace(/O/g, "\u0629").replace(/U/g, "\u0623").replace(/I/g, "\u0625").replace(/Q/g, "\u0622");
 const rx = (lat, ar) => new RegExp(lat.concat((ar || []).map(B)).join("|"));
 const AR_SCRIPT = /[\u0600-\u06FF]/;
@@ -38,6 +39,21 @@ const RE = {
 const TAG_NEWS = /^(news|news talk|akhbar|world news)$/, TAG_TALK = /^(talk|talk radio|news talk|discussion)$/;
 const EGYNAME = rx(["egypt|misr|masr|cairo|alexandria|nile|ertu"], ["mSr", "AlqAhrh", "AlAskndryh"]);
 
+/* ===== PURE-AUDIO GUARDS (no TV, no video) ===== */
+const VID_EXT = /\.(?:mp4|m4v|mkv|webm|flv|avi|mov|wmv|mpd|3gp|ts)(?:[?#]|$)/i;
+const VID_CODEC = /264|265|hevc|avc|vp[89]|mpeg-?ts|mp2t|video/i;
+const AUD_CODEC = /mp3|mpeg|aac|mp4a|ogg|opus|vorbis|flac/i;
+const TVNAME = new RegExp("\\btv\\b|television|\\bhdtv\\b|\\bvideo\\b|" + B("tlfzywn"));
+const TVTAG = /^(tv|television|video|tv channel|webtv)$/;
+function audioOK(r) {
+  if (VID_EXT.test(r.u)) return false;
+  if (r.seed) return true;
+  if (VID_CODEC.test(r.codec)) return false;
+  if (TVNAME.test(r.nn) || r.tags.some(t => TVTAG.test(t))) return false;
+  if (/\.m3u8(?:[?#]|$)/i.test(r.u) && !AUD_CODEC.test(r.codec)) return false;
+  return true;
+}
+
 /* ===== HUMAN-CURATED ALLOWLIST (array order = real-world fame order, earlier = more famous) =====
    c = category | lim: "eg" (Egyptian networks only) / "any" (icons, reciters) / default (needs Arabic evidence)
    ccf: forced country ("EG", "SA", "" ...) | "keep" = real cc | "egcue" = EG only if name is Egyptian | undefined = first non-EG cc
@@ -58,12 +74,66 @@ const EGM = { c: "MUSIC", lim: "eg", ccf: "EG" };
 const QE = { c: "QURAN", lim: "any", ccf: "EG" };
 const QG = { c: "QURAN", lim: "any" };
 const TR = { c: "MUSIC", lim: "any", ccf: "" };
-const NW = { c: "NEWS" };
+const NQX = [["qur ?an|koran|makk?ah|madin|nabawi|haram|tilawa"], ["qrAn|mkh|Almdynh|Alnbwy|AlHrm|tlAwh"]];
 
-/* ---- QURAN MAIN ---- */
+/* ---- #1 QURAN CAIRO ---- */
 F("Quran Cairo", "I*AEO AlqrQn AlkrAym mn AlqAhrO",
   [`${QN}.{0,30}(?:cairo|egypt|misr|masr)|(?:cairo|egypt|misr|masr).{0,30}${QN}`],
   ["qrAn.{0,30}(?:AlqAhrh|mSr)|(?:AlqAhrh|mSr).{0,30}qrAn"], Object.assign({ q: "quran cairo" }, QE));
+
+/* ---- EGYPT BLOCK (cc=EG always; c = real functional category) ---- */
+F("Nogoum FM", "njwm Af Am", ["nogoum|nogom|nujum|nogum|nogoom|nojoom|negoum"], ["njwm Af Am|Af Am njwm"], Object.assign({ q: "nogoum" }, EGM));
+F("Nile FM", "nAyl Af Am", ["nile ?fm|nilefm|nile radio"], ["nAyl Af Am|nyl Af Am"], Object.assign({ q: "nile fm" }, EGM));
+F("Mega FM", "myjA Af Am", ["mega ?fm|mega 92|mega ?masr"], ["myjA Af Am|myjA"], Object.assign({ q: "mega" }, EGM));
+F("Nagham FM", "ngm Af Am", ["nagham|naghem"], ["ngm Af Am|Af Am ngm"], Object.assign({ q: "nagham" }, EGM));
+F("Al Barnamg Al Aam", "AlbrnAmj AlEAm", ["general (?:program|programme)|barnameg ?(?:el|al)? ?aam|el barnameg el aam|albarnamg"], ["AlbrnAmj AlEAm"], Object.assign({ q: "barnamg" }, EGO));
+F("Sawt El Arab", "Swt AlErb", ["voice of (?:the )?arabs|sawt ?(?:el|al)? ?arab|sout el arab|saout el arab"], ["Swt AlErb"], Object.assign({ q: "sawt el arab" }, EGO));
+F("9090 FM", null, ["9090|90 ?90 ?fm"], ["9090"], Object.assign({ q: "9090" }, EGM));
+F("Radio Hits", "rAdyw hyts", ["radio ?hits|hits ?fm|hits ?radio"], ["rAdyw hyts|hyts Af Am"], Object.assign({ q: "hits" }, EGM));
+F("Shaabi FM", "$Eby Af Am", ["sha+bi ?fm|sha+bi radio|sha3by|el ?shaabi"], ["$Eby Af Am|rAdyw $Eby"], Object.assign({ q: "shaabi" }, EGM));
+F("Mix FM", "myks Af Am", ["mix ?fm|mix 106|mix ?egypt|mix ?masr"], ["myks Af Am"], Object.assign({ q: "mix fm" }, EGM));
+F("NRJ Egypt", "Inrjy mSr", ["nrj ?(?:egypt|masr|misr)|energy ?(?:fm )?(?:egypt|masr|98)|energy 98"], ["Anrjy"], Object.assign({ q: "nrj" }, EGM));
+F("ON Sport FM", "Awn sbwrt Af Am", ["\\bon ?sports?\\b|\\bonsport|on time sports"], ["Awn sbwrt|An sbwrt|Awn tAym sbwrt"], { c: "SPORTS", lim: "eg", ccf: "EG", q: "on sport" });
+F("Youth & Sports", "Al$bAb wAlryADO", ["youth ?(?:and )?sports|shabab ?(?:wa|wel|we|w)? ?(?:el)? ?riyad[a-z]{0,2}|el ?shabab ?w ?el ?riyad[a-z]{0,2}"], ["Al$bAb wAlryADh|$bAb wAlryADh|Al$bAb wryADh"], { c: "SPORTS", lim: "eg", ccf: "EG", q: "shabab" });
+F("Masr El Gdida", "rAdyw mSr AljdydO", ["masr el ?(?:gdid|jdid|gedid)\\w*|misr el ?gdid\\w*|new egypt"], ["mSr Aljdydh|mSr Aljdyd"], { c: "TALK", lim: "eg", ccf: "EG", q: "masr el gdida" });
+F("Rehab FM", "rhAb Af Am", ["rehab ?(?:fm|radio|city)"], ["rhAb Af Am"], Object.assign({ q: "rehab" }, EGM));
+F("Hawak FM", "hwAk Af Am", ["hawak|hawwak"], ["hwAk"], Object.assign({ q: "hawak" }, EGM));
+F("Masriyat", "mSryAt", ["masriyat|masryat|masriat|masreyat"], ["mSryAt"], Object.assign({ q: "masriyat" }, EGM));
+F("Aghani Aghani", "UgAny UgAny", ["aghani ?aghani|agani ?agani|aghany ?aghany"], ["AgAny AgAny"], Object.assign({ q: "aghani" }, EGM));
+F("Al Sharq Al Awsat", "I*AEO Al$rq AlUwsT", ["middle east (?:radio|fm)|sharq ?(?:el|al)? ?awsat\\b|el sharq el awsat"], ["Al$rq AlAwsT"], Object.assign({ q: "sharq el awsat" }, EGO));
+F("Cultural Program", "AlbrnAmj AlvqAfy", ["cultural (?:program|programme)|el ?thaqafi"], ["AlbrnAmj AlvqAfy"], EGO);
+F("Egyptian Radio ERTU", "AlI*AEO AlmSryO", ["egyptian radio|\\bertu\\b|radio of egypt"], ["AlA*AEh AlmSryh"], Object.assign({ q: "ertu" }, EGO));
+
+/* ---- NEWS (fame order; Egyptian news carry cc=EG) ---- */
+F("Al Jazeera", "AljzyrO", ["al ?jazeera|aljazeera|\\bjazeera\\b"], ["Aljzyrh"],
+  { c: "NEWS", q: "jazeera", x: [["mubasher|documentar|balkan|children|kids|\\bsports?\\b|\\bbein\\b"], ["mbA$r|wvAEqyh|ryADh"]] });
+F("Al Arabiya", "AlErbyO", ["al ?arabiya|alarabiya|al ?arabiyah|^" + B("AlErbyh") + "( |$)"], ["qnAh AlErbyh"],
+  { c: "NEWS", q: "arabiya", x: [["hadath"], ["AlHdv"]] });
+F("BBC Arabic", "by by sy ErbyO", ["bbc.{0,12}arab"], ["by by sy"], { c: "NEWS", q: "bbc arabic" });
+F("Sky News Arabia", "skAy nywz ErbyO", ["sky ?news.{0,10}arab|sky ?arabia|skynews ?arabia"], ["skAy nywz|skAy Erbyh"], { c: "NEWS", q: "sky news arabia" });
+F("Radio Masr", "rAdyw mSr", ["radio ?masr\\b|radio ?misr\\b|masr ?fm"], ["rAdyw mSr(?!y)"], { c: "NEWS", lim: "eg", ccf: "EG", q: "radio masr" });
+F("Al Hadath", "AlHdv", ["al ?hadath|alhadath"], ["AlHdv"], { c: "NEWS", q: "hadath" });
+F("Al Qahera News", "qnAO AlqAhrO AlIxbAryO", ["al ?qahera ?news|alqahera ?news|al ?qaherah ?news|qahera news|cairo news"], ["qnAh AlqAhrh|AlqAhrh AlAxbAryh"], { c: "NEWS", lim: "eg", ccf: "EG", q: "qahera" });
+F("Monte Carlo Doualiya", "mwnty kArlw AldwlyO", ["monte ?carlo|doualiya|\\bmcd\\b"], ["mwnt kArlw|mwnty kArlw|mwntykArlw"], { c: "NEWS", q: "monte carlo" });
+F("France 24 Arabic", "frAns 24 bAlErbyO", ["france ?24"], ["frAns ?24"], { c: "NEWS", q: "france 24" });
+F("Asharq News", "Al$rq llUxbAr", ["asharq ?(?:news|bloomberg|business)|al ?sharq ?(?:news|bloomberg)"], ["Al$rq llAxbAr|Al$rq blwmbrj|Al$rq bylwmbyrj|Al$rq nywz"], { c: "NEWS", q: "asharq" });
+F("Extra News", "IkstrA nywz", ["extra ?news|extranews"], ["AkstrA nywz"], { c: "NEWS", lim: "eg", ccf: "EG", q: "extra news" });
+F("DW Arabic", "dwyt$h fylh", ["\\bdw\\b|deutsche welle"], ["dwyt$h fylh|dw Erbyh"], { c: "NEWS", q: "dw arabic" });
+F("Al Mayadeen", "AlmyAdyn", ["al ?mayadeen|almayadeen"], ["AlmyAdyn"], { c: "NEWS", q: "mayadeen" });
+F("RT Arabic", "rwsyA Alywm", ["\\brt\\b.{0,10}arab|russia today.{0,10}arab|rt arabic|rt arabia"], ["rwsyA Alywm"], { c: "NEWS", q: "rt arabic" });
+F("Alhurra", "AlHrO", ["alhurra|al ?hurra"], ["AlHrh"], { c: "NEWS", q: "alhurra" });
+F("Radio Sawa", "rAdyw swA", ["radio sawa|\\bsawa\\b"], ["rAdyw swA"], { c: "NEWS", q: "sawa" });
+F("Sputnik Arabic", "sbwtnyk", ["sputnik"], ["sbwtnyk"], { c: "NEWS", q: "sputnik" });
+F("TRT Arabic", "ty Ar ty Erby", ["trt ?arab"], ["ty Ar ty Erby"], { c: "NEWS", q: "trt arabic" });
+F("Al Araby", "AlErby Aljdyd", ["al ?araby\\b|alaraby|araby ?tv"], ["AlErby Aljdyd|tlfzywn AlErby|rAdyw AlErby"], { c: "NEWS", q: "araby" });
+F("Saudi Radio", "I*AEO AlsEwdyO", ["saudi (?:radio|broadcasting)|radio saudi|saudi arabia radio"], ["A*AEh AlsEwdyh|A*AEh Almmlkh"], { c: "NEWS", ccf: "SA", q: "saudi radio", x: NQX });
+F("Radio Kuwait", "I*AEO AlkwyT", ["radio kuwait|kuwait radio|kuwait (?:fm|news)"], ["A*AEh AlkwyT"], { c: "NEWS", ccf: "KW", q: "kuwait radio", x: NQX });
+F("Qatar Radio", "I*AEO qTr", ["qatar radio|radio qatar|qatar (?:fm|broadcasting)"], ["A*AEh qTr"], { c: "NEWS", ccf: "QA", q: "qatar radio", x: NQX });
+F("Radio Jordan", "I*AEO AlUrdn", ["radio jordan|jordan radio|hashemite kingdom radio"], ["A*AEh AlArdn"], { c: "NEWS", ccf: "JO", q: "radio jordan", x: NQX });
+F("Voice of Lebanon", "Swt lbnAn", ["voice of lebanon|sawt ?(?:el|al)? ?lubnan|sawt lebnan"], ["Swt lbnAn"], { c: "NEWS", ccf: "LB", q: "voice of lebanon", x: NQX });
+F("Medi 1 Radio", "rAdyw mydy 1", ["medi ?1\\b|medi1|radio medi"], ["mydy 1|mydy1"], { c: "TALK", ccf: "MA", q: "medi 1", x: NQX });
+
+/* ---- QURAN (Saudi, Al Majd, Omni family, then reciters: Egyptian = cc EG, Gulf never EG) ---- */
 F("Saudi Quran Makkah", "I*AEO AlqrQn AlkrAym mn mkO AlmkrmO",
   [`makk?ah.{0,25}${QN}|${QN}.{0,25}makk?ah|mecca.{0,25}${QN}|${QN}.{0,25}mecca|makk?ah ?(?:live|radio)|haramain|masjid ?al ?haram|saudi.{0,25}${QN}|ksa.{0,10}${QN}|${QN}.{0,25}saudi`],
   ["qrAn.{0,25}mkh|mkh.{0,25}qrAn|AlHrm Almky|AlHrmyn|Almsjd AlHrAm|AlsEwdyh.{0,25}qrAn|qrAn.{0,25}AlsEwdyh"], { c: "QURAN", ccf: "SA", q: "makkah" });
@@ -73,91 +143,18 @@ F("Saudi Quran Madinah", "I*AEO AlqrQn AlkrAym mn AlmdynO Almnwrh",
 F("Al Majd Quran", "Almjd llqrQn AlkrAym",
   [`al ?majd.{0,25}${QN}|${QN}.{0,25}al ?majd|almajd ?quran`],
   ["Almjd.{0,25}qrAn|qrAn.{0,25}Almjd|Almjd llqrAn"], { c: "QURAN", ccf: "SA", q: "majd quran" });
-
-/* ---- NEWS (international / Arab flagships) ---- */
-F("Al Jazeera", "AljzyrO", ["al ?jazeera|aljazeera|\\bjazeera\\b"], ["Aljzyrh"],
-  { c: "NEWS", q: "jazeera", x: [["mubasher|documentar|balkan|children|kids|\\bsports?\\b|\\bbein\\b"], ["mbA$r|wvAEqyh|ryADh"]] });
-F("Al Arabiya", "AlErbyO", ["al ?arabiya|alarabiya|al ?arabiyah|^" + B("AlErbyh") + "( |$)"], ["qnAh AlErbyh"],
-  { c: "NEWS", q: "arabiya", x: [["hadath"], ["AlHdv"]] });
-F("Al Hadath", "AlHdv", ["al ?hadath|alhadath"], ["AlHdv"], { c: "NEWS", q: "hadath" });
-F("Sky News Arabia", "skAy nywz ErbyO", ["sky ?news.{0,10}arab|sky ?arabia|skynews ?arabia"], ["skAy nywz|skAy Erbyh"], { c: "NEWS", q: "sky" });
-F("BBC Arabic", "by by sy ErbyO", ["bbc.{0,12}arab"], ["by by sy"], { c: "NEWS", q: "bbc arabic" });
-F("Monte Carlo Doualiya", "mwnty kArlw AldwlyO", ["monte ?carlo|doualiya|\\bmcd\\b"], ["mwnt kArlw|mwnty kArlw|mwntykArlw"], { c: "NEWS", q: "monte carlo" });
-F("France 24 Arabic", "frAns 24 bAlErbyO", ["france ?24"], ["frAns ?24"], { c: "NEWS", q: "france 24" });
-F("Asharq News", "Al$rq llUxbAr", ["asharq ?(?:news|bloomberg|business)|al ?sharq ?(?:news|bloomberg)"], ["Al$rq llAxbAr|Al$rq blwmbrj|Al$rq bylwmbyrj|Al$rq nywz"], { c: "NEWS", q: "asharq" });
-
-/* ---- TARAB ICONS ---- */
-F("Umm Kulthum", "Um klvwm", ["k(?:a|o|u|ou)l[ts]h?[ou]+m"], ["Am klvwm|Am kltwm|klvwm|kltwm"], Object.assign({ q: "kalth" }, TR));
-F("Abdel Halim Hafez", "Ebd AlHlym HAfZ", ["abd(?:el|ul|al)? ?hal[ei]+m|abdelhalim"], ["Ebd AlHlym"], Object.assign({ q: "abdel halim" }, TR));
-F("Fairouz", "fyrwz", ["fairuz|fayrouz|fairouz|feyrouz|fayruz|fairoz|fayrooz|fairooz"], ["fyrwz"], Object.assign({ q: "fairuz" }, TR));
-F("Mohamed Abdel Wahab", "mHmd Ebd AlwhAb", ["abd(?:el|ul|al)? ?wahab|abdelwahab"], ["Ebd AlwhAb"], Object.assign({ q: "wahab" }, TR));
-F("Farid Al Atrash", "fryd AlUTr$", ["far[ie]e?d.{0,12}atrash|farid el ?atrash"], ["fryd AlATr$"], Object.assign({ q: "atrash" }, TR));
-
-/* ---- EGYPT (cc=EG always; c = real functional category so they appear in Egypt tab AND their own tab) ---- */
-F("Nogoum FM", "njwm Af Am", ["nogoum|nogom|nujum|nogum|nogoom|nojoom|negoum"], ["njwm Af Am|Af Am njwm"], Object.assign({ q: "nogoum" }, EGM));
-F("Nile FM", "nAyl Af Am", ["nile ?fm|nilefm|nile radio"], ["nAyl Af Am|nyl Af Am"], Object.assign({ q: "nile fm" }, EGM));
-F("Radio Masr", "rAdyw mSr", ["radio ?masr\\b|radio ?misr\\b|masr ?fm"], ["rAdyw mSr(?!y)"], { c: "NEWS", lim: "eg", ccf: "EG", q: "radio masr" });
-F("Al Qahera News", "qnAO AlqAhrO AlIxbAryO", ["al ?qahera ?news|alqahera ?news|al ?qaherah ?news|qahera news|cairo news"], ["qnAh AlqAhrh|AlqAhrh AlAxbAryh"], { c: "NEWS", lim: "eg", ccf: "EG", q: "qahera" });
-F("Extra News", "IkstrA nywz", ["extra ?news|extranews"], ["AkstrA nywz"], { c: "NEWS", lim: "eg", ccf: "EG", q: "extra news" });
-F("Mega FM", "myjA Af Am", ["mega ?fm|mega 92|mega ?masr"], ["myjA Af Am|myjA"], Object.assign({ q: "mega" }, EGM));
-F("Nagham FM", "ngm Af Am", ["nagham|naghem"], ["ngm Af Am|Af Am ngm"], Object.assign({ q: "nagham" }, EGM));
-F("9090 FM", null, ["9090|90 ?90 ?fm"], ["9090"], Object.assign({ q: "9090" }, EGM));
-F("Radio Hits", "rAdyw hyts", ["radio ?hits|hits ?fm|hits ?radio"], ["rAdyw hyts|hyts Af Am"], Object.assign({ q: "hits" }, EGM));
-F("Shaabi FM", "$Eby Af Am", ["sha+bi ?fm|sha+bi radio|sha3by|el ?shaabi"], ["$Eby Af Am|rAdyw $Eby"], Object.assign({ q: "shaabi" }, EGM));
-F("Masr El Gdida", "rAdyw mSr AljdydO", ["masr el ?(?:gdid|jdid|gedid)\\w*|misr el ?gdid\\w*|new egypt"], ["mSr Aljdydh|mSr Aljdyd"], { c: "TALK", lim: "eg", ccf: "EG", q: "masr el gdida" });
-F("Al Barnamg Al Aam", "AlbrnAmj AlEAm", ["general (?:program|programme)|barnameg ?(?:el|al)? ?aam|el barnameg el aam|albarnamg"], ["AlbrnAmj AlEAm"], Object.assign({ q: "barnamg" }, EGO));
-F("Sawt El Arab", "Swt AlErb", ["voice of (?:the )?arabs|sawt ?(?:el|al)? ?arab|sout el arab|saout el arab"], ["Swt AlErb"], Object.assign({ q: "sawt el arab" }, EGO));
-F("Al Sharq Al Awsat", "I*AEO Al$rq AlUwsT", ["middle east (?:radio|fm)|sharq ?(?:el|al)? ?awsat\\b|el sharq el awsat"], ["Al$rq AlAwsT"], Object.assign({ q: "sharq el awsat" }, EGO));
-F("ON Sport FM", "Awn sbwrt Af Am", ["\\bon ?sports?\\b|\\bonsport|on time sports"], ["Awn sbwrt|An sbwrt|Awn tAym sbwrt"], { c: "SPORTS", lim: "eg", ccf: "EG", q: "on sport" });
-F("Youth & Sports", "Al$bAb wAlryADO", ["youth ?(?:and )?sports|shabab ?(?:wa|wel|we|w)? ?(?:el)? ?riyad[a-z]{0,2}|el ?shabab ?w ?el ?riyad[a-z]{0,2}"], ["Al$bAb wAlryADh|$bAb wAlryADh|Al$bAb wryADh"], { c: "SPORTS", lim: "eg", ccf: "EG", q: "shabab" });
-F("Mix FM", "myks Af Am", ["mix ?fm|mix 106|mix ?egypt|mix ?masr"], ["myks Af Am"], Object.assign({ q: "mix fm" }, EGM));
-F("NRJ Egypt", "Inrjy mSr", ["nrj ?(?:egypt|masr|misr)|energy ?(?:fm )?(?:egypt|masr|98)|energy 98"], ["Anrjy"], Object.assign({ q: "nrj" }, EGM));
-F("Rehab FM", "rhAb Af Am", ["rehab ?(?:fm|radio|city)"], ["rhAb Af Am"], Object.assign({ q: "rehab" }, EGM));
-F("Hawak FM", "hwAk Af Am", ["hawak|hawwak"], ["hwAk"], Object.assign({ q: "hawak" }, EGM));
-F("Masriyat", "mSryAt", ["masriyat|masryat|masriat|masreyat"], ["mSryAt"], Object.assign({ q: "masriyat" }, EGM));
-F("Aghani Aghani", "UgAny UgAny", ["aghani ?aghani|agani ?agani|aghany ?aghany"], ["AgAny AgAny"], Object.assign({ q: "aghani" }, EGM));
-F("Cultural Program", "AlbrnAmj AlvqAfy", ["cultural (?:program|programme)|el ?thaqafi"], ["AlbrnAmj AlvqAfy"], EGO);
-F("Egyptian Radio ERTU", "AlI*AEO AlmSryO", ["egyptian radio|\\bertu\\b|radio of egypt"], ["AlA*AEh AlmSryh"], Object.assign({ q: "ertu" }, EGO));
-
-/* ---- ARAB POP ---- */
-F("Rotana FM", "rwtAnA Af Am", ["rotana"], ["rwtAnA"], { c: "MUSIC", q: "rotana", x: [["cinema|\\btv\\b|movies|drama|clip|khalijia"], []] });
-F("MBC FM", "Am by sy Af Am", ["mbc ?fm|mbc ?radio"], ["Am by sy Af Am"], { c: "MUSIC", q: "mbc fm" });
-
-/* ---- MORE TARAB ---- */
-F("Asmahan", "UsmhAn", ["asmahan|asmahane"], ["AsmhAn"], TR);
-F("Sabah Fakhri", "SbAH fxry", ["sabah ?fakhri|sabah el ?fakhri|sabah fakhry"], ["SbAH fxry"], TR);
-F("Sayed Darwish", "syd drwy$", ["sayed darwish|sayyid darwish|sayed derwish"], ["syd drwy$"], TR);
-F("Warda Al Jazairia", "wrdO AljzA'ryO", ["warda al ?jaz|warda el ?gaz|warda el ?jaz"], ["wrdh Aljz"], TR);
-F("Najat Al Saghira", "njAh AlSgyrO", ["najat (?:el|al)? ?saghira|nagat (?:el|al)? ?saghira"], ["njAh AlSgyrh"], TR);
-F("Zaman El Gameel", "Alzmn Aljmyl", ["zaman (?:el|al) ?(?:gameel|jameel|gamil|jamil)|zaman ?gameel|golden (?:era|age)|arabic classic|classic arabic|oriental classic"], ["Alzmn Aljmyl|zmAn Aljmyl"], { c: "MUSIC", ccf: "" });
-F("Tarab Radio", "Trb", ["\\btarab\\b|\\btaraab\\b|\\btarb\\b"], ["Trb"], { c: "MUSIC", ccf: "", fam: 1, cap: 12, min: 60 });
-
-/* ---- MORE NEWS ---- */
-F("DW Arabic", "dwyt$h fylh", ["\\bdw\\b|deutsche welle"], ["dwyt$h fylh|dw Erbyh"], { c: "NEWS", q: "dw arabic" });
-F("RT Arabic", "rwsyA Alywm", ["\\brt\\b.{0,10}arab|russia today.{0,10}arab|rt arabic|rt arabia"], ["rwsyA Alywm"], { c: "NEWS", q: "rt arabic" });
-F("Alhurra", "AlHrO", ["alhurra|al ?hurra"], ["AlHrh"], { c: "NEWS", q: "alhurra" });
-F("Radio Sawa", "rAdyw swA", ["radio sawa|\\bsawa\\b"], ["rAdyw swA"], { c: "NEWS", q: "sawa" });
-F("Al Mayadeen", "AlmyAdyn", ["al ?mayadeen|almayadeen"], ["AlmyAdyn"], { c: "NEWS", q: "mayadeen" });
-F("Sputnik Arabic", "sbwtnyk", ["sputnik"], ["sbwtnyk"], { c: "NEWS", q: "sputnik" });
-F("TRT Arabic", "ty Ar ty Erby", ["trt ?arab"], ["ty Ar ty Erby"], { c: "NEWS", q: "trt arabic" });
-F("Al Araby", "AlErby Aljdyd", ["al ?araby\\b|alaraby|araby ?tv"], ["AlErby Aljdyd|tlfzywn AlErby|rAdyw AlErby"], { c: "NEWS", q: "araby" });
-
-/* ---- SPORTS ---- */
-F("Kora FM", "kwrO Af Am", ["kora ?fm|kooora ?fm|radio kora|kooora radio|\\bkooora\\b"], ["kwrh Af Am|rAdyw kwrh"], { c: "SPORTS", q: "kora" });
-F("Arab Sports Radio", "ryADO", ["\\bsports?\\b|riyada|riyadah|kooora|\\bkora\\b"], ["ryADh|kwrh|mlAEb"], { c: "SPORTS", ccf: "keep", fam: 1, cap: 10, min: 40 });
-
-/* ---- QURAN RECITERS (Egyptian first, then Gulf; Gulf reciters NEVER get cc=EG) ---- */
-F("Minshawi", "Almn$Awy", ["min?shawi|menshawy|minshawy|menshawi"], ["Almn$Awy"], Object.assign({ q: "minshawi" }, QE));
-F("Al Husary", "AlHSry", ["h[ou]s+ar[iy]"], ["AlHSry"], Object.assign({ q: "husary" }, QE));
-F("Abdul Basit Abdul Samad", "Ebd AlbAsT Ebd AlSmd", ["abd(?:ul|el|al)? ?(?:al ?)?bas[iy]t|abdel ?bas+et|abdulbasit|abdelbasit|abdul ?baset"], ["Ebd AlbAsT|EbdAlbAsT"], Object.assign({ q: "abdul basit" }, QE));
-F("Mustafa Ismail", "mSTfy IsmAEyl", ["m[ou]+stafa ?isma[ei]+l|mostafa ismael|mustapha ismail"], ["mSTfy AsmAEyl"], Object.assign({ q: "mustafa ismail" }, QE));
-F("Mahmoud Ali Al Banna", "mHmwd Ely AlbnA", ["mahmoud ?(?:ali|aly)? ?(?:al ?|el ?)?bann?a|(?:sheikh|shaikh) ?(?:al|el) ?banna|\\bal ?banna\\b|\\bel ?banna\\b"], ["mHmwd Ely AlbnA|AlSyx AlbnA"], Object.assign({ q: "banna" }, QE));
-F("Al Tablawi", "AlTblAwy", ["tablawi|toblawi|tabliwi|tablawy"], ["AlTblAwy"], Object.assign({ q: "tablawi" }, QE));
-F("Maher Al Muaiqly", "mAhr AlmEyqly", ["muaiqly|mueaqly|moaiqly|moayqly|maher.{0,12}(?:mu|mo)|maher al ?mu"], ["AlmEyqly|mAhr AlmEyqly"], Object.assign({ q: "muaiqly" }, QG));
+F("Omni Quran", "Amny qrQn", ["omni ?quran|qurango|mp3 ?quran|mp3quran|omni ?radio|omniradio"], ["Amny qrAn"], { c: "QURAN", ccf: "", fam: 1, cap: 100, min: 0, q: "omni quran" });
 F("Mishary Alafasy", "m$Ary AlEfAsy", ["afasy|alafasy|alafasi|afasi|mish[ae]ry ?(?:rashid|al)?|mishari"], ["AlEfAsy|m$Ary AlEfAsy|m$Ary rA$d"], Object.assign({ q: "alafasy" }, QG));
 F("Abdulrahman Al Sudais", "Ebd AlrHmn Alsdys", ["sudais|sudays|sudaiss|soudais|sodais"], ["Alsdys"], Object.assign({ q: "sudais" }, QG));
+F("Abdul Basit Abdul Samad", "Ebd AlbAsT Ebd AlSmd", ["abd(?:ul|el|al)? ?(?:al ?)?bas[iy]t|abdel ?bas+et|abdulbasit|abdelbasit|abdul ?baset"], ["Ebd AlbAsT|EbdAlbAsT"], Object.assign({ q: "abdul basit" }, QE));
+F("Al Husary", "AlHSry", ["h[ou]s+ar[iy]"], ["AlHSry"], Object.assign({ q: "husary" }, QE));
+F("Minshawi", "Almn$Awy", ["min?shawi|menshawy|minshawy|menshawi"], ["Almn$Awy"], Object.assign({ q: "minshawi" }, QE));
+F("Maher Al Muaiqly", "mAhr AlmEyqly", ["muaiqly|mueaqly|moaiqly|moayqly|maher.{0,12}(?:mu|mo)|maher al ?mu"], ["AlmEyqly|mAhr AlmEyqly"], Object.assign({ q: "muaiqly" }, QG));
 F("Saud Al Shuraim", "swd Al$rym", ["shuraim|shuraym|shureym|alshuraim"], ["Al$rym"], Object.assign({ q: "shuraim" }, QG));
 F("Saad Al Ghamdi", "sEd AlgAmdy", ["ghamdi|ghamidi|ghamdy|alghamdi"], ["AlgAmdy"], Object.assign({ q: "ghamdi" }, QG));
+F("Mustafa Ismail", "mSTfy IsmAEyl", ["m[ou]+stafa ?isma[ei]+l|mostafa ismael|mustapha ismail"], ["mSTfy AsmAEyl"], Object.assign({ q: "mustafa ismail" }, QE));
+F("Al Tablawi", "AlTblAwy", ["tablawi|toblawi|tabliwi|tablawy"], ["AlTblAwy"], Object.assign({ q: "tablawi" }, QE));
+F("Mahmoud Ali Al Banna", "mHmwd Ely AlbnA", ["mahmoud ?(?:ali|aly)? ?(?:al ?|el ?)?bann?a|(?:sheikh|shaikh) ?(?:al|el) ?banna|\\bal ?banna\\b|\\bel ?banna\\b"], ["mHmwd Ely AlbnA|AlSyx AlbnA"], Object.assign({ q: "banna" }, QE));
 F("Yasser Al Dosari", "yAsr Aldwsry", ["dosari|dossary|dosary|daosari"], ["Aldwsry"], Object.assign({ q: "dosari" }, QG));
 F("Nasser Al Qatami", "nASr AlqTAmy", ["qatami|qatamy"], ["AlqTAmy"], Object.assign({ q: "qatami" }, QG));
 F("Ahmed Al Ajmi", "UHmd AlEjmy", ["\\bajmi\\b|\\bal ?ajmy\\b|\\bajmy\\b"], ["AlEjmy"], Object.assign({ q: "ajmi" }, QG));
@@ -166,10 +163,32 @@ F("Al Hudhaify", "Ely AlH*yfy", ["hudhaify|huthaify|hudhayfi|hudaify|hudhaifi"],
 F("Hani Al Rifai", "hAny AlrfAEy", ["hani ?(?:al ?|er ?)?rifa"], ["hAny AlrfAEy"], Object.assign({ q: "rifai" }, QG));
 F("Abdullah Basfar", "Ebd Allh bSfr", ["basfar"], ["bSfr"], Object.assign({ q: "basfar" }, QG));
 F("Muhammad Jibreel", "mHmd jbryl", ["(?:muhammad|mohamed|mohammed) ?(?:ayyub ?)?j[iy]br[ei]+l|\\bjibreel\\b|\\bjibril\\b"], ["mHmd jbryl"], Object.assign({ q: "jibreel" }, QG));
-
-/* ---- OMNI QURAN / QURANGO / MP3QURAN (every stream family) + other famous Quran radios ---- */
-F("Omni Quran", "Amny qrQn", ["omni ?quran|qurango|mp3 ?quran|mp3quran|omni ?radio|omniradio"], ["Amny qrAn"], { c: "QURAN", ccf: "", fam: 1, cap: 100, min: 0, q: "omni quran" });
 F("Quran Radio", "qrQn", [QN], ["qrAn"], { c: "QURAN", ccf: "egcue", fam: 1, cap: 25, min: 100, x: [["english|translation|urdu|tafseer|tafsir|indonesia|malay|hindi|bengali|turkish|persian|farsi"], []] });
+
+/* ---- TARAB ICONS ---- */
+F("Umm Kulthum", "Um klvwm", ["k(?:a|o|u|ou)l[ts]h?[ou]+m"], ["Am klvwm|Am kltwm|klvwm|kltwm"], Object.assign({ q: "kalth" }, TR));
+F("Abdel Halim Hafez", "Ebd AlHlym HAfZ", ["abd(?:el|ul|al)? ?hal[ei]+m|abdelhalim"], ["Ebd AlHlym"], Object.assign({ q: "abdel halim" }, TR));
+F("Fairouz", "fyrwz", ["fairuz|fayrouz|fairouz|feyrouz|fayruz|fairoz|fayrooz|fairooz"], ["fyrwz"], Object.assign({ q: "fairuz" }, TR));
+F("Mohamed Abdel Wahab", "mHmd Ebd AlwhAb", ["abd(?:el|ul|al)? ?wahab|abdelwahab"], ["Ebd AlwhAb"], Object.assign({ q: "wahab" }, TR));
+F("Farid Al Atrash", "fryd AlUTr$", ["far[ie]e?d.{0,12}atrash|farid el ?atrash"], ["fryd AlATr$"], Object.assign({ q: "atrash" }, TR));
+F("Asmahan", "UsmhAn", ["asmahan|asmahane"], ["AsmhAn"], TR);
+F("Sabah Fakhri", "SbAH fxry", ["sabah ?fakhri|sabah el ?fakhri|sabah fakhry"], ["SbAH fxry"], TR);
+F("Sayed Darwish", "syd drwy$", ["sayed darwish|sayyid darwish|sayed derwish"], ["syd drwy$"], TR);
+F("Warda Al Jazairia", "wrdO AljzA'ryO", ["warda al ?jaz|warda el ?gaz|warda el ?jaz"], ["wrdh Aljz"], TR);
+F("Najat Al Saghira", "njAh AlSgyrO", ["najat (?:el|al)? ?saghira|nagat (?:el|al)? ?saghira"], ["njAh AlSgyrh"], TR);
+F("Zaman El Gameel", "Alzmn Aljmyl", ["zaman (?:el|al) ?(?:gameel|jameel|gamil|jamil)|zaman ?gameel|golden (?:era|age)|arabic classic|classic arabic|oriental classic"], ["Alzmn Aljmyl|zmAn Aljmyl"], { c: "MUSIC", ccf: "" });
+F("Tarab Radio", "Trb", ["\\btarab\\b|\\btaraab\\b|\\btarb\\b"], ["Trb"], { c: "MUSIC", ccf: "", fam: 1, cap: 12, min: 60 });
+
+/* ---- ARAB POP ---- */
+F("Rotana FM", "rwtAnA Af Am", ["rotana"], ["rwtAnA"], { c: "MUSIC", q: "rotana", x: [["cinema|\\btv\\b|movies|drama|clip|khalijia"], []] });
+F("MBC FM", "Am by sy Af Am", ["mbc ?fm|mbc ?radio"], ["Am by sy Af Am"], { c: "MUSIC", q: "mbc fm" });
+F("Mosaique FM", "mwzAyk Af Am", ["mosaique|mosaic ?fm"], ["mwzAyk"], { c: "MUSIC", ccf: "TN", q: "mosaique" });
+
+/* ---- SPORTS ---- */
+F("Kora FM", "kwrO Af Am", ["kora ?fm|kooora ?fm|radio kora|kooora radio|\\bkooora\\b"], ["kwrh Af Am|rAdyw kwrh"], { c: "SPORTS", q: "kora" });
+F("Arab Sports Radio", "ryADO", ["\\bsports?\\b|riyada|riyadah|kooora|\\bkora\\b"], ["ryADh|kwrh|mlAEb"], { c: "SPORTS", ccf: "keep", fam: 1, cap: 10, min: 40 });
+
+const FAMIDX = new Map(FAME.map((e, i) => [e.en, i]));
 
 /* ===== matching ===== */
 const CC = new Map();
@@ -204,6 +223,7 @@ function pick(r) {
 }
 function prep(r) {
   r.e = -1;
+  if (r.fe !== undefined) { r.e = r.fe; return true; }
   if (r.nn.length < 2) return false;
   if (RE.drop.test(r.nn + " " + r.tags.join(" "))) return false;
   if (r.rel) r.e = pick(r);
@@ -238,59 +258,46 @@ function gkey(r) {
   return c ? "X|" + c : "";
 }
 
-const NAMEQ = ["nile", "mega", "nagham", "nogoum", "9090", "hits", "shaabi", "masr", "cairo", "ertu", "on sport", "shabab", "sawt el arab", "barnamg", "sharq el awsat",
-  "jazeera", "arabiya", "hadath", "sky", "asharq", "bbc", "monte carlo", "france 24", "qahera", "extra news",
-  "kalth", "fairuz", "rotana", "mbc fm", "tarab", "omni", "qurango", "mp3quran"];
+/* name queries, most valuable first (subrequest budget truncates the tail) */
+const NAMEQ = ["jazeera", "arabiya", "bbc arabic", "monte carlo", "france 24", "sky news arabia", "asharq", "dw arabic", "mayadeen", "rt arabic", "alhurra", "sawa", "sputnik", "trt arabic", "alaraby",
+  "quran cairo", "makkah", "madinah", "omni quran", "qurango", "mp3quran", "kalth", "fairuz", "rotana", "mbc fm", "tarab", "kora", "nogoum", "nile fm", "mega fm"];
 
-/* Extra stream URLs. Reciter/Quran seeds are added as backup servers of their curated station (or create it). */
+/* Backup stream URLs. [fameName|"", displayName|null, cc, url]. Unverified seeds rank AFTER Radio-Browser-verified servers and are probed when budget allows. */
+const OM = "Omni Quran - ";
 const SEEDS = [
-  ["Quran Cairo - إذاعة القرآن الكريم من القاهرة", "EG", "https://stream.radiojar.com/8s5u5tpdtwzuv"],
-  ["Quran Cairo - إذاعة القرآن الكريم من القاهرة", "EG", "https://n0a.radiojar.com/8s5u5tpdtwzuv"],
-  ["Radio Masr - راديو مصر", "EG", "https://live.radiomasr.net/RADIOMASR"],
-  ["Al Barnamg Al Aam - البرنامج العام", "EG", "https://stream.radiojar.com/4wqre23fytzuv"],
-  ["Sawt El Arab - صوت العرب", "EG", "https://stream.radiojar.com/p230232fytzuv"],
-  ["Al Sharq Al Awsat - إذاعة الشرق الأوسط", "EG", "https://stream.radiojar.com/3213232fytzuv"],
-  ["Youth & Sports - الشباب والرياضة", "EG", "https://stream.radiojar.com/7213232fytzuv"],
-  ["ON Sport FM - أون سبورت إف إم", "EG", "https://stream.radiojar.com/9213232fytzuv"],
-  ["Nile FM - نايل إف إم", "EG", "https://audio.nrpstream.com/listen/nile_fm/radio.mp3"],
-  ["Nogoum FM - نجوم إف إم", "EG", "https://audio.nrpstream.com/listen/nogoum_fm/radio.mp3"],
-  ["Mega FM - ميجا إف إم", "EG", "https://audio.nrpstream.com/listen/mega_fm/radio.mp3"],
-  ["Nagham FM - نغم إف إم", "EG", "https://audio.nrpstream.com/listen/nagham_fm/radio.mp3"],
-  ["Radio Hits - راديو هيتس", "EG", "https://audio.nrpstream.com/listen/radio_hits/radio.mp3"],
-  ["Shaabi FM - شعبي إف إم", "EG", "https://audio.nrpstream.com/listen/shaabi_fm/radio.mp3"],
-  ["Al Jazeera - الجزيرة", "QA", "https://live-hls-audio-web-aja.getaj.net/AJA/index.m3u8"],
-  ["Al Arabiya - العربية", "SA", "https://live.alarabiya.net/alarabiapublish/alarabiya.stream/playlist.m3u8"],
-  ["Al Hadath - الحدث", "SA", "https://av.alarabiya.net/alarabiapublish/alhadath.stream/playlist.m3u8"],
-  ["Sky News Arabia - سكاي نيوز عربية", "AE", "https://radio.skynewsarabia.com/stream/radio/sna"],
-  ["BBC Arabic - بي بي سي عربية", "GB", "https://stream.live.vc.bbcmedia.co.uk/bbc_arabic_radio"],
-  ["Monte Carlo Doualiya - مونت كارلو الدولية", "FR", "https://montecarlodoualiya128k.ice.infomaniak.ch/mc-doualiya.mp3"],
-  ["France 24 Arabic - فرانس 24 بالعربية", "FR", "https://france24.ice.infomaniak.ch/france24-ar-128.mp3"],
-  ["Asharq News - الشرق للأخبار", "SA", "https://svs.itworkscdn.net/asharqradio/asharqradio.stream/playlist.m3u8"],
-  ["DW Arabic - دويتشه فيله", "DE", "https://dwamdstream103.akamaized.net/hls/live/2015526/dwstream103/index.m3u8"],
-  ["RT Arabic - روسيا اليوم", "RU", "https://rt-arb.rttv.com/live/rtarab/playlist.m3u8"],
-  ["Radio Sawa - راديو سوا", "US", "https://stream.radiojar.com/4213232fytzuv"],
-  ["Alhurra - الحرة", "US", "https://mbnv-ingest-use1-ak.akamaized.net/hls/live/2038900/MBNV_ALHURRA_MAIN/master.m3u8"],
-  ["Omni Quran Mix", "", "https://backup.qurango.net/radio/mix"],
-  ["Omni Quran Tarateel", "", "https://backup.qurango.net/radio/tarateel"],
-  ["Mishary Alafasy Radio", "", "https://backup.qurango.net/radio/mishary_alafasi"],
-  ["Maher Al Muaiqly Radio", "", "https://backup.qurango.net/radio/maher_al_meaqli"],
-  ["Yasser Al Dosari Radio", "", "https://backup.qurango.net/radio/yasser_aldosari"],
-  ["Ahmad Al Ajmi Radio", "", "https://backup.qurango.net/radio/ahmad_alajmy"],
-  ["Saad Al Ghamdi Radio", "", "https://backup.qurango.net/radio/saad_alghamdi"],
-  ["Nasser Al Qatami Radio", "", "https://backup.qurango.net/radio/nasser_alqatami"],
-  ["Abdulrahman Al Sudais Radio", "", "https://backup.qurango.net/radio/abdulrahman_alsudaes"],
-  ["Saud Al Shuraim Radio", "", "https://backup.qurango.net/radio/saud_alshuraim"],
-  ["Minshawi Radio", "", "https://backup.qurango.net/radio/mohammed_siddiq_alminshawi"],
-  ["Husary Radio", "", "https://backup.qurango.net/radio/mahmood_khalil_alhussary"],
-  ["Abdul Basit Abdul Samad Radio", "", "https://backup.qurango.net/radio/abdulbasit_abdulsamad"],
-  ["Mustafa Ismail Radio", "", "https://backup.qurango.net/radio/mustafa_ismail"],
-  ["Mahmoud Ali Al Banna Radio", "", "https://backup.qurango.net/radio/mahmoud_ali_albanna"],
-  ["Abu Bakr Al Shatri Radio", "", "https://backup.qurango.net/radio/abu_bakr_al_shatri"]
+  ["Quran Cairo", null, "EG", "https://stream.radiojar.com/8s5u5tpdtwzuv"],
+  ["Quran Cairo", null, "EG", "https://n0a.radiojar.com/8s5u5tpdtwzuv"],
+  ["Nile FM", null, "EG", "https://audio.nrpstream.com/listen/nile_fm/radio.mp3"],
+  ["Nogoum FM", null, "EG", "https://audio.nrpstream.com/listen/nogoum_fm/radio.mp3"],
+  ["Mega FM", null, "EG", "https://audio.nrpstream.com/listen/mega_fm/radio.mp3"],
+  ["Al Jazeera", null, "QA", "https://live-hls-audio-web-aja.getaj.net/AJA/index.m3u8"],
+  ["BBC Arabic", null, "GB", "https://stream.live.vc.bbcmedia.co.uk/bbc_arabic_radio"],
+  ["Monte Carlo Doualiya", null, "FR", "https://montecarlodoualiya128k.ice.infomaniak.ch/mc-doualiya-128.mp3"],
+  ["Sky News Arabia", null, "AE", "https://radio.skynewsarabia.com/stream/radio/sna"],
+  ["Asharq News", null, "SA", "https://svs.itworkscdn.net/asharqradio/asharqradio.stream/playlist.m3u8"],
+  ["", OM + AR("mnwEAt"), "", "https://backup.qurango.net/radio/mix"],
+  ["", OM + AR("trAtyl"), "", "https://backup.qurango.net/radio/tarateel"],
+  ["Mishary Alafasy", null, "", "https://backup.qurango.net/radio/mishary_alafasi"],
+  ["Maher Al Muaiqly", null, "", "https://backup.qurango.net/radio/maher_al_meaqli"],
+  ["Yasser Al Dosari", null, "", "https://backup.qurango.net/radio/yasser_aldosari"],
+  ["Ahmed Al Ajmi", null, "", "https://backup.qurango.net/radio/ahmad_alajmy"],
+  ["Saad Al Ghamdi", null, "", "https://backup.qurango.net/radio/saad_alghamdi"],
+  ["Nasser Al Qatami", null, "", "https://backup.qurango.net/radio/nasser_alqatami"],
+  ["Abdulrahman Al Sudais", null, "", "https://backup.qurango.net/radio/abdulrahman_alsudaes"],
+  ["Saud Al Shuraim", null, "", "https://backup.qurango.net/radio/saud_alshuraim"],
+  ["Minshawi", null, "EG", "https://backup.qurango.net/radio/mohammed_siddiq_alminshawi"],
+  ["Al Husary", null, "EG", "https://backup.qurango.net/radio/mahmood_khalil_alhussary"],
+  ["Abdul Basit Abdul Samad", null, "EG", "https://backup.qurango.net/radio/abdulbasit_abdulsamad"],
+  ["Mustafa Ismail", null, "EG", "https://backup.qurango.net/radio/mustafa_ismail"],
+  ["Mahmoud Ali Al Banna", null, "EG", "https://backup.qurango.net/radio/mahmoud_ali_albanna"],
+  ["Abu Bakr Al Shatri", null, "", "https://backup.qurango.net/radio/abu_bakr_al_shatri"]
 ];
 
-async function rb(path) {
+async function rb(path, bud) {
   const st = Math.floor(Math.random() * MIRRORS.length);
   for (let i = 0; i < 2; i++) {
+    if (bud.n >= bud.cap) return [];
+    bud.n++;
     try {
       const r = await fetch(MIRRORS[(st + i) % MIRRORS.length] + path, { headers: { "User-Agent": "RadioJoo/2.0", "Accept": "application/json" }, signal: AbortSignal.timeout(25000) });
       if (r.ok) { const j = await r.json(); if (Array.isArray(j)) return j; }
@@ -309,11 +316,14 @@ function compact(a) {
     const cc = String(r.countrycode || "").toUpperCase();
     const lang = String(r.language || "").toLowerCase();
     const rel = !cc || ARAB.has(cc) || lang.includes("arab") || AR_SCRIPT.test(n) || /arab|quran|koran|qurango|mp3|omni|kalth|kulth|fairuz|fayrouz/.test(nn);
-    out.push({
-      id: r.stationuuid || (n + u), n, nn, u, cc, lang, rel,
+    const x = {
+      id: r.stationuuid || (n + u), n, nn, u, cc, lang, rel, seed: !!r._seed,
+      codec: String(r.codec || ""),
       tags: String(r.tags || "").split(",").map(norm).filter(Boolean),
       v: r.votes | 0, c: r.clickcount | 0, t: r.clicktrend | 0, b: r.bitrate | 0, e: -1,
-    });
+    };
+    if (!audioOK(x)) continue;
+    out.push(x);
   }
   return out;
 }
@@ -330,16 +340,84 @@ function classify(name, tags) {
   return "EGYPT";
 }
 function seedRec(s, i) {
-  return compact([{ stationuuid: "seed" + i, name: s[0], url: s[2], countrycode: s[1], language: "arabic", tags: "quran", votes: 0, clickcount: 1, bitrate: 128 }])[0];
+  const fi = s[0] ? FAMIDX.get(s[0]) : undefined;
+  const nm = s[1] || (fi !== undefined ? FAME[fi].name : s[0]);
+  const r = compact([{ stationuuid: "seed" + i, name: nm, url: s[3], countrycode: s[2], language: "arabic", codec: "MP3", tags: "", votes: 0, clickcount: 1, bitrate: 128, _seed: 1 }])[0];
+  if (r && fi !== undefined) r.fe = fi;
+  return r;
 }
-async function build() {
+/* server ordering: not-reported-bad, https, RB-verified before seed, low/medium bitrate */
+function srvRank(x, bad) {
+  const b = x.b | 0;
+  const bucket = (b >= 32 && b <= 128) ? 0 : (b > 128 && b <= 192) ? 1 : b > 192 ? 2 : 1;
+  return (bad.has(h32(ukey(x.u))) ? 1000 : 0) + (/^https:/i.test(x.u) ? 0 : 100) + (x.seed ? 10 : 0) + bucket;
+}
+
+/* ===== audio probe: returns "ok" | "video" | "dead" ===== */
+async function probe(u) {
+  try {
+    const hls = /\.m3u8(?:[?#]|$)/i.test(u);
+    const hd = { "Icy-MetaData": "0", "User-Agent": "RadioJoo/2.0" };
+    if (!hls) hd.Range = "bytes=0-2047";
+    const r = await fetch(u, { headers: hd, signal: AbortSignal.timeout(4500) });
+    const ct = (r.headers.get("content-type") || "").toLowerCase();
+    const drop = () => { try { r.body && r.body.cancel(); } catch (e) { } };
+    if (!(r.ok || r.status === 206)) { drop(); return "dead"; }
+    if (/^video\//.test(ct) || /mp2t|x-flv|x-matroska/.test(ct)) { drop(); return "video"; }
+    if (hls || /mpegurl/.test(ct)) {
+      const t = (await r.text()).slice(0, 30000);
+      if (!/#EXTM3U/.test(t)) return "dead";
+      if (/RESOLUTION=|CODECS="[^"]*(?:avc|hvc|hev|vp0|av01)|#EXT-X-I-FRAME/i.test(t)) return "video";
+      return "ok";
+    }
+    drop();
+    return /audio|ogg|octet-stream|aac|mpeg|binary|stream/.test(ct) ? "ok" : "dead";
+  } catch (e) { return "dead"; }
+}
+async function verify(list, bud) {
+  const jobs = [];
+  for (const st of list) for (const x of st.s) if (x.k) jobs.push(x);
+  const todo = jobs.slice(0, Math.max(0, bud.cap - bud.n));
+  bud.n += todo.length;
+  for (let i = 0; i < todo.length; i += 6) {
+    const part = todo.slice(i, i + 6);
+    const res = await Promise.all(part.map(x => probe(x.u)));
+    part.forEach((x, j) => { x.v = res[j]; });
+  }
+  const out = [];
+  for (const st of list) {
+    let s = st.s.filter(x => x.v !== "video");
+    const live = s.filter(x => x.v !== "dead");
+    if (live.length) s = live;
+    if (!s.length) continue;
+    out.push(Object.assign({}, st, { s: s.map(x => ({ u: x.u, b: x.b, h: 0 })) }));
+  }
+  return out;
+}
+
+function getKV(env) {
+  return env.RADIO_KV || env.KV || Object.values(env || {}).find(v => v && typeof v.get === "function" && typeof v.put === "function" && typeof v.list === "function") || null;
+}
+async function loadBad(env) {
+  const kv = getKV(env); if (!kv) return new Set();
+  try {
+    const t = await kv.get("bad"); if (!t) return new Set();
+    const o = JSON.parse(t), now = Date.now(), s = new Set();
+    for (const k in o) if (o[k].n >= 3 && now - o[k].t < BADMS) s.add(k);
+    return s;
+  } catch (e) { return new Set(); }
+}
+
+async function build(env) {
   CC.clear();
+  const bud = { n: 0, cap: SUBCAP };
+  const bad = await loadBad(env);
   const b = "/json/stations/search?hidebroken=true&order=clickcount&reverse=true&limit=";
   const Q = [b + "6000&language=arabic", b + "3500&countrycode=EG", b + "2500&tag=quran"];
-  for (const n of NAMEQ) Q.push(b + "150&name=" + encodeURIComponent(n));
+  for (const n of NAMEQ) Q.push(b + "120&name=" + encodeURIComponent(n));
   const all = new Map();
   for (let i = 0; i < Q.length; i += 6) {
-    const res = await Promise.all(Q.slice(i, i + 6).map(q => rb(q)));
+    const res = await Promise.all(Q.slice(i, i + 6).map(q => rb(q, bud)));
     for (const arr of res) for (const r of compact(arr)) if (!all.has(r.id)) all.set(r.id, r);
   }
   SEEDS.forEach((s, i) => { const r = seedRec(s, i); if (r) all.set(r.id, r); });
@@ -355,8 +433,8 @@ async function build() {
   const tmp = [];
   for (const [key, g] of groups) {
     g.sort((a, z) => score(z) - score(a));
-    const best = g[0];
-    const idx = best.e;
+    const best = g.find(x => !x.seed) || g[0];
+    const idx = g[0].e;
     const e = idx >= 0 ? FAME[idx] : null;
     let cc;
     if (!e) cc = "EG";
@@ -372,12 +450,18 @@ async function build() {
     sc = Math.round(sc);
     const p = e ? (1900000000 - idx * 1000000 + Math.min(999999, sc)) : (1000000000 + Math.min(500000000, sc));
     const seen = new Set(), sv = [];
-    const ordered = g.slice().sort((a, z) => (/^https:/i.test(a.u) ? 0 : 1) - (/^https:/i.test(z.u) ? 0 : 1));
-    for (const x of ordered) { const k = ukey(x.u); if (seen.has(k)) continue; seen.add(k); sv.push({ u: x.u, b: x.b, h: 0 }); if (sv.length >= 8) break; }
-    tmp.push({ idx, fam: !!(e && e.fam), ex: !e, sc, st: { id: "rj" + h32(key) + h32(key.split("").reverse().join("")), n: (e && !e.fam) ? e.name : best.n, c: cat, cc, p: Math.min(2000000000, Math.round(p)), s: sv } });
+    const ordered = g.slice().sort((a, z) => srvRank(a, bad) - srvRank(z, bad));
+    for (const x of ordered) {
+      const k = ukey(x.u); if (seen.has(k)) continue; seen.add(k);
+      sv.push({ u: x.u, b: x.b, h: 0, k: (x.seed || /\.m3u8(?:[?#]|$)/i.test(x.u)) ? 1 : 0 });
+      if (sv.length >= MAXSRV) break;
+    }
+    const nm = e ? (e.fam ? (g.find(x => x.seed) && !g.some(x => !x.seed) ? g[0].n : best.n) : e.name) : best.n;
+    tmp.push({ idx, fam: !!(e && e.fam), ex: !e, sc, st: { id: "rj" + h32(key) + h32(key.split("").reverse().join("")), n: nm, c: cat, cc, p: Math.min(2000000000, Math.round(p)), s: sv } });
   }
 
-  const stations = [], fb = new Map(), extras = [];
+  let stations = [];
+  const fb = new Map(), extras = [];
   for (const x of tmp) {
     if (x.ex) extras.push(x);
     else if (x.fam) { let a = fb.get(x.idx); if (!a) fb.set(x.idx, a = []); a.push(x); }
@@ -387,18 +471,18 @@ async function build() {
     const e = FAME[idx];
     arr.filter(x => x.sc >= e.min).sort((a, z) => z.sc - a.sc).slice(0, e.cap || 50).forEach(x => stations.push(x.st));
   }
-  extras.filter(x => x.sc >= 8).sort((a, z) => z.sc - a.sc).slice(0, 160).forEach(x => stations.push(x.st));
+  extras.filter(x => x.sc >= 15).sort((a, z) => z.sc - a.sc).slice(0, 140).forEach(x => stations.push(x.st));
 
   if (stations.length < 60) return null;
   stations.sort((a, z) => z.p - a.p);
+  stations = await verify(stations, bud);
+  if (stations.length < 60) return null;
   const cats = {}; let servers = 0;
   for (const s of stations) { cats[s.c] = (cats[s.c] || 0) + 1; servers += s.s.length; }
   const body = JSON.stringify({ v: 2, stations });
   return { body, t: Date.now(), etag: '"' + h32(body) + stations.length + '"', n: stations.length, s: servers, cats };
 }
-function getKV(env) {
-  return env.RADIO_KV || env.KV || Object.values(env || {}).find(v => v && typeof v.get === "function" && typeof v.put === "function" && typeof v.list === "function") || null;
-}
+
 async function loadStored(env) {
   if (MEM) return MEM;
   const kv = getKV(env); if (!kv) return null;
@@ -412,7 +496,7 @@ function rebuild(env) {
   if (BUILDING) return BUILDING;
   BUILDING = (async () => {
     try {
-      const c = await build(); if (!c) return null;
+      const c = await build(env); if (!c) return null;
       MEM = c;
       const kv = getKV(env);
       if (kv) { try { await kv.put("catalog", c.body); await kv.put("catalog_meta", JSON.stringify({ t: c.t, etag: c.etag, n: c.n, s: c.s, cats: c.cats })); } catch (e) { } }
@@ -428,14 +512,7 @@ async function catalog(env, ctx) {
   return await rebuild(env);
 }
 const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { "Content-Type": "application/json; charset=utf-8" } });
-async function probe(u) {
-  try {
-    const r = await fetch(u, { headers: { "Range": "bytes=0-1", "Icy-MetaData": "0", "User-Agent": "RadioJoo/2.0" }, signal: AbortSignal.timeout(4000) });
-    const ct = (r.headers.get("content-type") || "").toLowerCase();
-    try { r.body && r.body.cancel(); } catch (e) { }
-    return (r.ok || r.status === 206) && /audio|mpegurl|ogg|octet-stream|aac|mpeg/.test(ct);
-  } catch (e) { return false; }
-}
+
 export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
@@ -459,20 +536,38 @@ export default {
       const id = url.searchParams.get("id");
       const st = JSON.parse(c.body).stations.find(s => s.id === id);
       if (!st) return json({}, 404);
+      const bud = { n: 0, cap: 20 };
       const q0 = st.n.split(" - ")[0];
       const r0 = { n: q0, nn: norm(q0), cc: st.cc || "", lang: "arabic", tags: [], rel: true, e: -1 };
       prep(r0);
       const k0 = gkey(r0);
       const sq = (r0.e >= 0 && FAME[r0.e].q) ? FAME[r0.e].q : q0;
-      const found = compact(await rb("/json/stations/search?hidebroken=true&limit=60&order=clickcount&reverse=true&name=" + encodeURIComponent(sq)));
+      const found = compact(await rb("/json/stations/search?hidebroken=true&limit=60&order=clickcount&reverse=true&name=" + encodeURIComponent(sq), bud));
       const have = new Set(st.s.map(x => ukey(x.u)));
       const extra = !k0 ? [] : found.filter(r => prep(r) && gkey(r) === k0 && !have.has(ukey(r.u))).sort((a, z) => score(z) - score(a)).map(r => ({ u: r.u, b: r.b, h: 0 }));
       const cand = st.s.concat(extra).slice(0, 12);
-      const alive = await Promise.all(cand.map(x => probe(x.u)));
-      st.s = cand.filter((x, i) => alive[i]).concat(cand.filter((x, i) => !alive[i])).slice(0, 10);
+      const res = await Promise.all(cand.map(x => probe(x.u)));
+      const keep = cand.filter((x, i) => res[i] !== "video");
+      const rk = res.filter(v => v !== "video");
+      st.s = keep.filter((x, i) => rk[i] === "ok").concat(keep.filter((x, i) => rk[i] !== "ok")).slice(0, 10);
       return json({ station: st });
     }
-    if (path === "/v2/report") return json({ ok: true });
+    if (path === "/v2/report") {
+      try {
+        let u = url.searchParams.get("u") || "";
+        if (!u && req.method === "POST") { const j = await req.json().catch(() => null); if (j) u = j.u || j.url || ""; }
+        const kv = getKV(env);
+        if (u && kv) {
+          const t = await kv.get("bad"); const o = t ? JSON.parse(t) : {}; const now = Date.now();
+          const k = h32(ukey(u)); const x = o[k] || { n: 0, t: 0 };
+          x.n++; x.t = now; o[k] = x;
+          for (const kk in o) if (now - o[kk].t > BADMS) delete o[kk];
+          const ks = Object.keys(o); if (ks.length > 800) ks.sort((a, z) => o[a].t - o[z].t).slice(0, ks.length - 800).forEach(kk => delete o[kk]);
+          await kv.put("bad", JSON.stringify(o));
+        }
+      } catch (e) { }
+      return json({ ok: true });
+    }
     return json({ ok: true, service: "radio-joo-proxy", v: 2 });
   },
   async scheduled(event, env, ctx) { ctx.waitUntil(rebuild(env)); },
