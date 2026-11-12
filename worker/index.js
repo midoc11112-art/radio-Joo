@@ -1,7 +1,7 @@
 /* RADIO-JOO flagship catalog worker (schema v2). ASCII-only source: Arabic is produced from Buckwalter via B()/AR(). */
 const MIRRORS = ["https://de1.api.radio-browser.info", "https://fi1.api.radio-browser.info", "https://at1.api.radio-browser.info", "https://de2.api.radio-browser.info"];
 const ARAB = new Set("EG SA AE KW QA BH OM YE IQ SY LB JO PS LY TN DZ MA MR SD SO DJ KM".split(" "));
-const TTL = 6 * 3600 * 1000, THROTTLE = 45000, SUBCAP = 48, MAXSRV = 8, BADMS = 3 * 86400000;
+const TTL = 6 * 3600 * 1000, THROTTLE = 45000, SUBCAP = 48, MAXSRV = 12, BADMS = 3 * 86400000, HSMS = 7 * 86400000;
 let MEM = null, BUILDING = null, LASTREF = 0;
 
 const BW = { A: "\u0627", b: "\u0628", t: "\u062A", v: "\u062B", j: "\u062C", H: "\u062D", x: "\u062E", d: "\u062F", "*": "\u0630", r: "\u0631", z: "\u0632", s: "\u0633", "$": "\u0634", S: "\u0635", D: "\u0636", T: "\u0637", Z: "\u0638", E: "\u0639", g: "\u063A", f: "\u0641", q: "\u0642", k: "\u0643", l: "\u0644", m: "\u0645", n: "\u0646", h: "\u0647", w: "\u0648", y: "\u064A", "'": "\u0621" };
@@ -77,7 +77,7 @@ const TR = { c: "MUSIC", lim: "any", ccf: "" };
 const NQX = [["qur ?an|koran|makk?ah|madin|nabawi|haram|tilawa"], ["qrAn|mkh|Almdynh|Alnbwy|AlHrm|tlAwh"]];
 
 /* ---- #1 QURAN CAIRO ---- */
-F("Quran Cairo", "I*AEO AlqrQn AlkrAym mn AlqAhrO",
+F("Quran Cairo", "I*AEO AlqrQn Alkrym mn AlqAhrO",
   [`${QN}.{0,30}(?:cairo|egypt|misr|masr)|(?:cairo|egypt|misr|masr).{0,30}${QN}`],
   ["qrAn.{0,30}(?:AlqAhrh|mSr)|(?:AlqAhrh|mSr).{0,30}qrAn"], Object.assign({ q: "quran cairo" }, QE));
 
@@ -99,6 +99,7 @@ F("Masr El Gdida", "rAdyw mSr AljdydO", ["masr el ?(?:gdid|jdid|gedid)\\w*|misr 
 F("Rehab FM", "rhAb Af Am", ["rehab ?(?:fm|radio|city)"], ["rhAb Af Am"], Object.assign({ q: "rehab" }, EGM));
 F("Hawak FM", "hwAk Af Am", ["hawak|hawwak"], ["hwAk"], Object.assign({ q: "hawak" }, EGM));
 F("Masriyat", "mSryAt", ["masriyat|masryat|masriat|masreyat"], ["mSryAt"], Object.assign({ q: "masriyat" }, EGM));
+F("Tes3enat FM", "tsEynAt Af Am", ["tes3enat|tis3enat|tes3inat|tesaenat|\\b90s ?fm\\b|nineties ?fm"], ["tsEynAt"], Object.assign({ q: "tes3enat" }, EGM));
 F("Aghani Aghani", "UgAny UgAny", ["aghani ?aghani|agani ?agani|aghany ?aghany"], ["AgAny AgAny"], Object.assign({ q: "aghani" }, EGM));
 F("Al Sharq Al Awsat", "I*AEO Al$rq AlUwsT", ["middle east (?:radio|fm)|sharq ?(?:el|al)? ?awsat\\b|el sharq el awsat"], ["Al$rq AlAwsT"], Object.assign({ q: "sharq el awsat" }, EGO));
 F("Cultural Program", "AlbrnAmj AlvqAfy", ["cultural (?:program|programme)|el ?thaqafi"], ["AlbrnAmj AlvqAfy"], EGO);
@@ -132,15 +133,22 @@ F("Qatar Radio", "I*AEO qTr", ["qatar radio|radio qatar|qatar (?:fm|broadcasting
 F("Radio Jordan", "I*AEO AlUrdn", ["radio jordan|jordan radio|hashemite kingdom radio"], ["A*AEh AlArdn"], { c: "NEWS", ccf: "JO", q: "radio jordan", x: NQX });
 F("Voice of Lebanon", "Swt lbnAn", ["voice of lebanon|sawt ?(?:el|al)? ?lubnan|sawt lebnan"], ["Swt lbnAn"], { c: "NEWS", ccf: "LB", q: "voice of lebanon", x: NQX });
 F("Medi 1 Radio", "rAdyw mydy 1", ["medi ?1\\b|medi1|radio medi"], ["mydy 1|mydy1"], { c: "TALK", ccf: "MA", q: "medi 1", x: NQX });
+F("Radio Oman", "I*AEO slTnO EmAn", ["radio oman|oman radio|sultanate of oman radio|oman (?:fm|news)"], ["A*AEh slTnh EmAn|A*AEh EmAn"], { c: "NEWS", ccf: "OM", q: "radio oman", x: NQX });
+F("Radio Bahrain", "I*AEO AlbHryn", ["radio bahrain|bahrain radio|bahrain (?:fm|news)"], ["A*AEh AlbHryn"], { c: "NEWS", ccf: "BH", q: "radio bahrain", x: NQX });
+F("Iraqi Media Network", "$bkO AlEAlAm AlErAqy", ["iraqi media network|radio iraq|iraq radio|republic of iraq radio"], ["$bkh AlEAlAm AlErAqy|A*AEh AlErAq"], { c: "NEWS", ccf: "IQ", q: "iraqi media", x: NQX });
+F("Voice of Palestine", "Swt flsTyn", ["voice of palestine|sawt ?(?:el|al)? ?filast[iy]n|palestine radio|radio palestine"], ["Swt flsTyn|A*AEh flsTyn"], { c: "NEWS", ccf: "PS", q: "voice of palestine", x: NQX });
+F("Omdurman Radio", "I*AEO Um drmAn", ["omdurman|um ?durman|radio sudan|sudan radio"], ["Am drmAn|A*AEh AlswdAn"], { c: "NEWS", ccf: "SD", q: "omdurman", x: NQX });
+F("Radio Algerie", "I*AEO AljzAyr", ["radio ?alg.?rie|algerian radio|radio algeria|algeria radio"], ["A*AEh AljzAyr|A*AEh AljzA'r"], { c: "NEWS", ccf: "DZ", q: "radio algerie", x: NQX });
+F("Radio Tunisienne", "AlI*AEO AltwnsyO", ["radio tunisienne|tunisian national radio|radio tunis(?:ie)?\\b|tunisia radio"], ["A*AEh Altwnsyh"], { c: "NEWS", ccf: "TN", q: "radio tunis", x: NQX });
 
 /* ---- QURAN (Saudi, Al Majd, Omni family, then reciters: Egyptian = cc EG, Gulf never EG) ---- */
-F("Saudi Quran Makkah", "I*AEO AlqrQn AlkrAym mn mkO AlmkrmO",
+F("Saudi Quran Makkah", "I*AEO AlqrQn Alkrym mn mkO AlmkrmO",
   [`makk?ah.{0,25}${QN}|${QN}.{0,25}makk?ah|mecca.{0,25}${QN}|${QN}.{0,25}mecca|makk?ah ?(?:live|radio)|haramain|masjid ?al ?haram|saudi.{0,25}${QN}|ksa.{0,10}${QN}|${QN}.{0,25}saudi`],
   ["qrAn.{0,25}mkh|mkh.{0,25}qrAn|AlHrm Almky|AlHrmyn|Almsjd AlHrAm|AlsEwdyh.{0,25}qrAn|qrAn.{0,25}AlsEwdyh"], { c: "QURAN", ccf: "SA", q: "makkah" });
-F("Saudi Quran Madinah", "I*AEO AlqrQn AlkrAym mn AlmdynO Almnwrh",
+F("Saudi Quran Madinah", "I*AEO AlqrQn Alkrym mn AlmdynO Almnwrh",
   [`madin[ae]h?.{0,25}${QN}|${QN}.{0,25}madin[ae]h?|medin[ae]h?.{0,25}${QN}|${QN}.{0,25}medin[ae]h?|nabawi|prophet.{0,10}mosque`],
   ["qrAn.{0,25}Almdynh|Almdynh.{0,25}qrAn|Almsjd Alnbwy|AlHrm Alnbwy"], { c: "QURAN", ccf: "SA", q: "madinah" });
-F("Al Majd Quran", "Almjd llqrQn AlkrAym",
+F("Al Majd Quran", "Almjd llqrQn Alkrym",
   [`al ?majd.{0,25}${QN}|${QN}.{0,25}al ?majd|almajd ?quran`],
   ["Almjd.{0,25}qrAn|qrAn.{0,25}Almjd|Almjd llqrAn"], { c: "QURAN", ccf: "SA", q: "majd quran" });
 F("Omni Quran", "Amny qrQn", ["omni ?quran|qurango|mp3 ?quran|mp3quran|omni ?radio|omniradio"], ["Amny qrAn"], { c: "QURAN", ccf: "", fam: 1, cap: 100, min: 0, q: "omni quran" });
@@ -346,11 +354,17 @@ function seedRec(s, i) {
   if (r && fi !== undefined) r.fe = fi;
   return r;
 }
-/* server ordering: not-reported-bad, https, RB-verified before seed, low/medium bitrate */
-function srvRank(x, bad) {
-  const b = x.b | 0;
-  const bucket = (b >= 32 && b <= 128) ? 0 : (b > 128 && b <= 192) ? 1 : b > 192 ? 2 : 1;
-  return (bad.has(h32(ukey(x.u))) ? 1000 : 0) + (/^https:/i.test(x.u) ? 0 : 100) + (x.seed ? 10 : 0) + bucket;
+/* server ordering: not-reported-bad, https, then CHEAPEST bitrate first (<=40 / <=72 / <=112 kbps / rest), RB-verified before seed */
+function kbOf(x, hs) { return x.b > 0 ? x.b : (hs.kb.get(h32(ukey(x.u))) || 0); }
+function srvRank(x, hs) {
+  const k = h32(ukey(x.u)), kb = kbOf(x, hs);
+  const bucket = kb <= 0 ? 3 : kb <= 40 ? 0 : kb <= 72 ? 1 : kb <= 112 ? 2 : 3;
+  return (hs.bad.has(k) ? 1000 : 0) + (/^https:/i.test(x.u) ? 0 : 200) + bucket * 20 + (x.seed ? 5 : 0);
+}
+async function probeAll(urls) {
+  const out = [];
+  for (let i = 0; i < urls.length; i += 6) out.push(...await Promise.all(urls.slice(i, i + 6).map(probe)));
+  return out;
 }
 
 /* ===== audio probe: returns "ok" | "video" | "dead" ===== */
@@ -398,20 +412,47 @@ async function verify(list, bud) {
 function getKV(env) {
   return env.RADIO_KV || env.KV || Object.values(env || {}).find(v => v && typeof v.get === "function" && typeof v.put === "function" && typeof v.list === "function") || null;
 }
-async function loadBad(env) {
-  const kv = getKV(env); if (!kv) return new Set();
+async function loadHS(env) {
+  const out = { bad: new Set(), kb: new Map() };
+  const kv = getKV(env); if (!kv) return out;
   try {
-    const t = await kv.get("bad"); if (!t) return new Set();
-    const o = JSON.parse(t), now = Date.now(), s = new Set();
-    for (const k in o) if (o[k].n >= 3 && now - o[k].t < BADMS) s.add(k);
-    return s;
-  } catch (e) { return new Set(); }
+    const t = await kv.get("hs"); if (!t) return out;
+    const o = JSON.parse(t), now = Date.now();
+    for (const k in o) {
+      const x = o[k]; if (now - x.t > HSMS) continue;
+      if (x.f >= 3 && now - x.t < BADMS) out.bad.add(k);
+      if (x.k >= 8 && x.k <= 400) out.kb.set(k, x.k);
+    }
+  } catch (e) { }
+  return out;
+}
+async function loadHeal(env) {
+  const kv = getKV(env); if (!kv) return {};
+  try { const t = await kv.get("heal"); return t ? JSON.parse(t) : {}; } catch (e) { return {}; }
+}
+async function healSave(env, id, servers) {
+  const kv = getKV(env); if (!kv) return;
+  try {
+    const t = await kv.get("heal"); const o = t ? JSON.parse(t) : {};
+    delete o[id]; o[id] = servers.slice(0, 12).map(x => ({ u: x.u, b: x.b | 0 }));
+    const ks = Object.keys(o); if (ks.length > 300) ks.slice(0, ks.length - 300).forEach(k => delete o[k]);
+    await kv.put("heal", JSON.stringify(o));
+  } catch (e) { }
+}
+async function persistCatalog(env, c, stations) {
+  const body = JSON.stringify({ v: 2, stations });
+  let servers = 0; const cats = {};
+  for (const s of stations) { servers += s.s.length; cats[s.c] = (cats[s.c] || 0) + 1; }
+  const nc = { body, t: c.t, etag: '"' + h32(body) + stations.length + '"', n: stations.length, s: servers, cats };
+  MEM = nc;
+  const kv = getKV(env);
+  if (kv) { try { await kv.put("catalog", body); await kv.put("catalog_meta", JSON.stringify({ t: nc.t, etag: nc.etag, n: nc.n, s: nc.s, cats })); } catch (e) { } }
 }
 
 async function build(env) {
   CC.clear();
   const bud = { n: 0, cap: SUBCAP };
-  const bad = await loadBad(env);
+  const hs = await loadHS(env); const healMap = await loadHeal(env);
   const b = "/json/stations/search?hidebroken=true&order=clickcount&reverse=true&limit=";
   const Q = [b + "6000&language=arabic", b + "3500&countrycode=EG", b + "2500&tag=quran"];
   for (const n of NAMEQ) Q.push(b + "120&name=" + encodeURIComponent(n));
@@ -449,15 +490,20 @@ async function build(env) {
     let sc = score(best); for (let i = 1; i < g.length; i++) sc += score(g[i]) * 0.5;
     sc = Math.round(sc);
     const p = e ? (1900000000 - idx * 1000000 + Math.min(999999, sc)) : (1000000000 + Math.min(500000000, sc));
+    const sid = "rj" + h32(key) + h32(key.split("").reverse().join(""));
     const seen = new Set(), sv = [];
-    const ordered = g.slice().sort((a, z) => srvRank(a, bad) - srvRank(z, bad));
-    for (const x of ordered) {
+    const hsrv = (healMap[sid] || []).map(x => ({ u: x.u, b: x.b | 0, seed: false }));
+    let pool = g.concat(hsrv).sort((a, z) => srvRank(a, hs) - srvRank(z, hs));
+    const good = pool.filter(x => !hs.bad.has(h32(ukey(x.u))));
+    if (good.length >= 3) pool = good;
+    if (pool.filter(x => /^https:/i.test(x.u)).length >= 2) pool = pool.filter(x => /^https:/i.test(x.u));
+    for (const x of pool) {
       const k = ukey(x.u); if (seen.has(k)) continue; seen.add(k);
-      sv.push({ u: x.u, b: x.b, h: 0, k: (x.seed || /\.m3u8(?:[?#]|$)/i.test(x.u)) ? 1 : 0 });
+      sv.push({ u: x.u, b: kbOf(x, hs), h: 0, k: (x.seed || /\.m3u8(?:[?#]|$)/i.test(x.u)) ? 1 : 0 });
       if (sv.length >= MAXSRV) break;
     }
     const nm = e ? (e.fam ? (g.find(x => x.seed) && !g.some(x => !x.seed) ? g[0].n : best.n) : e.name) : best.n;
-    tmp.push({ idx, fam: !!(e && e.fam), ex: !e, sc, st: { id: "rj" + h32(key) + h32(key.split("").reverse().join("")), n: nm, c: cat, cc, p: Math.min(2000000000, Math.round(p)), s: sv } });
+    tmp.push({ idx, fam: !!(e && e.fam), ex: !e, sc, st: { id: sid, n: nm, c: cat, cc, p: Math.min(2000000000, Math.round(p)), s: sv } });
   }
 
   let stations = [];
@@ -534,36 +580,64 @@ export default {
     if (path === "/v2/heal") {
       const c = await catalog(env, ctx); if (!c) return json({}, 404);
       const id = url.searchParams.get("id");
-      const st = JSON.parse(c.body).stations.find(s => s.id === id);
-      if (!st) return json({}, 404);
-      const bud = { n: 0, cap: 20 };
+      const all = JSON.parse(c.body).stations;
+      const ix = all.findIndex(s => s.id === id);
+      if (ix < 0) return json({}, 404);
+      const st = all[ix];
+      const hs = await loadHS(env);
+      const bud = { n: 0, cap: 24 };
       const q0 = st.n.split(" - ")[0];
       const r0 = { n: q0, nn: norm(q0), cc: st.cc || "", lang: "arabic", tags: [], rel: true, e: -1 };
       prep(r0);
       const k0 = gkey(r0);
       const sq = (r0.e >= 0 && FAME[r0.e].q) ? FAME[r0.e].q : q0;
-      const found = compact(await rb("/json/stations/search?hidebroken=true&limit=60&order=clickcount&reverse=true&name=" + encodeURIComponent(sq), bud));
+      const qs = sq === q0 ? [sq] : [sq, q0];
+      const arrs = await Promise.all(qs.map(q => rb("/json/stations/search?hidebroken=true&limit=80&order=clickcount&reverse=true&name=" + encodeURIComponent(q), bud)));
+      const found = compact([].concat(...arrs));
       const have = new Set(st.s.map(x => ukey(x.u)));
-      const extra = !k0 ? [] : found.filter(r => prep(r) && gkey(r) === k0 && !have.has(ukey(r.u))).sort((a, z) => score(z) - score(a)).map(r => ({ u: r.u, b: r.b, h: 0 }));
-      const cand = st.s.concat(extra).slice(0, 12);
-      const res = await Promise.all(cand.map(x => probe(x.u)));
-      const keep = cand.filter((x, i) => res[i] !== "video");
-      const rk = res.filter(v => v !== "video");
-      st.s = keep.filter((x, i) => rk[i] === "ok").concat(keep.filter((x, i) => rk[i] !== "ok")).slice(0, 10);
+      const seenX = new Set();
+      const extra = !k0 ? [] : found.filter(r => prep(r) && gkey(r) === k0 && !have.has(ukey(r.u)) && !seenX.has(ukey(r.u)) && seenX.add(ukey(r.u)))
+        .sort((a, z) => score(z) - score(a)).map(r => ({ u: r.u, b: r.b, h: 0 }));
+      const cand = st.s.concat(extra).slice(0, 18);
+      const res = await probeAll(cand.map(x => x.u));
+      const ok = [], rest = [];
+      cand.forEach((x, i) => { if (res[i] === "video") return; (res[i] === "ok" ? ok : rest).push(x); });
+      const rk = (a, z) => srvRank(a, hs) - srvRank(z, hs);
+      ok.sort(rk); rest.sort(rk);
+      const added = ok.filter(x => !have.has(ukey(x.u)));
+      st.s = ok.concat(rest).slice(0, 14);
+      if (added.length || cand.length !== ok.length + rest.length) {
+        await healSave(env, id, ok);
+        all[ix] = st;
+        await persistCatalog(env, c, all);
+      }
       return json({ station: st });
     }
     if (path === "/v2/report") {
       try {
-        let u = url.searchParams.get("u") || "";
-        if (!u && req.method === "POST") { const j = await req.json().catch(() => null); if (j) u = j.u || j.url || ""; }
+        let items = [];
+        const u1 = url.searchParams.get("u");
+        if (u1) items.push({ u: u1, ok: url.searchParams.get("ok") === "1" ? 1 : 0, b: 0 });
+        if (req.method === "POST") {
+          const j = await req.json().catch(() => null);
+          if (j) {
+            if (Array.isArray(j.r)) items = items.concat(j.r.slice(0, 200));
+            else if (j.u || j.url) items.push({ u: j.u || j.url, ok: j.ok ? 1 : 0, b: j.b | 0 });
+          }
+        }
         const kv = getKV(env);
-        if (u && kv) {
-          const t = await kv.get("bad"); const o = t ? JSON.parse(t) : {}; const now = Date.now();
-          const k = h32(ukey(u)); const x = o[k] || { n: 0, t: 0 };
-          x.n++; x.t = now; o[k] = x;
-          for (const kk in o) if (now - o[kk].t > BADMS) delete o[kk];
-          const ks = Object.keys(o); if (ks.length > 800) ks.sort((a, z) => o[a].t - o[z].t).slice(0, ks.length - 800).forEach(kk => delete o[kk]);
-          await kv.put("bad", JSON.stringify(o));
+        if (items.length && kv) {
+          const t = await kv.get("hs"); const o = t ? JSON.parse(t) : {}; const now = Date.now();
+          for (const it of items) {
+            if (!it || typeof it.u !== "string" || !/^https?:\/\//i.test(it.u)) continue;
+            const k = h32(ukey(it.u)); const x = o[k] || { f: 0, o: 0, t: 0, k: 0 };
+            if (it.ok) { x.o++; x.f = 0; } else x.f++;
+            const kb = it.b | 0; if (kb >= 8 && kb <= 400) x.k = kb;
+            x.t = now; o[k] = x;
+          }
+          for (const kk in o) if (now - o[kk].t > HSMS) delete o[kk];
+          const ks = Object.keys(o); if (ks.length > 3000) ks.sort((a, z) => o[a].t - o[z].t).slice(0, ks.length - 3000).forEach(kk => delete o[kk]);
+          await kv.put("hs", JSON.stringify(o));
         }
       } catch (e) { }
       return json({ ok: true });
