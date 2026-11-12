@@ -74,7 +74,7 @@ class Health(context: Context) {
     }
 
     private fun tier(url: String, now: Long): Int {
-        val cool = cooling(url, now) == 1
+        val cool = (stats[url]?.consecutiveFails ?: 0) > 0
         return when {
             !cool && url in pinned -> 0
             !cool -> 1

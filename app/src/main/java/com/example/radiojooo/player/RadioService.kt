@@ -437,6 +437,10 @@ private fun startAttempt(i: Int) {
             }
         }
         override fun onPlayerError(error: PlaybackException) { onServerFailed() }
+        override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+            val hasVideo = tracks.groups.any { g -> g.type == androidx.media3.common.C.TRACK_TYPE_VIDEO && (0 until g.length).any { i -> val m = g.getTrackFormat(i).sampleMimeType ?: ""; m != "video/mjpeg" && m != "image/jpeg" } }
+            if (hasVideo) { order.getOrNull(index)?.let { health.setBanned(it.url, true) }; onServerFailed() }
+        }
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             if (!playWhenReady && isActiveStatus() &&
                 (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS ||
