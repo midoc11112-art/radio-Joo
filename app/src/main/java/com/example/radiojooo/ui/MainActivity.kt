@@ -135,6 +135,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (Graph.repo(this).restoreFromExternalBackup()) {
+            showMessage("✅ تم استعادة ترتيب وإعدادات الإذاعات المحفوظة")
+        }
+    }
+
     // ---------------------------------------------------------------- recordings folder access (/sdcard/RadioJoo)
     private fun askStorageAccess() {
         try {
