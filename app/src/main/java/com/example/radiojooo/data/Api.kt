@@ -99,13 +99,13 @@ object Api {
         } catch (e: Exception) { false }
     }
 
-    private fun parseStations(arr: JSONArray): List<Station> {
+    fun parseStations(arr: JSONArray): List<Station> {
         val out = ArrayList<Station>(arr.length())
         for (i in 0 until arr.length()) parseStation(arr.optJSONObject(i))?.let { out.add(it) }
         return out
     }
 
-    private fun parseStation(o: JSONObject?): Station? {
+    fun parseStation(o: JSONObject?): Station? {
         if (o == null) return null
         val id = o.optString("id"); val name = o.optString("n")
         val sv = o.optJSONArray("s") ?: return null

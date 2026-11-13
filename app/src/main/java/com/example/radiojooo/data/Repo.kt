@@ -201,21 +201,7 @@ class Repo(context: Context) {
 
     /** Shows the cached list instantly (works offline), before any network call. */
     
-    suspend fun addLiveStation(st: Station): Station = mutex.withLock {
-        val clean = st.copy(isFavorite = true)
-        deleted.remove(clean.id)
-        delPrefs.edit().putStringSet("ids", deleted).commit()
-        customCats[clean.id] = clean.category
-        catPrefs.edit().putString(clean.id, clean.category).commit()
-        ranks[clean.id] = -System.currentTimeMillis().toInt()
-        orderPrefs.edit().putInt(clean.id, ranks[clean.id]!!).commit()
-        val cur = _stations.value.filterNot { it.id == clean.id }.toMutableList()
-        cur.add(0, clean)
-        _stations.value = cur
-        saveCache(cur)
-        persistUserPrefsBackup()
-        clean
-    }
+    
 
     
     private fun loadGoldenAssetFallback(): List<Station> {
@@ -234,6 +220,22 @@ class Repo(context: Context) {
         } catch (e: Exception) {
             emptyList()
         }
+    }
+
+    
+    suspend fun addLiveStation(st: Station): Station = mutex.withLock {
+        val clean = st.copy(isFavorite = true)
+        deleted.remove(clean.id)
+        delPrefs.edit().putStringSet("ids", deleted).commit()
+        customCats[clean.id] = clean.category
+        catPrefs.edit().putString(clean.id, clean.category).commit()
+        ranks[clean.id] = -System.currentTimeMillis().toInt()
+        orderPrefs.edit().putInt(clean.id, ranks[clean.id]!!).commit()
+        val cur = _stations.value.filterNot { it.id == clean.id }.toMutableList()
+        cur.add(0, clean)
+        _stations.value = cur
+        persistCache(cur)
+        clean
     }
 
     suspend fun loadCache() = withContext(Dispatchers.IO) {
