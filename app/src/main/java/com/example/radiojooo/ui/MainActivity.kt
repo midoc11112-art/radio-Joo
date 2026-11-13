@@ -357,7 +357,6 @@ class MainActivity : AppCompatActivity() {
             setPadding(p, p, p, p)
         }
 
-        // 1. مربع بحث تفاعلي + زر بحث داخل النافذة نفسها
         val searchBoxRow = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
@@ -414,7 +413,6 @@ class MainActivity : AppCompatActivity() {
         searchBoxRow.addView(btnRadarGo)
         root.addView(searchBoxRow)
 
-        // 2. أزرار اكتشاف سريعة
         val quickRow = android.widget.HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             layoutParams = android.widget.LinearLayout.LayoutParams(
@@ -459,7 +457,6 @@ class MainActivity : AppCompatActivity() {
         quickRow.addView(chipsBox)
         root.addView(quickRow)
 
-        // 3. شريط الحالة الحي
         val statusRow = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
@@ -483,7 +480,6 @@ class MainActivity : AppCompatActivity() {
         statusRow.addView(tvStatus)
         root.addView(statusRow)
 
-        // 4. قائمة النتائج
         val listView = android.widget.ListView(this).apply {
             divider = android.graphics.drawable.ColorDrawable(android.graphics.Color.parseColor("#1E293B"))
             dividerHeight = (1 * dp).toInt()
@@ -555,7 +551,7 @@ class MainActivity : AppCompatActivity() {
                     spinner.visibility = View.GONE
                     currentResults = list
                     if (list.isEmpty()) {
-                        tvStatus.text = "⚠️ لا توجد نتائج مطابقة. عدّل النص بالأعلى أو جرّب البحث بالإنجليزية (مثل egypt)."
+                        tvStatus.text = "⚠️ لا توجد نتائج مطابقة. عدّل النص بالأعلى أو جرّب أحد الأزرار."
                         tvStatus.setTextColor(android.graphics.Color.parseColor("#F59E0B"))
                         listView.adapter = null
                     } else {
@@ -636,6 +632,7 @@ class MainActivity : AppCompatActivity() {
             .setNegativeButton("إلغاء", null)
             .show()
     }
+
 
 
 
