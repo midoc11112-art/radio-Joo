@@ -1,4 +1,4 @@
-package com.example.radiojooo.ui
+﻿package com.example.radiojooo.ui
 
 import android.Manifest
 import android.content.Intent
@@ -77,6 +77,49 @@ class MainActivity : AppCompatActivity() {
         androidx.recyclerview.widget.ItemTouchHelper(StationAdapter.TouchCallback(adapter, android.view.ViewConfiguration.get(this).scaledTouchSlop)).attachToRecyclerView(binding.rvStations)
         setupSelectionBar()
 
+        binding.chipEgypt.visibility = View.GONE
+        val btnLiveSearch = android.widget.Button(this).apply {
+            text = "🌐 بحث حي على الإنترنت عن إذاعة جديدة..."
+            textSize = 14f
+            isAllCaps = false
+            setTextColor(android.graphics.Color.WHITE)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(android.graphics.Color.parseColor("#1D4ED8"))
+                cornerRadius = 14f * resources.displayMetrics.density
+            }
+            val pad = (10 * resources.displayMetrics.density).toInt()
+            setPadding(pad, pad, pad, pad)
+            visibility = View.GONE
+            setOnClickListener {
+                val q = binding.etSearch.text?.toString()?.trim().orEmpty()
+                if (q.length >= 2) {
+                    vm.searchOnline(q)
+                    showLiveSearchDialog(q)
+                }
+            }
+        }
+        (binding.rvStations.parent as? android.view.ViewGroup)?.let { parent ->
+            val idx = parent.indexOfChild(binding.rvStations)
+            val lp = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                val m = (8 * resources.displayMetrics.density).toInt()
+                setMargins(m, m / 2, m, m / 2)
+            }
+            parent.addView(btnLiveSearch, idx.coerceAtLeast(0), lp)
+        }
+        binding.etSearch.doOnTextChanged { text, _, _, _ ->
+            val q = text?.toString()?.trim().orEmpty()
+            if (q.length >= 2) {
+                btnLiveSearch.text = "🌐 بحث حي على الإنترنت عن \"$q\""
+                btnLiveSearch.visibility = View.VISIBLE
+            } else {
+                btnLiveSearch.visibility = View.GONE
+            }
+        }
+
+
         // jump back to the top of the list in one tap
         binding.rvStations.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
@@ -111,7 +154,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnClearSearch.setOnClickListener { binding.etSearch.setText("") }
 
         val chipToCategory = mapOf(
-            binding.chipAll.id to "ALL", binding.chipFavorite.id to "FAVORITE", binding.chipEgypt.id to "EGYPT",
+            binding.chipAll.id to "ALL", binding.chipFavorite.id to "FAVORITE", 
             binding.chipQuran.id to "QURAN", binding.chipNews.id to "NEWS", binding.chipMusic.id to "MUSIC",
             binding.chipSports.id to "SPORTS", binding.chipTalk.id to "TALK"
         )
@@ -310,11 +353,49 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    
+    private fun showLiveSearchDialog(query: String) {
+        val progress = android.widget.ProgressBar(this).apply { isIndeterminate = true }
+        val loadingDlg = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("🌐 جاري البحث الحي على الإنترنت...")
+            .setMessage("البحث بالاسم والتردد والوصف عن: $query")
+            .setView(progress)
+            .setNegativeButton("إلغاء", null)
+            .show()
+
+        lifecycleScope.launch {
+            vm.liveSearching.collect { searching ->
+                if (!searching && vm.liveResults.value.isNotEmpty()) {
+                    loadingDlg.dismiss()
+                    val list = vm.liveResults.value
+                    val items = list.map { st ->
+                        val br = st.servers.firstOrNull()?.kbps ?: 64
+                        val catAr = com.example.radiojooo.data.CategoryStyle.arabicName(st.category)
+                        "${st.name}  •  [$catAr | ${br}kbps]"
+                    }.toTypedArray()
+                    androidx.appcompat.app.AlertDialog.Builder(this@MainActivity)
+                        .setTitle("نتائج البحث الحي (${list.size}) - اضغط للإضافة والتشغيل")
+                        .setItems(items) { _, which ->
+                            val chosen = list[which]
+                            vm.addLiveStation(chosen) { saved ->
+                                com.example.radiojooo.player.RadioService.play(this@MainActivity, saved)
+                                startActivity(Intent(this@MainActivity, PlayerActivity::class.java))
+                            }
+                        }
+                        .setNegativeButton("إغلاق", null)
+                        .show()
+                    vm.clearLiveSearch()
+                } else if (!searching && loadingDlg.isShowing) {
+                    loadingDlg.dismiss()
+                }
+            }
+        }
+    }
+
     private fun showMoveCategoryDialog(id: String, name: String) {
-        val keys = arrayOf("EGYPT", "QURAN", "NEWS", "MUSIC", "SPORTS", "TALK", "ALL")
+        val keys = arrayOf("QURAN", "NEWS", "MUSIC", "SPORTS", "TALK", "ALL")
         val labels = arrayOf(
-            com.example.radiojooo.data.CategoryStyle.arabicName("EGYPT"),
-            com.example.radiojooo.data.CategoryStyle.arabicName("QURAN"),
+                        com.example.radiojooo.data.CategoryStyle.arabicName("QURAN"),
             com.example.radiojooo.data.CategoryStyle.arabicName("NEWS"),
             com.example.radiojooo.data.CategoryStyle.arabicName("MUSIC"),
             com.example.radiojooo.data.CategoryStyle.arabicName("SPORTS"),
@@ -496,7 +577,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showBatchMoveCategoryDialog(ids: List<String>) {
-        val keys = arrayOf("EGYPT", "QURAN", "NEWS", "MUSIC", "SPORTS", "TALK")
+        val keys = arrayOf("QURAN", "NEWS", "MUSIC", "SPORTS", "TALK")
         val labels = keys.map { com.example.radiojooo.data.CategoryStyle.arabicName(it) }.toTypedArray()
         var selectedIdx = 0
         MaterialAlertDialogBuilder(this, R.style.RadioDialog)
@@ -546,7 +627,7 @@ class MainActivity : AppCompatActivity() {
     private fun renderCounts(c: Map<String, Int>) {
         binding.chipAll.text = "\uD83D\uDD25 \u0627\u0644\u0643\u0644 (${c["ALL"] ?: 0})"
         binding.chipFavorite.text = "\u2B50 \u0627\u0644\u0645\u0641\u0636\u0644\u0629 (${c["FAVORITE"] ?: 0})"
-        binding.chipEgypt.text = "\uD83C\uDDEA\uD83C\uDDEC \u0645\u0635\u0631 (${c["EGYPT"] ?: 0})"
+        binding.chipEgypt.visibility = View.GONE
         binding.chipQuran.text = "\uD83D\uDCD6 \u0627\u0644\u0642\u0631\u0622\u0646 \u0627\u0644\u0643\u0631\u064A\u0645 (${c["QURAN"] ?: 0})"
         binding.chipNews.text = "\uD83D\uDCF0 \u0627\u0644\u0623\u062E\u0628\u0627\u0631 (${c["NEWS"] ?: 0})"
         binding.chipMusic.text = "\uD83C\uDFB5 \u0627\u0644\u0645\u0648\u0633\u064A\u0642\u0649 (${c["MUSIC"] ?: 0})"

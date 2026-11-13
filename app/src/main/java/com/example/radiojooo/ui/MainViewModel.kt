@@ -29,6 +29,44 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val messages: SharedFlow<String> = _messages.asSharedFlow()
 
     val searchQuery = MutableStateFlow("")
+
+    private val _liveResults = MutableStateFlow<List<Station>>(emptyList())
+    val liveResults: StateFlow<List<Station>> = _liveResults.asStateFlow()
+    private val _liveSearching = MutableStateFlow(false)
+    val liveSearching: StateFlow<Boolean> = _liveSearching.asStateFlow()
+
+    fun searchOnline(query: String) {
+        val q = query.trim()
+        if (q.length < 2) {
+            _liveResults.value = emptyList()
+            return
+        }
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            _liveSearching.value = true
+            try {
+                val res = com.example.radiojooo.data.Api.searchLive(q)
+                _liveResults.value = res
+                if (res.isEmpty()) {
+                    _messages.emit("لم يتم العثور على بث مباشر مطابق لـ: $q")
+                }
+            } finally {
+                _liveSearching.value = false
+            }
+        }
+    }
+
+    fun clearLiveSearch() {
+        _liveResults.value = emptyList()
+    }
+
+    fun addLiveStation(st: Station, onAdded: (Station) -> Unit) {
+        viewModelScope.launch {
+            val saved = repo.addLiveStation(st)
+            _messages.emit("تمت إضافة: ${saved.name}")
+            onAdded(saved)
+        }
+    }
+
     val category = MutableStateFlow("ALL")
     val syncState: StateFlow<Repo.SyncState> = repo.sync
 
@@ -37,8 +75,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         out = when (cat) {
             "ALL" -> out
             "FAVORITE" -> out.filter { it.isFavorite }
-            "EGYPT" -> out.filter { isEgypt(it) }
-            else -> out.filter { it.category == cat }
+                        else -> out.filter { it.category == cat }
         }
         val q = fold(query)
         if (q.isNotEmpty()) out = out.filter { fold(it.name).contains(q) || fold(it.countryCode).contains(q) }
@@ -50,8 +87,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val m = HashMap<String, Int>()
         m["ALL"] = list.size
         m["FAVORITE"] = list.count { it.isFavorite }
-        m["EGYPT"] = list.count { isEgypt(it) }
-        for (c in listOf("QURAN", "NEWS", "MUSIC", "SPORTS", "TALK")) m[c] = list.count { it.category == c }
+                for (c in listOf("QURAN", "NEWS", "MUSIC", "SPORTS", "TALK")) m[c] = list.count { it.category == c }
         m
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
@@ -150,8 +186,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun isEgypt(s: Station) = s.countryCode.equals("EG", true) || s.category == "EGYPT"
-
+    
     /** Arabic-friendly search: ignores hamza/ta marbuta/ya variants, diacritics and case. */
     private fun fold(s: String): String =
         s.trim().lowercase()
