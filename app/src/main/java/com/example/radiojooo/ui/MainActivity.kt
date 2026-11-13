@@ -508,8 +508,7 @@ class MainActivity : AppCompatActivity() {
                             val br = st.servers.firstOrNull()?.kbps ?: 64
                             val savingTag = if (br <= 64) "موفر للباقة" else "جودة عالية"
                             val catAr = com.example.radiojooo.data.CategoryStyle.arabicName(st.category)
-                            "${st.name}
-📂 $catAr  •  ⚡ ${br} kbps ($savingTag)  •  🌍 ${st.countryCode}"
+                            "${st.name}\n📂 $catAr  •  ⚡ ${br} kbps ($savingTag)  •  🌍 ${st.countryCode}"
                         }
                         listView.adapter = object : android.widget.ArrayAdapter<String>(
                             this@MainActivity,
