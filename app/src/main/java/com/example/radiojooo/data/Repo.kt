@@ -223,6 +223,12 @@ class Repo(context: Context) {
     }
 
     
+    suspend fun injectTemporaryStation(st: Station) = mutex.withLock {
+        val cur = _stations.value.filterNot { it.id == st.id }.toMutableList()
+        cur.add(0, st)
+        _stations.value = cur
+    }
+
     suspend fun addLiveStation(st: Station): Station = mutex.withLock {
         val clean = st.copy(isFavorite = true)
         deleted.remove(clean.id)

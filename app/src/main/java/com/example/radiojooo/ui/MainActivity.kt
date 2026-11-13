@@ -507,33 +507,55 @@ class MainActivity : AppCompatActivity() {
             val catAr = com.example.radiojooo.data.CategoryStyle.arabicName(chosen.category)
             val br = chosen.servers.firstOrNull()?.kbps ?: 64
             val actions = arrayOf(
-                "▶ إضافة وتشغيل فوري في قسم ($catAr)",
-                "📂 اختيار القسم يدوياً قبل الإضافة"
+                "🎧 تجربة وتشغيل مؤقت الآن (بدون إضافة للقائمة)",
+                "➕ إضافة لقائمتي وتشغيل في ($catAr)",
+                "📂 اختيار القسم يدوياً + إضافة وتشغيل",
+                "⭐ إضافة للمفضلة وتشغيل"
             )
             androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle("${chosen.name} (${br} kbps)")
                 .setItems(actions) { _, actIdx ->
-                    if (actIdx == 0) {
-                        dlg.dismiss()
-                        vm.addLiveStation(chosen) { saved ->
-                            com.example.radiojooo.player.RadioService.play(this@MainActivity, saved.id)
-                            startActivity(Intent(this@MainActivity, PlayerActivity::class.java))
-                        }
-                    } else {
-                        val cats = arrayOf("QURAN", "NEWS", "MUSIC", "SPORTS", "TALK")
-                        val catLabels = cats.map { com.example.radiojooo.data.CategoryStyle.arabicName(it) }.toTypedArray()
-                        androidx.appcompat.app.AlertDialog.Builder(this)
-                            .setTitle("اختر القسم المناسب للإذاعة")
-                            .setItems(catLabels) { _, cIdx ->
-                                dlg.dismiss()
-                                val customSt = chosen.copy(category = cats[cIdx])
-                                vm.addLiveStation(customSt) { saved ->
-                                    com.example.radiojooo.player.RadioService.play(this@MainActivity, saved.id)
-                                    startActivity(Intent(this@MainActivity, PlayerActivity::class.java))
-                                }
+                    when (actIdx) {
+                        0 -> {
+                            vm.previewLiveStation(chosen) { tempSt ->
+                                com.example.radiojooo.player.RadioService.play(this@MainActivity, tempSt.id)
+                                startActivity(Intent(this@MainActivity, PlayerActivity::class.java))
                             }
-                            .show()
+                        }
+                        1 -> {
+                            dlg.dismiss()
+                            vm.addLiveStation(chosen) { saved ->
+                                com.example.radiojooo.player.RadioService.play(this@MainActivity, saved.id)
+                                startActivity(Intent(this@MainActivity, PlayerActivity::class.java))
+                            }
+                        }
+                        2 -> {
+                            val cats = arrayOf("QURAN", "NEWS", "MUSIC", "SPORTS", "TALK")
+                            val catLabels = cats.map { com.example.radiojooo.data.CategoryStyle.arabicName(it) }.toTypedArray()
+                            androidx.appcompat.app.AlertDialog.Builder(this)
+                                .setTitle("اختر القسم المناسب للإذاعة")
+                                .setItems(catLabels) { _, cIdx ->
+                                    dlg.dismiss()
+                                    val customSt = chosen.copy(category = cats[cIdx])
+                                    vm.addLiveStation(customSt) { saved ->
+                                        com.example.radiojooo.player.RadioService.play(this@MainActivity, saved.id)
+                                        startActivity(Intent(this@MainActivity, PlayerActivity::class.java))
+                                    }
+                                }
+                                .show()
+                        }
+                        3 -> {
+                            dlg.dismiss()
+                            val favSt = chosen.copy(isFavorite = true)
+                            vm.addLiveStation(favSt) { saved ->
+                                com.example.radiojooo.player.RadioService.play(this@MainActivity, saved.id)
+                                startActivity(Intent(this@MainActivity, PlayerActivity::class.java))
+                            }
+                        }
                     }
+                }
+                .show()
+        }
                 }
                 .show()
         }

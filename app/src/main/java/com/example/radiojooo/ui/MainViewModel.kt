@@ -60,6 +60,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _liveResults.value = emptyList()
     }
 
+    fun previewLiveStation(st: Station, onReady: (Station) -> Unit) {
+        viewModelScope.launch {
+            repo.injectTemporaryStation(st)
+            onReady(st)
+        }
+    }
+
     fun addLiveStation(st: Station, onAdded: (Station) -> Unit) {
         viewModelScope.launch {
             val saved = repo.addLiveStation(st)
