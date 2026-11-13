@@ -353,18 +353,68 @@ class MainActivity : AppCompatActivity() {
         val root = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
             setBackgroundColor(android.graphics.Color.parseColor("#0F172A"))
-            val p = (16 * dp).toInt()
+            val p = (14 * dp).toInt()
             setPadding(p, p, p, p)
         }
 
-        val tvSubtitle = android.widget.TextView(this).apply {
-            text = "⚡ السحابة تبحث في قواعد البث العالمية وتفحص الجودة والبت ريت نيابة عنك (توفير 100% من باقتك)."
-            setTextColor(android.graphics.Color.parseColor("#94A3B8"))
-            textSize = 12f
+        // 1. مربع بحث تفاعلي + زر بحث داخل النافذة نفسها
+        val searchBoxRow = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+            )
         }
-        root.addView(tvSubtitle)
 
-        // أزرار اكتشاف سريعة
+        val etRadarQuery = android.widget.EditText(this).apply {
+            setText(initialQuery)
+            hint = "اكتب اسم إذاعة، قارئ، تردد (88.7)..."
+            setTextColor(android.graphics.Color.WHITE)
+            setHintTextColor(android.graphics.Color.parseColor("#64748B"))
+            textSize = 13f
+            isSingleLine = true
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(android.graphics.Color.parseColor("#1E293B"))
+                cornerRadius = 12 * dp
+                setStroke((1 * dp).toInt(), android.graphics.Color.parseColor("#3B82F6"))
+            }
+            setPadding((12 * dp).toInt(), (10 * dp).toInt(), (12 * dp).toInt(), (10 * dp).toInt())
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                0,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f
+            ).apply { marginEnd = (8 * dp).toInt() }
+        }
+
+        val btnRadarGo = com.google.android.material.button.MaterialButton(this).apply {
+            text = "🔍 بحث"
+            textSize = 13f
+            isAllCaps = false
+            setTextColor(android.graphics.Color.WHITE)
+            backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#2563EB"))
+            cornerRadius = (12 * dp).toInt()
+            setOnClickListener {
+                val q = etRadarQuery.text?.toString()?.trim().orEmpty()
+                if (q.isNotEmpty()) {
+                    vm.searchOnline(q)
+                }
+            }
+        }
+
+        etRadarQuery.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) {
+                btnRadarGo.performClick()
+                true
+            } else false
+        }
+
+        searchBoxRow.addView(etRadarQuery)
+        searchBoxRow.addView(btnRadarGo)
+        root.addView(searchBoxRow)
+
+        // 2. أزرار اكتشاف سريعة
         val quickRow = android.widget.HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             layoutParams = android.widget.LinearLayout.LayoutParams(
@@ -377,10 +427,12 @@ class MainActivity : AppCompatActivity() {
         }
         val presets = listOf(
             "🇪🇬 مصر" to "egypt",
-            "📖 قرآن" to "quran",
+            "📖 القرآن" to "quran",
+            "🎙️ المنشاوي" to "المنشاوي",
             "📰 أخبار" to "news",
             "🎵 طرب" to "tarab",
-            "⚽ رياضة" to "sport"
+            "⚽ رياضة" to "sport",
+            "📻 9090" to "9090"
         )
         for ((label, qVal) in presets) {
             val chip = android.widget.TextView(this).apply {
@@ -398,7 +450,7 @@ class MainActivity : AppCompatActivity() {
                     android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
                 ).apply { marginEnd = (6 * dp).toInt() }
                 setOnClickListener {
-                    binding.etSearch.setText(qVal)
+                    etRadarQuery.setText(qVal)
                     vm.searchOnline(qVal)
                 }
             }
@@ -407,35 +459,37 @@ class MainActivity : AppCompatActivity() {
         quickRow.addView(chipsBox)
         root.addView(quickRow)
 
+        // 3. شريط الحالة الحي
         val statusRow = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
             layoutParams = android.widget.LinearLayout.LayoutParams(
                 android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
                 android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = (12 * dp).toInt(); bottomMargin = (8 * dp).toInt() }
+            ).apply { topMargin = (10 * dp).toInt(); bottomMargin = (8 * dp).toInt() }
         }
         val spinner = android.widget.ProgressBar(this).apply {
-            layoutParams = android.widget.LinearLayout.LayoutParams((20 * dp).toInt(), (20 * dp).toInt()).apply {
+            layoutParams = android.widget.LinearLayout.LayoutParams((18 * dp).toInt(), (18 * dp).toInt()).apply {
                 marginEnd = (8 * dp).toInt()
             }
         }
         val tvStatus = android.widget.TextView(this).apply {
-            text = "📡 جاري مسح الخوادم عن: \"$initialQuery\"..."
+            text = "📡 جاري البحث في السحابة عن: \"$initialQuery\"..."
             setTextColor(android.graphics.Color.parseColor("#38BDF8"))
-            textSize = 13f
+            textSize = 12f
             setTypeface(null, android.graphics.Typeface.BOLD)
         }
         statusRow.addView(spinner)
         statusRow.addView(tvStatus)
         root.addView(statusRow)
 
+        // 4. قائمة النتائج
         val listView = android.widget.ListView(this).apply {
             divider = android.graphics.drawable.ColorDrawable(android.graphics.Color.parseColor("#1E293B"))
             dividerHeight = (1 * dp).toInt()
             layoutParams = android.widget.LinearLayout.LayoutParams(
                 android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
-                (320 * dp).toInt()
+                (300 * dp).toInt()
             )
         }
         root.addView(listView)
@@ -446,6 +500,9 @@ class MainActivity : AppCompatActivity() {
         val dlg = androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle("🌐 رادار البحث السحابي الذكي")
             .setView(root)
+            .setNeutralButton("➕ إضافة رابط يدوي") { _, _ ->
+                showManualUrlDialog()
+            }
             .setNegativeButton("إغلاق", null)
             .create()
 
@@ -492,17 +549,17 @@ class MainActivity : AppCompatActivity() {
                 if (searching) {
                     started = true
                     spinner.visibility = View.VISIBLE
-                    tvStatus.text = "📡 جاري البحث وفحص الخوادم في السحابة..."
+                    tvStatus.text = "📡 السحابة تفحص قواعد البث العالمية وتفلتر الأقل استهلاكاً..."
                     tvStatus.setTextColor(android.graphics.Color.parseColor("#38BDF8"))
                 } else if (started) {
                     spinner.visibility = View.GONE
                     currentResults = list
                     if (list.isEmpty()) {
-                        tvStatus.text = "⚠️ لم يتم العثور على بث شغال مطابق. جرّب كلمة أخرى أو أحد الأزرار بالأعلى."
+                        tvStatus.text = "⚠️ لا توجد نتائج مطابقة. عدّل النص بالأعلى أو جرّب البحث بالإنجليزية (مثل egypt)."
                         tvStatus.setTextColor(android.graphics.Color.parseColor("#F59E0B"))
                         listView.adapter = null
                     } else {
-                        tvStatus.text = "✅ تم العثور على ${list.size} إذاعة شغالة (مرتبة من الأقل استهلاكاً للباقة):"
+                        tvStatus.text = "✅ تم العثور على ${list.size} إذاعة (مرتبة من الأقل استهلاكاً للباقة):"
                         tvStatus.setTextColor(android.graphics.Color.parseColor("#4ADE80"))
                         val displayItems = list.map { st ->
                             val br = st.servers.firstOrNull()?.kbps ?: 64
@@ -531,8 +588,55 @@ class MainActivity : AppCompatActivity() {
 
         dlg.setOnDismissListener { job.cancel() }
         dlg.show()
-        vm.searchOnline(initialQuery)
+        if (initialQuery.isNotBlank()) {
+            vm.searchOnline(initialQuery)
+        }
     }
+
+    private fun showManualUrlDialog() {
+        val dp = resources.displayMetrics.density
+        val box = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            val p = (16 * dp).toInt()
+            setPadding(p, p, p, p)
+        }
+        val etName = android.widget.EditText(this).apply { hint = "اسم الإذاعة (مثال: إذاعة خاصة)" }
+        val etUrl = android.widget.EditText(this).apply { hint = "رابط البث المباشر (http://... أو .m3u8)" }
+        val spCat = android.widget.Spinner(this).apply {
+            val cats = arrayOf("القرآن الكريم", "الأخبار", "الموسيقى", "الرياضة", "توك شو")
+            adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, cats)
+        }
+        box.addView(etName)
+        box.addView(etUrl)
+        box.addView(spCat)
+
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("➕ إضافة إذاعة برابط مباشر")
+            .setView(box)
+            .setPositiveButton("إضافة وتشغيل") { _, _ ->
+                val n = etName.text?.toString()?.trim().orEmpty()
+                val u = etUrl.text?.toString()?.trim().orEmpty()
+                if (n.isNotEmpty() && u.startsWith("http")) {
+                    val catKeys = arrayOf("QURAN", "NEWS", "MUSIC", "SPORTS", "TALK")
+                    val st = com.example.radiojooo.data.Station(
+                        id = "manual_" + System.currentTimeMillis(),
+                        name = n,
+                        category = catKeys[spCat.selectedItemPosition],
+                        countryCode = "EG",
+                        popularity = 999999,
+                        servers = listOf(com.example.radiojooo.data.Server(u, 64, u.contains(".m3u8", true))),
+                        isFavorite = true
+                    )
+                    vm.addLiveStation(st) { saved ->
+                        com.example.radiojooo.player.RadioService.play(this@MainActivity, saved.id)
+                        startActivity(Intent(this@MainActivity, PlayerActivity::class.java))
+                    }
+                }
+            }
+            .setNegativeButton("إلغاء", null)
+            .show()
+    }
+
 
 
     private fun showMoveCategoryDialog(id: String, name: String) {
