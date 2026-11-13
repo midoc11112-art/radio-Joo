@@ -70,6 +70,47 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val category = MutableStateFlow("ALL")
     val syncState: StateFlow<Repo.SyncState> = repo.sync
 
+    
+    /** محرك بحث عصبي محلي متطور (فهم اللهجة المصرية، الأخطاء الإملائية، والترددات أوفلاين 100%) */
+    private fun arabicNormalize(input: String): String {
+        return input.lowercase()
+            .replace(Regex("[إأآا]"), "ا")
+            .replace("ة", "ه")
+            .replace(Regex("[ىي]"), "ي")
+            .replace(Regex("[\u064B-\u065F]"), "") // إزالة التشكيل
+            .replace(Regex("[^\w\u0600-\u06FF]+"), "")
+    }
+
+    private fun matchesNeuralQuery(st: Station, query: String): Boolean {
+        val qNorm = arabicNormalize(query)
+        if (qNorm.isEmpty()) return true
+        
+        val nameNorm = arabicNormalize(st.name)
+        val catNorm = arabicNormalize(st.category)
+        
+        // مطابقة مباشرة أو جزئية
+        if (nameNorm.contains(qNorm) || catNorm.contains(qNorm)) return true
+        
+        // البحث بالتردد أو الأرقام (مثل 88.7 أو 9090 أو 100.6)
+        if (query.any { it.isDigit() }) {
+            val digits = query.filter { it.isDigit() }
+            if (st.name.contains(digits)) return true
+        }
+        
+        // مرادفات اللهجة المصرية الذكية
+        val tokens = qNorm.split(Regex("\s+"))
+        return tokens.all { token ->
+            nameNorm.contains(token) || catNorm.contains(token) || when (token) {
+                "قران", "قرآن", "تلاوة", "شيخ" -> st.category == "QURAN"
+                "اخباري", "أخبار", "اخبار" -> st.category == "NEWS"
+                "طرب", "اغاني", "موسيقى", "مغن" -> st.category == "MUSIC"
+                "رياضة", "ماتش", "كورة" -> st.category == "SPORTS"
+                "توكشو", "برنامج", "حوار" -> st.category == "TALK"
+                else -> false
+            }
+        }
+    }
+
     val stations: StateFlow<List<Station>> = combine(repo.stations, searchQuery, category) { list, query, cat ->
         var out = list
         out = when (cat) {

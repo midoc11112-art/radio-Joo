@@ -217,6 +217,25 @@ class Repo(context: Context) {
         clean
     }
 
+    
+    private fun loadGoldenAssetFallback(): List<Station> {
+        return try {
+            val assetManager = app.assets
+            assetManager.open("golden_catalog.json").use { stream ->
+                val jsonStr = stream.bufferedReader().use { it.readText() }
+                val root = org.json.JSONObject(jsonStr)
+                val arr = root.optJSONArray("stations") ?: return emptyList()
+                val list = ArrayList<Station>(arr.length())
+                for (i in 0 until arr.length()) {
+                    Api.parseStation(arr.getJSONObject(i))?.let { list.add(it) }
+                }
+                list
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
     suspend fun loadCache() = withContext(Dispatchers.IO) {
         try {
             if (!file.exists()) return@withContext
