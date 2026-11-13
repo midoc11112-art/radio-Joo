@@ -56,18 +56,36 @@ class Health(context: Context) {
         banned.removeAll(pinned)
     }
 
-    private fun bucket(kbps: Int) = when { kbps <= 0 -> 3; kbps <= 40 -> 0; kbps <= 72 -> 1; kbps <= 112 -> 2; else -> 3 }
+    private fun effectiveKbps(s: Server): Int {
+        val measured = stats[s.url]?.kbps ?: 0
+        // إذا كان الكتالوج أو القياس الفعلي يحدد بيت ريت، نأخذ القيمة الأحدث الموثوقة
+        return when {
+            measured > 0 && s.kbps > 0 -> minOf(measured, s.kbps)
+            s.kbps > 0 -> s.kbps
+            measured > 0 -> measured
+            else -> 999 // السيرفر غير معروف البيت ريت يأتي بعد السيرفرات المؤكدة <= 128kbps
+        }
+    }
+
+    private fun bitrateTier(kbps: Int): Int = when {
+        kbps <= 40 -> 0   // 24 - 40 kbps (أولوية قصوى)
+        kbps <= 68 -> 1   // 48 - 64 kbps (أولوية ثانية)
+        kbps <= 100 -> 2  // 80 - 96 kbps
+        kbps <= 132 -> 3  // 112 - 128 kbps
+        kbps < 999 -> 4   // 160 - 320 kbps
+        else -> 3         // غير معروف يُعامل كـ 128k حتى يُقاس
+    }
 
     /**
-     * Order servers: banned ones are dropped completely; pinned (and not cooling) servers come first with absolute
-     * priority; then everything else not cooling; cooling servers last. Inside a group: cheapest bitrate tier,
-     * then reliability, then fastest start.
+     * ترتيب صارم يضع أقل بيت ريت (32-64 kbps) في المقدمة دائماً،
+     * ويرتب تصاعدياً بالرقم الدقيق داخل كل فئة.
      */
     fun rank(servers: List<Server>): List<Server> {
         val now = System.currentTimeMillis()
         return servers.filter { it.url !in banned }.sortedWith(compareBy<Server>(
             { tier(it.url, now) },
-            { bucket(if (it.kbps > 0) it.kbps else (stats[it.url]?.kbps ?: 0)) },
+            { bitrateTier(effectiveKbps(it)) },
+            { effectiveKbps(it) },
             { reliabilityPenalty(it.url) },
             { stats[it.url]?.startupMs?.takeIf { ms -> ms > 0 } ?: 5000L }
         ))
