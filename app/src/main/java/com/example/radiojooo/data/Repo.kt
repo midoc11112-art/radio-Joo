@@ -234,7 +234,7 @@ class Repo(context: Context) {
         val cur = _stations.value.filterNot { it.id == clean.id }.toMutableList()
         cur.add(0, clean)
         _stations.value = cur
-        persistCache(cur)
+        saveCache(cur)
         clean
     }
 
