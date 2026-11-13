@@ -185,7 +185,6 @@ class Repo(context: Context) {
 
     private var favorites: MutableSet<String> = (prefs.getStringSet("fav", emptySet()) ?: emptySet()).toMutableSet()
     private var raw: List<Station> = emptyList()
-
     private val _stations = MutableStateFlow<List<Station>>(emptyList())
     val stations: StateFlow<List<Station>> = _stations.asStateFlow()
 
@@ -223,11 +222,7 @@ class Repo(context: Context) {
     }
 
     
-    suspend fun injectTemporaryStation(st: Station) = mutex.withLock {
-        val cur = _stations.value.filterNot { it.id == st.id }.toMutableList()
-        cur.add(0, st)
-        _stations.value = cur
-    }
+    
 
     suspend fun addLiveStation(st: Station): Station = mutex.withLock {
         val clean = st.copy(isFavorite = true)

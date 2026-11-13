@@ -60,23 +60,7 @@ object Api {
     /** Asks the cloud to find fresh servers for a station whose servers all failed. */
     
     /** Live global search by station name, frequency (e.g. 88.7, 9090), or description. */
-    fun searchLive(query: String): List<Station> {
-        return try {
-            val req = Request.Builder().url("$BASE/v2/search?q=" + URLEncoder.encode(query.trim(), "UTF-8")).build()
-            longClient.newCall(req).execute().use { r ->
-                if (!r.isSuccessful) return emptyList()
-                val root = JSONObject(r.body?.string() ?: return emptyList())
-                val arr = root.optJSONArray("stations") ?: return emptyList()
-                val out = ArrayList<Station>(arr.length())
-                for (i in 0 until arr.length()) {
-                    parseStation(arr.getJSONObject(i))?.let { out.add(it) }
-                }
-                out
-            }
-        } catch (e: Exception) {
-            emptyList()
-        }
-    }
+    
 
     fun heal(stationId: String): Station? {
         return try {

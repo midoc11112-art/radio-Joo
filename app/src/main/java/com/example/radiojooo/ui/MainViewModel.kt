@@ -33,39 +33,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _liveResults = MutableStateFlow<List<Station>>(emptyList())
     val liveResults: StateFlow<List<Station>> = _liveResults.asStateFlow()
-    private val _liveSearching = MutableStateFlow(false)
-    val liveSearching: StateFlow<Boolean> = _liveSearching.asStateFlow()
 
-    fun searchOnline(query: String) {
-        val q = query.trim()
-        if (q.length < 2) {
-            _liveResults.value = emptyList()
-            return
-        }
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            _liveSearching.value = true
-            try {
-                val res = com.example.radiojooo.data.Api.searchLive(q)
-                _liveResults.value = res
-                if (res.isEmpty()) {
-                    _messages.emit("لم يتم العثور على بث مباشر مطابق لـ: $q")
-                }
-            } finally {
-                _liveSearching.value = false
-            }
-        }
-    }
-
-    fun clearLiveSearch() {
-        _liveResults.value = emptyList()
-    }
-
-    fun previewLiveStation(st: Station, onReady: (Station) -> Unit) {
-        viewModelScope.launch {
-            repo.injectTemporaryStation(st)
-            onReady(st)
-        }
-    }
+    
 
     fun addLiveStation(st: Station, onAdded: (Station) -> Unit) {
         viewModelScope.launch {
@@ -123,7 +92,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         var out = list
         out = when (cat) {
             "ALL" -> out
-            "FAVORITE" -> out.filter { it.isFavorite }
+            "FAVORITE" -> out.filter { it.isFavorite }`n            "EGYPT" -> out.filter { it.countryCode == "EG" || it.category == "EGYPT" }
                         else -> out.filter { it.category == cat }
         }
         val q = fold(query)
@@ -136,7 +105,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val m = HashMap<String, Int>()
         m["ALL"] = list.size
         m["FAVORITE"] = list.count { it.isFavorite }
-                for (c in listOf("QURAN", "NEWS", "MUSIC", "SPORTS", "TALK")) m[c] = list.count { it.category == c }
+                m["EGYPT"] = list.count { it.countryCode == "EG" || it.category == "EGYPT" }`n        for (c in listOf("QURAN", "NEWS", "MUSIC", "SPORTS", "TALK")) m[c] = list.count { it.category == c }
         m
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 

@@ -91,7 +91,7 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener {
                 val q = binding.etSearch.text?.toString()?.trim().orEmpty()
                 if (q.length >= 2) {
-                    showSmartRadarDialog(q)
+                    showManualUrlDialog()
                 }
             }
         }
@@ -112,7 +112,6 @@ class MainActivity : AppCompatActivity() {
                 btnLiveSearch.visibility = View.GONE
             }
         }
-
 
         // jump back to the top of the list in one tap
         binding.rvStations.addOnScrollListener(object : RecyclerView.OnScrollListener() {
@@ -347,270 +346,6 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    
-    private fun showSmartRadarDialog(initialQuery: String) {
-        val dp = resources.displayMetrics.density
-        val root = android.widget.LinearLayout(this).apply {
-            orientation = android.widget.LinearLayout.VERTICAL
-            setBackgroundColor(android.graphics.Color.parseColor("#0F172A"))
-            val p = (14 * dp).toInt()
-            setPadding(p, p, p, p)
-        }
-
-        val searchBoxRow = android.widget.LinearLayout(this).apply {
-            orientation = android.widget.LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            layoutParams = android.widget.LinearLayout.LayoutParams(
-                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
-                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-        }
-
-        val etRadarQuery = android.widget.EditText(this).apply {
-            setText(initialQuery)
-            hint = "اكتب اسم إذاعة، قارئ، تردد (88.7)..."
-            setTextColor(android.graphics.Color.WHITE)
-            setHintTextColor(android.graphics.Color.parseColor("#64748B"))
-            textSize = 13f
-            isSingleLine = true
-            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(android.graphics.Color.parseColor("#1E293B"))
-                cornerRadius = 12 * dp
-                setStroke((1 * dp).toInt(), android.graphics.Color.parseColor("#3B82F6"))
-            }
-            setPadding((12 * dp).toInt(), (10 * dp).toInt(), (12 * dp).toInt(), (10 * dp).toInt())
-            layoutParams = android.widget.LinearLayout.LayoutParams(
-                0,
-                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
-                1f
-            ).apply { marginEnd = (8 * dp).toInt() }
-        }
-
-        val btnRadarGo = com.google.android.material.button.MaterialButton(this).apply {
-            text = "🔍 بحث"
-            textSize = 13f
-            isAllCaps = false
-            setTextColor(android.graphics.Color.WHITE)
-            backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#2563EB"))
-            cornerRadius = (12 * dp).toInt()
-            setOnClickListener {
-                val q = etRadarQuery.text?.toString()?.trim().orEmpty()
-                if (q.isNotEmpty()) {
-                    vm.searchOnline(q)
-                }
-            }
-        }
-
-        etRadarQuery.setOnEditorActionListener { _, actionId, _ ->
-            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) {
-                btnRadarGo.performClick()
-                true
-            } else false
-        }
-
-        searchBoxRow.addView(etRadarQuery)
-        searchBoxRow.addView(btnRadarGo)
-        root.addView(searchBoxRow)
-
-        val quickRow = android.widget.HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-            layoutParams = android.widget.LinearLayout.LayoutParams(
-                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
-                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = (10 * dp).toInt() }
-        }
-        val chipsBox = android.widget.LinearLayout(this).apply {
-            orientation = android.widget.LinearLayout.HORIZONTAL
-        }
-        val presets = listOf(
-            "🇪🇬 مصر" to "egypt",
-            "📖 القرآن" to "quran",
-            "🎙️ المنشاوي" to "المنشاوي",
-            "📰 أخبار" to "news",
-            "🎵 طرب" to "tarab",
-            "⚽ رياضة" to "sport",
-            "📻 9090" to "9090"
-        )
-        for ((label, qVal) in presets) {
-            val chip = android.widget.TextView(this).apply {
-                text = label
-                textSize = 12f
-                setTextColor(android.graphics.Color.WHITE)
-                background = android.graphics.drawable.GradientDrawable().apply {
-                    setColor(android.graphics.Color.parseColor("#1E293B"))
-                    cornerRadius = 14 * dp
-                    setStroke((1 * dp).toInt(), android.graphics.Color.parseColor("#334155"))
-                }
-                setPadding((12 * dp).toInt(), (6 * dp).toInt(), (12 * dp).toInt(), (6 * dp).toInt())
-                layoutParams = android.widget.LinearLayout.LayoutParams(
-                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
-                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { marginEnd = (6 * dp).toInt() }
-                setOnClickListener {
-                    etRadarQuery.setText(qVal)
-                    vm.searchOnline(qVal)
-                }
-            }
-            chipsBox.addView(chip)
-        }
-        quickRow.addView(chipsBox)
-        root.addView(quickRow)
-
-        val statusRow = android.widget.LinearLayout(this).apply {
-            orientation = android.widget.LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            layoutParams = android.widget.LinearLayout.LayoutParams(
-                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
-                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = (10 * dp).toInt(); bottomMargin = (8 * dp).toInt() }
-        }
-        val spinner = android.widget.ProgressBar(this).apply {
-            layoutParams = android.widget.LinearLayout.LayoutParams((18 * dp).toInt(), (18 * dp).toInt()).apply {
-                marginEnd = (8 * dp).toInt()
-            }
-        }
-        val tvStatus = android.widget.TextView(this).apply {
-            text = "📡 جاري البحث في السحابة عن: \"$initialQuery\"..."
-            setTextColor(android.graphics.Color.parseColor("#38BDF8"))
-            textSize = 12f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-        }
-        statusRow.addView(spinner)
-        statusRow.addView(tvStatus)
-        root.addView(statusRow)
-
-        val listView = android.widget.ListView(this).apply {
-            divider = android.graphics.drawable.ColorDrawable(android.graphics.Color.parseColor("#1E293B"))
-            dividerHeight = (1 * dp).toInt()
-            layoutParams = android.widget.LinearLayout.LayoutParams(
-                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
-                (300 * dp).toInt()
-            )
-        }
-        root.addView(listView)
-
-        var currentResults: List<com.example.radiojooo.data.Station> = emptyList()
-        var started = false
-
-        val dlg = androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("🌐 رادار البحث السحابي الذكي")
-            .setView(root)
-            .setNeutralButton("➕ إضافة رابط يدوي") { _, _ ->
-                showManualUrlDialog()
-            }
-            .setNegativeButton("إغلاق", null)
-            .create()
-
-        listView.setOnItemClickListener { _, _, pos, _ ->
-            val chosen = currentResults.getOrNull(pos) ?: return@setOnItemClickListener
-            val catAr = com.example.radiojooo.data.CategoryStyle.arabicName(chosen.category)
-            val br = chosen.servers.firstOrNull()?.kbps ?: 64
-            val actions = arrayOf(
-                "🎧 تجربة وتشغيل مؤقت الآن (بدون إضافة للقائمة)",
-                "➕ إضافة لقائمتي وتشغيل في ($catAr)",
-                "📂 اختيار القسم يدوياً + إضافة وتشغيل",
-                "⭐ إضافة للمفضلة وتشغيل"
-            )
-            androidx.appcompat.app.AlertDialog.Builder(this)
-                .setTitle("${chosen.name} (${br} kbps)")
-                .setItems(actions) { _, actIdx ->
-                    when (actIdx) {
-                        0 -> {
-                            vm.previewLiveStation(chosen) { tempSt ->
-                                com.example.radiojooo.player.RadioService.play(this@MainActivity, tempSt.id)
-                                startActivity(Intent(this@MainActivity, PlayerActivity::class.java))
-                            }
-                        }
-                        1 -> {
-                            dlg.dismiss()
-                            vm.addLiveStation(chosen) { saved ->
-                                com.example.radiojooo.player.RadioService.play(this@MainActivity, saved.id)
-                                startActivity(Intent(this@MainActivity, PlayerActivity::class.java))
-                            }
-                        }
-                        2 -> {
-                            val cats = arrayOf("QURAN", "NEWS", "MUSIC", "SPORTS", "TALK")
-                            val catLabels = cats.map { com.example.radiojooo.data.CategoryStyle.arabicName(it) }.toTypedArray()
-                            androidx.appcompat.app.AlertDialog.Builder(this)
-                                .setTitle("اختر القسم المناسب للإذاعة")
-                                .setItems(catLabels) { _, cIdx ->
-                                    dlg.dismiss()
-                                    val customSt = chosen.copy(category = cats[cIdx])
-                                    vm.addLiveStation(customSt) { saved ->
-                                        com.example.radiojooo.player.RadioService.play(this@MainActivity, saved.id)
-                                        startActivity(Intent(this@MainActivity, PlayerActivity::class.java))
-                                    }
-                                }
-                                .show()
-                        }
-                        3 -> {
-                            dlg.dismiss()
-                            val favSt = chosen.copy(isFavorite = true)
-                            vm.addLiveStation(favSt) { saved ->
-                                com.example.radiojooo.player.RadioService.play(this@MainActivity, saved.id)
-                                startActivity(Intent(this@MainActivity, PlayerActivity::class.java))
-                            }
-                        }
-                    }
-                }
-                .show()
-        }
-                }
-                .show()
-        }
-
-        val job = lifecycleScope.launch {
-            kotlinx.coroutines.flow.combine(vm.liveSearching, vm.liveResults) { searching, list ->
-                searching to list
-            }.collect { (searching, list) ->
-                if (searching) {
-                    started = true
-                    spinner.visibility = View.VISIBLE
-                    tvStatus.text = "📡 السحابة تفحص قواعد البث العالمية وتفلتر الأقل استهلاكاً..."
-                    tvStatus.setTextColor(android.graphics.Color.parseColor("#38BDF8"))
-                } else if (started) {
-                    spinner.visibility = View.GONE
-                    currentResults = list
-                    if (list.isEmpty()) {
-                        tvStatus.text = "⚠️ لا توجد نتائج مطابقة. عدّل النص بالأعلى أو جرّب أحد الأزرار."
-                        tvStatus.setTextColor(android.graphics.Color.parseColor("#F59E0B"))
-                        listView.adapter = null
-                    } else {
-                        tvStatus.text = "✅ تم العثور على ${list.size} إذاعة (مرتبة من الأقل استهلاكاً للباقة):"
-                        tvStatus.setTextColor(android.graphics.Color.parseColor("#4ADE80"))
-                        val displayItems = list.map { st ->
-                            val br = st.servers.firstOrNull()?.kbps ?: 64
-                            val savingTag = if (br <= 64) "موفر للباقة" else "جودة عالية"
-                            val catAr = com.example.radiojooo.data.CategoryStyle.arabicName(st.category)
-                            "${st.name}\n📂 $catAr  •  ⚡ ${br} kbps ($savingTag)  •  🌍 ${st.countryCode}"
-                        }
-                        listView.adapter = object : android.widget.ArrayAdapter<String>(
-                            this@MainActivity,
-                            android.R.layout.simple_list_item_1,
-                            displayItems
-                        ) {
-                            override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
-                                val v = super.getView(position, convertView, parent) as android.widget.TextView
-                                v.setTextColor(android.graphics.Color.WHITE)
-                                v.textSize = 13f
-                                val padV = (10 * dp).toInt()
-                                v.setPadding((6 * dp).toInt(), padV, (6 * dp).toInt(), padV)
-                                return v
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        dlg.setOnDismissListener { job.cancel() }
-        dlg.show()
-        if (initialQuery.isNotBlank()) {
-            vm.searchOnline(initialQuery)
-        }
-    }
-
     private fun showManualUrlDialog() {
         val dp = resources.displayMetrics.density
         val box = android.widget.LinearLayout(this).apply {
@@ -654,9 +389,6 @@ class MainActivity : AppCompatActivity() {
             .setNegativeButton("إلغاء", null)
             .show()
     }
-
-
-
 
     private fun showMoveCategoryDialog(id: String, name: String) {
         val keys = arrayOf("QURAN", "NEWS", "MUSIC", "SPORTS", "TALK", "ALL")
@@ -974,3 +706,5 @@ class MainActivity : AppCompatActivity() {
         return String.format(Locale.US, "%02d:%02d:%02d", h, m, s)
     }
 }
+
+
