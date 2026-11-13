@@ -378,7 +378,7 @@ class MainActivity : AppCompatActivity() {
                         .setItems(items) { _, which ->
                             val chosen = list[which]
                             vm.addLiveStation(chosen) { saved ->
-                                com.example.radiojooo.player.RadioService.play(this@MainActivity, saved)
+                                com.example.radiojooo.player.RadioService.play(this@MainActivity, saved.id)
                                 startActivity(Intent(this@MainActivity, PlayerActivity::class.java))
                             }
                         }

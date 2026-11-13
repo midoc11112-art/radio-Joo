@@ -234,13 +234,13 @@ class Repo(context: Context) {
         val cur = _stations.value.filterNot { it.id == clean.id }.toMutableList()
         cur.add(0, clean)
         _stations.value = cur
-        saveCache(cur)
+        try { val ja = org.json.JSONArray(); for (x in cur) ja.put(org.json.JSONObject().put("id", x.id).put("n", x.name).put("c", x.category).put("cc", x.countryCode).put("p", x.popularity).put("s", org.json.JSONArray().apply { for (sv in x.servers) put(org.json.JSONObject().put("u", sv.url).put("b", sv.kbps).put("h", if (sv.isHls) 1 else 0)) })); file.writeText(org.json.JSONObject().put("s", ja).toString()) } catch (_: Exception) {}
         clean
     }
 
     suspend fun loadCache() = withContext(Dispatchers.IO) {
         try {
-            if (!file.exists()) return@withContext
+            if (!file.exists()) { val assetList = loadGoldenAssetFallback(); if (assetList.isNotEmpty()) _stations.value = applyUserCustomizations(assetList); return@withContext }
             val arr = JSONObject(file.readText()).getJSONArray("s")
             val list = ArrayList<Station>()
             for (i in 0 until arr.length()) {

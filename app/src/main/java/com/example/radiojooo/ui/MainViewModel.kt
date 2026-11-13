@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -78,7 +79,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             .replace("ة", "ه")
             .replace(Regex("[ىي]"), "ي")
             .replace(Regex("[\u064B-\u065F]"), "") // إزالة التشكيل
-            .replace(Regex("[^\w\u0600-\u06FF]+"), "")
+            .replace(Regex("[^a-z0-9\u0600-\u06FF]+"), "")
     }
 
     private fun matchesNeuralQuery(st: Station, query: String): Boolean {
@@ -98,7 +99,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         
         // مرادفات اللهجة المصرية الذكية
-        val tokens = qNorm.split(Regex("\s+"))
+        val tokens = qNorm.split(" ")
         return tokens.all { token ->
             nameNorm.contains(token) || catNorm.contains(token) || when (token) {
                 "قران", "قرآن", "تلاوة", "شيخ" -> st.category == "QURAN"
