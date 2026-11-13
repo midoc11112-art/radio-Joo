@@ -78,41 +78,35 @@ class MainActivity : AppCompatActivity() {
         setupSelectionBar()
 
         binding.chipEgypt.visibility = View.GONE
-        val btnLiveSearch = android.widget.Button(this).apply {
-            text = "🌐 بحث حي على الإنترنت عن إذاعة جديدة..."
-            textSize = 14f
+        val btnLiveSearch = com.google.android.material.button.MaterialButton(this).apply {
+            text = "🌐 رادار البحث السحابي (توفير الباقة)"
+            textSize = 12f
             isAllCaps = false
             setTextColor(android.graphics.Color.WHITE)
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(android.graphics.Color.parseColor("#1D4ED8"))
-                cornerRadius = 14f * resources.displayMetrics.density
-            }
-            val pad = (10 * resources.displayMetrics.density).toInt()
-            setPadding(pad, pad, pad, pad)
+            backgroundTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#1D4ED8"))
+            cornerRadius = (16 * resources.displayMetrics.density).toInt()
+            insetTop = 0
+            insetBottom = 0
             visibility = View.GONE
             setOnClickListener {
                 val q = binding.etSearch.text?.toString()?.trim().orEmpty()
                 if (q.length >= 2) {
-                    vm.searchOnline(q)
-                    showLiveSearchDialog(q)
+                    showSmartRadarDialog(q)
                 }
             }
         }
-        (binding.rvStations.parent as? android.view.ViewGroup)?.let { parent ->
-            val idx = parent.indexOfChild(binding.rvStations)
-            val lp = android.widget.LinearLayout.LayoutParams(
-                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
-                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                val m = (8 * resources.displayMetrics.density).toInt()
-                setMargins(m, m / 2, m, m / 2)
-            }
-            parent.addView(btnLiveSearch, idx.coerceAtLeast(0), lp)
+        val barLp = android.widget.LinearLayout.LayoutParams(
+            android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+            (38 * resources.displayMetrics.density).toInt()
+        ).apply {
+            topMargin = (8 * resources.displayMetrics.density).toInt()
         }
+        binding.headerLayout.addView(btnLiveSearch, barLp)
+
         binding.etSearch.doOnTextChanged { text, _, _, _ ->
             val q = text?.toString()?.trim().orEmpty()
             if (q.length >= 2) {
-                btnLiveSearch.text = "🌐 بحث حي على الإنترنت عن \"$q\""
+                btnLiveSearch.text = "🌐 بحث سحابي ذكي عن \"$q\" (اضغط للفتح)"
                 btnLiveSearch.visibility = View.VISIBLE
             } else {
                 btnLiveSearch.visibility = View.GONE
@@ -354,43 +348,193 @@ class MainActivity : AppCompatActivity() {
     }
 
     
-    private fun showLiveSearchDialog(query: String) {
-        val progress = android.widget.ProgressBar(this).apply { isIndeterminate = true }
-        val loadingDlg = androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("🌐 جاري البحث الحي على الإنترنت...")
-            .setMessage("البحث بالاسم والتردد والوصف عن: $query")
-            .setView(progress)
-            .setNegativeButton("إلغاء", null)
-            .show()
+    private fun showSmartRadarDialog(initialQuery: String) {
+        val dp = resources.displayMetrics.density
+        val root = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setBackgroundColor(android.graphics.Color.parseColor("#0F172A"))
+            val p = (16 * dp).toInt()
+            setPadding(p, p, p, p)
+        }
 
-        lifecycleScope.launch {
-            vm.liveSearching.collect { searching ->
-                if (!searching && vm.liveResults.value.isNotEmpty()) {
-                    loadingDlg.dismiss()
-                    val list = vm.liveResults.value
-                    val items = list.map { st ->
-                        val br = st.servers.firstOrNull()?.kbps ?: 64
-                        val catAr = com.example.radiojooo.data.CategoryStyle.arabicName(st.category)
-                        "${st.name}  •  [$catAr | ${br}kbps]"
-                    }.toTypedArray()
-                    androidx.appcompat.app.AlertDialog.Builder(this@MainActivity)
-                        .setTitle("نتائج البحث الحي (${list.size}) - اضغط للإضافة والتشغيل")
-                        .setItems(items) { _, which ->
-                            val chosen = list[which]
-                            vm.addLiveStation(chosen) { saved ->
-                                com.example.radiojooo.player.RadioService.play(this@MainActivity, saved.id)
-                                startActivity(Intent(this@MainActivity, PlayerActivity::class.java))
+        val tvSubtitle = android.widget.TextView(this).apply {
+            text = "⚡ السحابة تبحث في قواعد البث العالمية وتفحص الجودة والبت ريت نيابة عنك (توفير 100% من باقتك)."
+            setTextColor(android.graphics.Color.parseColor("#94A3B8"))
+            textSize = 12f
+        }
+        root.addView(tvSubtitle)
+
+        // أزرار اكتشاف سريعة
+        val quickRow = android.widget.HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = (10 * dp).toInt() }
+        }
+        val chipsBox = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+        }
+        val presets = listOf(
+            "🇪🇬 مصر" to "egypt",
+            "📖 قرآن" to "quran",
+            "📰 أخبار" to "news",
+            "🎵 طرب" to "tarab",
+            "⚽ رياضة" to "sport"
+        )
+        for ((label, qVal) in presets) {
+            val chip = android.widget.TextView(this).apply {
+                text = label
+                textSize = 12f
+                setTextColor(android.graphics.Color.WHITE)
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(android.graphics.Color.parseColor("#1E293B"))
+                    cornerRadius = 14 * dp
+                    setStroke((1 * dp).toInt(), android.graphics.Color.parseColor("#334155"))
+                }
+                setPadding((12 * dp).toInt(), (6 * dp).toInt(), (12 * dp).toInt(), (6 * dp).toInt())
+                layoutParams = android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { marginEnd = (6 * dp).toInt() }
+                setOnClickListener {
+                    binding.etSearch.setText(qVal)
+                    vm.searchOnline(qVal)
+                }
+            }
+            chipsBox.addView(chip)
+        }
+        quickRow.addView(chipsBox)
+        root.addView(quickRow)
+
+        val statusRow = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = (12 * dp).toInt(); bottomMargin = (8 * dp).toInt() }
+        }
+        val spinner = android.widget.ProgressBar(this).apply {
+            layoutParams = android.widget.LinearLayout.LayoutParams((20 * dp).toInt(), (20 * dp).toInt()).apply {
+                marginEnd = (8 * dp).toInt()
+            }
+        }
+        val tvStatus = android.widget.TextView(this).apply {
+            text = "📡 جاري مسح الخوادم عن: \"$initialQuery\"..."
+            setTextColor(android.graphics.Color.parseColor("#38BDF8"))
+            textSize = 13f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+        }
+        statusRow.addView(spinner)
+        statusRow.addView(tvStatus)
+        root.addView(statusRow)
+
+        val listView = android.widget.ListView(this).apply {
+            divider = android.graphics.drawable.ColorDrawable(android.graphics.Color.parseColor("#1E293B"))
+            dividerHeight = (1 * dp).toInt()
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                (320 * dp).toInt()
+            )
+        }
+        root.addView(listView)
+
+        var currentResults: List<com.example.radiojooo.data.Station> = emptyList()
+        var started = false
+
+        val dlg = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("🌐 رادار البحث السحابي الذكي")
+            .setView(root)
+            .setNegativeButton("إغلاق", null)
+            .create()
+
+        listView.setOnItemClickListener { _, _, pos, _ ->
+            val chosen = currentResults.getOrNull(pos) ?: return@setOnItemClickListener
+            val catAr = com.example.radiojooo.data.CategoryStyle.arabicName(chosen.category)
+            val br = chosen.servers.firstOrNull()?.kbps ?: 64
+            val actions = arrayOf(
+                "▶ إضافة وتشغيل فوري في قسم ($catAr)",
+                "📂 اختيار القسم يدوياً قبل الإضافة"
+            )
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("${chosen.name} (${br} kbps)")
+                .setItems(actions) { _, actIdx ->
+                    if (actIdx == 0) {
+                        dlg.dismiss()
+                        vm.addLiveStation(chosen) { saved ->
+                            com.example.radiojooo.player.RadioService.play(this@MainActivity, saved.id)
+                            startActivity(Intent(this@MainActivity, PlayerActivity::class.java))
+                        }
+                    } else {
+                        val cats = arrayOf("QURAN", "NEWS", "MUSIC", "SPORTS", "TALK")
+                        val catLabels = cats.map { com.example.radiojooo.data.CategoryStyle.arabicName(it) }.toTypedArray()
+                        androidx.appcompat.app.AlertDialog.Builder(this)
+                            .setTitle("اختر القسم المناسب للإذاعة")
+                            .setItems(catLabels) { _, cIdx ->
+                                dlg.dismiss()
+                                val customSt = chosen.copy(category = cats[cIdx])
+                                vm.addLiveStation(customSt) { saved ->
+                                    com.example.radiojooo.player.RadioService.play(this@MainActivity, saved.id)
+                                    startActivity(Intent(this@MainActivity, PlayerActivity::class.java))
+                                }
+                            }
+                            .show()
+                    }
+                }
+                .show()
+        }
+
+        val job = lifecycleScope.launch {
+            kotlinx.coroutines.flow.combine(vm.liveSearching, vm.liveResults) { searching, list ->
+                searching to list
+            }.collect { (searching, list) ->
+                if (searching) {
+                    started = true
+                    spinner.visibility = View.VISIBLE
+                    tvStatus.text = "📡 جاري البحث وفحص الخوادم في السحابة..."
+                    tvStatus.setTextColor(android.graphics.Color.parseColor("#38BDF8"))
+                } else if (started) {
+                    spinner.visibility = View.GONE
+                    currentResults = list
+                    if (list.isEmpty()) {
+                        tvStatus.text = "⚠️ لم يتم العثور على بث شغال مطابق. جرّب كلمة أخرى أو أحد الأزرار بالأعلى."
+                        tvStatus.setTextColor(android.graphics.Color.parseColor("#F59E0B"))
+                        listView.adapter = null
+                    } else {
+                        tvStatus.text = "✅ تم العثور على ${list.size} إذاعة شغالة (مرتبة من الأقل استهلاكاً للباقة):"
+                        tvStatus.setTextColor(android.graphics.Color.parseColor("#4ADE80"))
+                        val displayItems = list.map { st ->
+                            val br = st.servers.firstOrNull()?.kbps ?: 64
+                            val savingTag = if (br <= 64) "موفر للباقة" else "جودة عالية"
+                            val catAr = com.example.radiojooo.data.CategoryStyle.arabicName(st.category)
+                            "${st.name}
+📂 $catAr  •  ⚡ ${br} kbps ($savingTag)  •  🌍 ${st.countryCode}"
+                        }
+                        listView.adapter = object : android.widget.ArrayAdapter<String>(
+                            this@MainActivity,
+                            android.R.layout.simple_list_item_1,
+                            displayItems
+                        ) {
+                            override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
+                                val v = super.getView(position, convertView, parent) as android.widget.TextView
+                                v.setTextColor(android.graphics.Color.WHITE)
+                                v.textSize = 13f
+                                val padV = (10 * dp).toInt()
+                                v.setPadding((6 * dp).toInt(), padV, (6 * dp).toInt(), padV)
+                                return v
                             }
                         }
-                        .setNegativeButton("إغلاق", null)
-                        .show()
-                    vm.clearLiveSearch()
-                } else if (!searching && loadingDlg.isShowing) {
-                    loadingDlg.dismiss()
+                    }
                 }
             }
         }
+
+        dlg.setOnDismissListener { job.cancel() }
+        dlg.show()
+        vm.searchOnline(initialQuery)
     }
+
 
     private fun showMoveCategoryDialog(id: String, name: String) {
         val keys = arrayOf("QURAN", "NEWS", "MUSIC", "SPORTS", "TALK", "ALL")
