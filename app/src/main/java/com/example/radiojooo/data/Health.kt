@@ -100,13 +100,6 @@ class Health(context: Context) {
         }
     }
 
-    private fun cooling(url: String, now: Long): Int {
-        val s = stats[url] ?: return 0
-        if (s.consecutiveFails == 0) return 0
-        val coolMs = minOf(30 * 60_000L, 15_000L shl minOf(s.consecutiveFails, 7))   // 30s, 60s, 2m ... capped at 30 min
-        return if (now - s.lastFailAt < coolMs) 1 else 0
-    }
-
     private fun reliabilityPenalty(url: String): Int {
         val s = stats[url] ?: return 1
         val total = s.ok + s.fail

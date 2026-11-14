@@ -1,0 +1,11 @@
+name = "radio-joo-proxy"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+workers_dev = true
+
+[triggers]
+crons = ["*/10 * * * *"]
+
+[[kv_namespaces]]
+binding = "RADIO_KV"
+id = "68505956ecd843a494b8aabb2ca2bc2d"
