@@ -21,7 +21,7 @@ import java.io.File
 /** Catalog cache (file) + favorites (prefs) + sync with the cloud. The UI only ever reads [stations]. */
 class Repo(context: Context) {
     private val app = context.applicationContext
-    private val file = File(app.filesDir, "catalog_v4.json")
+    private val file = File(app.filesDir, "catalog_v5.json")
     private val prefs = app.getSharedPreferences("repo_v3", Context.MODE_PRIVATE)
     private val mutex = Mutex()
     @Suppress("DEPRECATION")
@@ -40,6 +40,19 @@ class Repo(context: Context) {
     private val customNames: MutableMap<String, String> = HashMap<String, String>().also { m -> for ((k, v) in namePrefs.all) if (v is String && v.isNotBlank()) m[k] = v }
 
     init {
+        if (!prefs.getBoolean("migrated_v5_clean", false)) {
+            deleted.clear()
+            deletedNames.clear()
+            delPrefs.edit().clear().commit()
+            prefs.edit().remove("etag").putBoolean("migrated_v5_clean", true).commit()
+            try {
+                if (extBackupFile.exists() && extBackupFile.canRead()) {
+                    val obj = JSONObject(extBackupFile.readText(Charsets.UTF_8))
+                    obj.put("deleted", JSONArray())
+                    extBackupFile.writeText(obj.toString(2), Charsets.UTF_8)
+                }
+            } catch (_: Exception) { }
+        }
         restoreFromExternalBackup()
     }
 
@@ -472,7 +485,7 @@ class Repo(context: Context) {
             for (x in s.servers) sv.put(JSONObject().put("u", x.url).put("b", x.kbps).put("h", if (x.hls) 1 else 0))
             arr.put(JSONObject().put("i", s.id).put("n", s.name).put("c", s.category).put("k", s.countryCode).put("p", s.popularity).put("v", sv))
         }
-        val tmp = File(app.filesDir, "catalog_v4.tmp")
+        val tmp = File(app.filesDir, "catalog_v5.tmp")
         tmp.writeText(JSONObject().put("s", arr).toString())
         if (!tmp.renameTo(file)) { file.delete(); tmp.renameTo(file) }
     }
