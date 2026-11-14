@@ -15,11 +15,11 @@ object Api {
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(25, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
 
-    private val longClient = client.newBuilder().readTimeout(55, TimeUnit.SECONDS).build()
+    private val longClient = client.newBuilder().readTimeout(12, TimeUnit.SECONDS).build()
 
     /** What the cloud reports after it re-checked its servers on our request. */
     data class RefreshInfo(val stations: Int, val servers: Int, val verified: Int, val throttled: Boolean)

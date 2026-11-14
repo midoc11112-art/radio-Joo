@@ -1,4 +1,4 @@
-﻿package com.example.radiojooo.ui
+package com.example.radiojooo.ui
 
 import android.Manifest
 import android.content.Intent
@@ -77,7 +77,7 @@ class MainActivity : AppCompatActivity() {
         androidx.recyclerview.widget.ItemTouchHelper(StationAdapter.TouchCallback(adapter, android.view.ViewConfiguration.get(this).scaledTouchSlop)).attachToRecyclerView(binding.rvStations)
         setupSelectionBar()
 
-        binding.chipEgypt.visibility = View.GONE
+        binding.chipEgypt.visibility = View.VISIBLE
         val btnLiveSearch = com.google.android.material.button.MaterialButton(this).apply {
             text = "🌐 رادار البحث السحابي (توفير الباقة)"
             textSize = 12f
@@ -147,7 +147,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnClearSearch.setOnClickListener { binding.etSearch.setText("") }
 
         val chipToCategory = mapOf(
-            binding.chipAll.id to "ALL", binding.chipFavorite.id to "FAVORITE", 
+            binding.chipAll.id to "ALL", binding.chipFavorite.id to "FAVORITE", binding.chipEgypt.id to "EGYPT", 
             binding.chipQuran.id to "QURAN", binding.chipNews.id to "NEWS", binding.chipMusic.id to "MUSIC",
             binding.chipSports.id to "SPORTS", binding.chipTalk.id to "TALK"
         )
@@ -625,7 +625,7 @@ class MainActivity : AppCompatActivity() {
     private fun renderCounts(c: Map<String, Int>) {
         binding.chipAll.text = "\uD83D\uDD25 \u0627\u0644\u0643\u0644 (${c["ALL"] ?: 0})"
         binding.chipFavorite.text = "\u2B50 \u0627\u0644\u0645\u0641\u0636\u0644\u0629 (${c["FAVORITE"] ?: 0})"
-        binding.chipEgypt.visibility = View.GONE
+        binding.chipEgypt.text = "\uD83C\uDDEA\uD83C\uDDEC \u0645\u0635\u0631 (${c["EGYPT"] ?: 0})"
         binding.chipQuran.text = "\uD83D\uDCD6 \u0627\u0644\u0642\u0631\u0622\u0646 \u0627\u0644\u0643\u0631\u064A\u0645 (${c["QURAN"] ?: 0})"
         binding.chipNews.text = "\uD83D\uDCF0 \u0627\u0644\u0623\u062E\u0628\u0627\u0631 (${c["NEWS"] ?: 0})"
         binding.chipMusic.text = "\uD83C\uDFB5 \u0627\u0644\u0645\u0648\u0633\u064A\u0642\u0649 (${c["MUSIC"] ?: 0})"

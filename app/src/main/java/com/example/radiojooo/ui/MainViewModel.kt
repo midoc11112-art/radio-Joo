@@ -92,7 +92,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         var out = list
         out = when (cat) {
             "ALL" -> out
-            "FAVORITE" -> out.filter { it.isFavorite }`n            "EGYPT" -> out.filter { it.countryCode == "EG" || it.category == "EGYPT" }
+            "FAVORITE" -> out.filter { it.isFavorite }
+            "EGYPT" -> out.filter { it.countryCode == "EG" || it.category == "EGYPT" }
                         else -> out.filter { it.category == cat }
         }
         val q = fold(query)
@@ -105,7 +106,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val m = HashMap<String, Int>()
         m["ALL"] = list.size
         m["FAVORITE"] = list.count { it.isFavorite }
-                m["EGYPT"] = list.count { it.countryCode == "EG" || it.category == "EGYPT" }`n        for (c in listOf("QURAN", "NEWS", "MUSIC", "SPORTS", "TALK")) m[c] = list.count { it.category == c }
+                m["EGYPT"] = list.count { it.countryCode == "EG" || it.category == "EGYPT" }
+        for (c in listOf("QURAN", "NEWS", "MUSIC", "SPORTS", "TALK")) m[c] = list.count { it.category == c }
         m
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
