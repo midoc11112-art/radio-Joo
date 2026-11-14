@@ -59,7 +59,6 @@ class RadioService : Service() {
 
     companion object {
         const val CHANNEL = "radio_joo_playback_v17"
-        private const val OLD_CHANNEL = "radio_joo_playback_v15"
         const val NOTIF_ID = 101
         const val ACTION_PLAY = "action_play"
         const val ACTION_TOGGLE = "action_toggle"
